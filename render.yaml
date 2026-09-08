@@ -1,0 +1,31 @@
+# Render blueprint. Connect the repo, add the secrets, point Twilio at
+# https://<service>.onrender.com/webhook/whatsapp
+services:
+  - type: web
+    name: training-log-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        value: whatsapp:+14155238886
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: VALIDATE_TWILIO_SIGNATURE
+        value: "true"
+      - key: DATABASE_PATH
+        value: /var/data/training_log.db
+    disk:
+      name: training-log-data
+      mountPath: /var/data
+      sizeGB: 1

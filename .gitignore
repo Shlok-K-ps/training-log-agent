@@ -1,0 +1,25 @@
+# Secrets — the API key never reaches GitHub
+.env
+*.env
+!.env.example
+
+# Data
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
