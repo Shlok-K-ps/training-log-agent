@@ -140,14 +140,22 @@ python chat.py --offline                        # interactive
 ### 3. Add a Gemini key
 
 Free, no card: <https://aistudio.google.com/apikey>. Put it in `.env` as
-`GEMINI_API_KEY`, then:
+`GEMINI_API_KEY`, then check the parsing layer against deliberately messy input:
+
+```bash
+python scripts/check_gemini.py
+```
+
+It prints, for each sentence, the raw tool call the model returned and what the
+validator made of it — including the ones it rejects. Then:
 
 ```bash
 python chat.py
 ```
 
 Now the messy half works — "squats felt awful today, ground out the last two at
-one forty" parses.
+one forty" parses, and so does "tweaked my left shoulder on the last set", which
+logs the set *and* raises the injury flag.
 
 ### 4. Connect WhatsApp (Twilio sandbox)
 
@@ -257,5 +265,6 @@ app/
   router.py    the seam: parse → store → decide → reply
   main.py      FastAPI service
 chat.py        terminal harness, no phone required
+scripts/       check_gemini.py — prove Layer 1 against messy input
 tests/         96 tests, no network
 ```
