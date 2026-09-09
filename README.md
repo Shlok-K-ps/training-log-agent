@@ -1,8 +1,9 @@
 # Training-Log Agent
 
 A WhatsApp agent for a 20-athlete powerlifting team. Athletes text their sessions
-in plain English. The agent parses them into structured data, tracks every lift
-over time, and returns a verdict: **progressing, stalled, or deload**.
+in plain English. The agent parses them into structured data, tracks training,
+sleep, readiness, soreness, stress, bodyweight and nutrition, then returns a
+deterministic verdict or next-session plan.
 
 ```
 athlete                                                        agent
@@ -53,8 +54,19 @@ model is the right tool for reading "ground out the last two at one forty" and
 the wrong tool for deciding whether someone should strip 15% off their squat.
 
 The model never sees the reply text. It cannot write one. Its entire vocabulary
-is four function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
+is seven function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
 anything it returns outside them is thrown away before it reaches the database.
+
+The same boundary now covers coaching. [`app/programming/`](app/programming/)
+selects one of five programming strategies from explicit profile facts, while
+[`app/decision/readiness.py`](app/decision/readiness.py) and
+[`app/decision/prescribe.py`](app/decision/prescribe.py) connect same-day
+recovery data to the next session. The model extracts facts; it never chooses a
+method, calculates a readiness score, invents a working max, or phrases advice.
+
+See [programming methodologies](docs/programming-methodologies.md) and
+[readiness and nutrition](docs/readiness-and-nutrition.md) for the research,
+policy cutoffs, and safety boundaries.
 
 ---
 
@@ -263,7 +275,7 @@ anywhere else.
 ## Tests
 
 ```bash
-pytest -q          # 146 tests, no network, under two seconds
+pytest -q          # 187 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -293,15 +305,16 @@ trustworthy:
 ```
   parse + detect   ← built
         │
-  prescribe        next session's numbers, not just a verdict
+  prescribe        built for linear/RPE methods; other methods wait for
+                    verified training-max, block, or variation inputs
         │
   push daily       the agent messages first, instead of waiting
         │
-  autoregulate     adjust today's load from today's reported readiness
+  autoregulate     built: same-day readiness may only hold or reduce load
         │
   injury flags     graded return-to-load protocols, physio in the loop
         │
-  nutrition        macros, sleep, supplements
+  nutrition        tracking built; personalised targets need coach/dietitian input
 ```
 
 You cannot autoregulate on data you cannot parse reliably, and you cannot
@@ -334,13 +347,15 @@ a branch in `rules.py` and a row in the database.
 app/
   agent/       Layer 1 — schemas, the Gemini call, an offline stub
   storage/     Layer 2 — SQLite schema, queries, lift-name normalisation
-  decision/    Layer 3 — the rules and the reply templates
+  decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
+  programming/ Pure Python — five methods, selector, session structure
   channels/    Twilio/WhatsApp transport: identity, signatures, chunking
   router.py    the seam: parse → store → decide → reply
   main.py      FastAPI service
 chat.py        terminal harness, no phone required
 reference/     OpenPowerlifting sample the validation bounds derive from
+docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         146 tests, no network
+tests/         187 tests, no network
 ```

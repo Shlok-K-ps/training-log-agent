@@ -36,6 +36,15 @@ MAX_PAST_DAYS = 400
 MAX_FUTURE_DAYS = 1
 
 PHASES = ("cut", "maintain", "bulk")
+METHODOLOGIES = (
+    "auto",
+    "linear_progression",
+    "five_three_one",
+    "block_periodization",
+    "autoregulated_rpe",
+    "conjugate",
+)
+EXPERIENCE_LEVELS = ("novice", "intermediate", "advanced")
 
 
 class ValidationError(ValueError):
@@ -70,11 +79,47 @@ class QueryProgress:
 
 
 @dataclass(frozen=True)
+class LogCheckIn:
+    checked_on: str
+    sleep_hours: float | None = None
+    sleep_quality: int | None = None
+    readiness: int | None = None
+    soreness: int | None = None
+    stress: int | None = None
+    bodyweight_kg: float | None = None
+    protein_g: float | None = None
+    calories: float | None = None
+    nutrition_adherence: int | None = None
+
+
+@dataclass(frozen=True)
+class AskPrescription:
+    lift: str | None = None
+
+
+@dataclass(frozen=True)
+class ConfigureProgram:
+    methodology: str | None = None
+    experience: str | None = None
+    days_per_week: int | None = None
+    meet_date: str | None = None
+    has_specialty_equipment: bool | None = None
+
+
+@dataclass(frozen=True)
 class Clarify:
     question: str
 
 
-Action = LogSet | LogStatus | QueryProgress | Clarify
+Action = (
+    LogSet
+    | LogStatus
+    | QueryProgress
+    | LogCheckIn
+    | AskPrescription
+    | ConfigureProgram
+    | Clarify
+)
 
 
 # --- Declarations handed to Gemini --------------------------------------------
@@ -197,6 +242,84 @@ QUERY_PROGRESS = types.FunctionDeclaration(
     ),
 )
 
+LOG_CHECKIN = types.FunctionDeclaration(
+    name="log_checkin",
+    description=(
+        "Record today's recovery and nutrition facts exactly as the athlete reports them. "
+        "Do not estimate missing values and do not convert vague feelings into scores."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "sleep_hours": types.Schema(type=types.Type.NUMBER, description="Hours slept."),
+            "sleep_quality": types.Schema(type=types.Type.INTEGER, description="Sleep quality 1-5."),
+            "readiness": types.Schema(type=types.Type.INTEGER, description="Training readiness 1-10."),
+            "soreness": types.Schema(type=types.Type.INTEGER, description="Whole-body soreness 1-10."),
+            "stress": types.Schema(type=types.Type.INTEGER, description="Current stress 1-10."),
+            "bodyweight_kg": types.Schema(type=types.Type.NUMBER, description="Bodyweight in kilograms."),
+            "protein_g": types.Schema(type=types.Type.NUMBER, description="Protein eaten today in grams."),
+            "calories": types.Schema(type=types.Type.NUMBER, description="Calories eaten today."),
+            "nutrition_adherence": types.Schema(
+                type=types.Type.INTEGER,
+                description="Athlete-rated adherence to their existing nutrition plan, 1-10.",
+            ),
+            "checked_on": types.Schema(
+                type=types.Type.STRING,
+                description="Check-in date as YYYY-MM-DD. Default to today when unstated.",
+            ),
+        },
+    ),
+)
+
+ASK_PRESCRIPTION = types.FunctionDeclaration(
+    name="ask_prescription",
+    description=(
+        "The athlete explicitly asks what load or workout to do next. Call this instead "
+        "of answering; deterministic Python applies history, method, and same-day readiness."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "lift": types.Schema(
+                type=types.Type.STRING,
+                description="Lift they want prescribed. Omit only if they ask for the full session.",
+            ),
+        },
+    ),
+)
+
+CONFIGURE_PROGRAM = types.FunctionDeclaration(
+    name="configure_program",
+    description=(
+        "Record explicit programming facts: experience, schedule, meet horizon, "
+        "equipment, or a chosen method. Never infer these from strength numbers."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "methodology": types.Schema(
+                type=types.Type.STRING,
+                enum=list(METHODOLOGIES),
+                description="Chosen method, or auto to let deterministic policy select it.",
+            ),
+            "experience": types.Schema(
+                type=types.Type.STRING,
+                enum=list(EXPERIENCE_LEVELS),
+                description="Athlete-declared training experience.",
+            ),
+            "days_per_week": types.Schema(type=types.Type.INTEGER, description="Training days per week, 1-7."),
+            "meet_date": types.Schema(
+                type=types.Type.STRING,
+                description="Next competition date as YYYY-MM-DD. Resolve relative dates against today.",
+            ),
+            "has_specialty_equipment": types.Schema(
+                type=types.Type.BOOLEAN,
+                description="Whether specialty bars, bands or chains are available.",
+            ),
+        },
+    ),
+)
+
 CLARIFY = types.FunctionDeclaration(
     name="clarify",
     description=(
@@ -217,10 +340,26 @@ CLARIFY = types.FunctionDeclaration(
 )
 
 TOOL = types.Tool(
-    function_declarations=[LOG_SET, LOG_STATUS, QUERY_PROGRESS, CLARIFY]
+    function_declarations=[
+        LOG_SET,
+        LOG_STATUS,
+        QUERY_PROGRESS,
+        LOG_CHECKIN,
+        ASK_PRESCRIPTION,
+        CONFIGURE_PROGRAM,
+        CLARIFY,
+    ]
 )
 
-TOOL_NAMES = ("log_set", "log_status", "query_progress", "clarify")
+TOOL_NAMES = (
+    "log_set",
+    "log_status",
+    "query_progress",
+    "log_checkin",
+    "ask_prescription",
+    "configure_program",
+    "clarify",
+)
 
 
 # --- Validation ---------------------------------------------------------------
@@ -247,6 +386,13 @@ def _int(value: Any, field: str, maximum: int) -> int | None:
     return result
 
 
+def _bounded_num(value: Any, field: str, minimum: float, maximum: float) -> float | None:
+    number = _num(value, field)
+    if number is not None and not minimum <= number <= maximum:
+        raise ValidationError(f"{field} out of range ({minimum:g}-{maximum:g}): {number:g}")
+    return number
+
+
 def _resolve_date(value: Any, today: date) -> str:
     if not value:
         return today.isoformat()
@@ -258,6 +404,20 @@ def _resolve_date(value: Any, today: date) -> str:
         raise ValidationError(f"session_date is in the future: {parsed}")
     if parsed < today - timedelta(days=MAX_PAST_DAYS):
         raise ValidationError(f"session_date is implausibly old: {parsed}")
+    return parsed.isoformat()
+
+
+def _resolve_meet_date(value: Any, today: date) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = date.fromisoformat(str(value).strip())
+    except ValueError:
+        raise ValidationError(f"meet_date is not YYYY-MM-DD: {value!r}") from None
+    if parsed < today:
+        raise ValidationError(f"meet_date is in the past: {parsed}")
+    if parsed > today + timedelta(days=730):
+        raise ValidationError(f"meet_date is implausibly far away: {parsed}")
     return parsed.isoformat()
 
 
@@ -327,6 +487,64 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
 
     if name == "query_progress":
         return QueryProgress(lift=normalize_lift(args.get("lift")))
+
+    if name == "log_checkin":
+        action = LogCheckIn(
+            checked_on=_resolve_date(args.get("checked_on"), today),
+            sleep_hours=_bounded_num(args.get("sleep_hours"), "sleep_hours", 0, 24),
+            sleep_quality=_int(args.get("sleep_quality"), "sleep_quality", 5),
+            readiness=_int(args.get("readiness"), "readiness", 10),
+            soreness=_int(args.get("soreness"), "soreness", 10),
+            stress=_int(args.get("stress"), "stress", 10),
+            bodyweight_kg=_bounded_num(args.get("bodyweight_kg"), "bodyweight_kg", 20, 400),
+            protein_g=_bounded_num(args.get("protein_g"), "protein_g", 0, 600),
+            calories=_bounded_num(args.get("calories"), "calories", 0, 15000),
+            nutrition_adherence=_int(
+                args.get("nutrition_adherence"), "nutrition_adherence", 10
+            ),
+        )
+        metrics = (
+            action.sleep_hours,
+            action.sleep_quality,
+            action.readiness,
+            action.soreness,
+            action.stress,
+            action.bodyweight_kg,
+            action.protein_g,
+            action.calories,
+            action.nutrition_adherence,
+        )
+        if all(value is None for value in metrics):
+            raise ValidationError("log_checkin carried no usable field")
+        return action
+
+    if name == "ask_prescription":
+        return AskPrescription(lift=normalize_lift(args.get("lift")))
+
+    if name == "configure_program":
+        methodology = args.get("methodology")
+        experience = args.get("experience")
+        if methodology is not None:
+            methodology = str(methodology).strip().lower()
+            if methodology not in METHODOLOGIES:
+                raise ValidationError(f"unknown methodology: {methodology!r}")
+        if experience is not None:
+            experience = str(experience).strip().lower()
+            if experience not in EXPERIENCE_LEVELS:
+                raise ValidationError(f"unknown experience level: {experience!r}")
+        equipment = args.get("has_specialty_equipment")
+        if equipment is not None and not isinstance(equipment, bool):
+            equipment = str(equipment).strip().lower() in {"true", "1", "yes"}
+        action = ConfigureProgram(
+            methodology=methodology,
+            experience=experience,
+            days_per_week=_int(args.get("days_per_week"), "days_per_week", 7),
+            meet_date=_resolve_meet_date(args.get("meet_date"), today),
+            has_specialty_equipment=equipment,
+        )
+        if all(value is None for value in action.__dict__.values()):
+            raise ValidationError("configure_program carried no usable field")
+        return action
 
     if name == "clarify":
         question = str(args.get("question") or "").strip()

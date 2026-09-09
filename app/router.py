@@ -11,10 +11,28 @@ import sqlite3
 from datetime import date
 
 from app.agent.parser import ModelClient, parse_message
-from app.agent.schemas import Action, Clarify, LogSet, LogStatus, QueryProgress
-from app.decision.format import format_assessment, format_logged, format_status
+from app.agent.schemas import (
+    Action,
+    AskPrescription,
+    Clarify,
+    ConfigureProgram,
+    LogCheckIn,
+    LogSet,
+    LogStatus,
+    QueryProgress,
+)
+from app.decision.format import (
+    format_assessment,
+    format_checkin,
+    format_logged,
+    format_prescription,
+    format_status,
+)
 from app.decision.plausibility import review
+from app.decision.prescribe import prescribe_next
+from app.decision.readiness import DailyCheckIn, evaluate_readiness
 from app.decision.rules import evaluate
+from app.programming import Experience, Methodology, ProgrammingProfile, choose_methodology
 from app.storage import db
 
 MAX_VERDICTS_PER_REPLY = 3
@@ -35,6 +53,9 @@ HELP = (
     "• _i'm on a cut now_  — flat weight in a cut counts as holding\n"
     "• _tweaked my left knee_  — flags an injury; I stop suggesting loads\n"
     "• _how's my bench going?_  — progressing, stalled, or deload\n\n"
+    "• _slept 7h, readiness 6, soreness 4, protein 150g_  — daily check-in\n"
+    "• _I'm intermediate and train 4 days/week_  — configures programming\n"
+    "• _what should I squat today?_  — deterministic next-session plan\n\n"
     "Verdicts come from fixed rules over your own log, not from a chatbot's opinion."
 )
 
@@ -78,6 +99,7 @@ def _apply(
     confirmations: list[str] = []
     questions: list[str] = []
     lifts_to_assess: list[str] = []
+    lifts_to_prescribe: list[str] = []
     assess_all = False
 
     warnings: list[str] = []
@@ -152,6 +174,70 @@ def _apply(
             else:
                 assess_all = True
 
+        elif isinstance(action, LogCheckIn):
+            checkin = DailyCheckIn(**action.__dict__)
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=action.checked_on,
+                    raw_text=raw_text,
+                    sleep_hours=action.sleep_hours,
+                    sleep_quality=action.sleep_quality,
+                    readiness=action.readiness,
+                    soreness=action.soreness,
+                    stress=action.stress,
+                    bodyweight_kg=action.bodyweight_kg,
+                    protein_g=action.protein_g,
+                    calories=action.calories,
+                    nutrition_adherence=action.nutrition_adherence,
+                ),
+            )
+            confirmations.append(format_checkin(checkin, evaluate_readiness(checkin)))
+
+        elif isinstance(action, ConfigureProgram):
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=today.isoformat(),
+                    raw_text=raw_text,
+                    methodology=action.methodology,
+                    experience=action.experience,
+                    days_per_week=action.days_per_week,
+                    meet_date=action.meet_date,
+                    has_specialty_equipment=action.has_specialty_equipment,
+                ),
+            )
+            pieces = [
+                f"method {action.methodology}" if action.methodology else None,
+                f"experience {action.experience}" if action.experience else None,
+                f"{action.days_per_week} days/week" if action.days_per_week else None,
+                f"meet {action.meet_date}" if action.meet_date else None,
+                (
+                    "specialty equipment available"
+                    if action.has_specialty_equipment is True
+                    else "no specialty equipment"
+                    if action.has_specialty_equipment is False
+                    else None
+                ),
+            ]
+            confirmations.append("✅ Program profile: " + ", ".join(p for p in pieces if p) + ".")
+
+        elif isinstance(action, AskPrescription):
+            if action.lift:
+                lifts_to_prescribe.append(action.lift)
+            else:
+                known_lifts = db.list_lifts(conn, athlete_id)
+                if known_lifts:
+                    lifts_to_prescribe.extend(known_lifts)
+                else:
+                    questions.append("❓ Which lift do you want prescribed?")
+
         elif isinstance(action, Clarify):
             questions.append(f"❓ {action.question}")
 
@@ -176,12 +262,81 @@ def _apply(
         )
         verdicts.append(format_assessment(assessment, athlete_name=None))
 
+    prescriptions: list[str] = []
+    settings = db.latest_program_settings(conn, athlete_id)
+    if lifts_to_prescribe and not {"experience", "days_per_week"} <= settings.keys():
+        questions.append(
+            "❓ Before I choose a method, tell me your experience level and training days per week."
+        )
+    else:
+        preferred_value = settings.get("methodology")
+        preferred = (
+            None
+            if preferred_value in {None, "auto"}
+            else Methodology(str(preferred_value))
+        )
+        profile = (
+            ProgrammingProfile(
+                experience=Experience(str(settings["experience"])),
+                days_per_week=int(settings["days_per_week"]),
+                weeks_to_meet=(
+                    max(0, (date.fromisoformat(str(settings["meet_date"])) - today).days // 7)
+                    if settings.get("meet_date") is not None
+                    else None
+                ),
+                rpe_logging_ratio=db.rpe_logging_ratio(conn, athlete_id),
+                has_specialty_equipment=bool(settings.get("has_specialty_equipment", False)),
+                preferred=preferred,
+                injured=injured,
+            )
+            if lifts_to_prescribe
+            else None
+        )
+        choice = choose_methodology(profile) if profile else None
+        checkin_row = db.latest_checkin(conn, athlete_id, today.isoformat())
+        checkin = (
+            DailyCheckIn(
+                checked_on=checkin_row.session_date,
+                sleep_hours=checkin_row.sleep_hours,
+                sleep_quality=checkin_row.sleep_quality,
+                readiness=checkin_row.readiness,
+                soreness=checkin_row.soreness,
+                stress=checkin_row.stress,
+                bodyweight_kg=checkin_row.bodyweight_kg,
+                protein_g=checkin_row.protein_g,
+                calories=checkin_row.calories,
+                nutrition_adherence=checkin_row.nutrition_adherence,
+            )
+            if checkin_row
+            else None
+        )
+        for lift in dict.fromkeys(lifts_to_prescribe):
+            history = db.session_history(conn, athlete_id, lift)
+            assessment = evaluate(
+                athlete_id,
+                lift,
+                history,
+                phase=phase,
+                injured=injured,
+                injury_note=injury_note,
+            )
+            prescription = prescribe_next(
+                assessment,
+                history,
+                choice,
+                session_number=len(history) + 1,
+                today=today,
+                checkin=checkin,
+            )
+            prescriptions.append(format_prescription(prescription))
+
     blocks = [
         b
         for b in [
             "\n".join(confirmations),
             "\n".join(warnings),
             "\n\n".join(verdicts),
+            "\n\n".join(prescriptions),
             "\n".join(questions),
         ]
         if b

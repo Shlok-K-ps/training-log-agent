@@ -8,6 +8,8 @@ traced to a branch in `rules.py` and a row in the database.
 from __future__ import annotations
 
 from app.decision.rules import Assessment, Verdict
+from app.decision.prescribe import Prescription
+from app.decision.readiness import DailyCheckIn, ReadinessAssessment
 
 PHASE_LABEL = {"cut": "cut", "maintain": "maintenance", "bulk": "bulk"}
 
@@ -114,3 +116,55 @@ def format_status(
     elif injured is False:
         bits.append("Injury flag cleared. Load suggestions are back on.")
     return "✅ " + " ".join(bits) if bits else "✅ Noted."
+
+
+def format_checkin(checkin: DailyCheckIn, assessment: ReadinessAssessment) -> str:
+    """Confirm exactly what was tracked and expose the deterministic readiness result."""
+    tracked: list[str] = []
+    if checkin.sleep_hours is not None:
+        tracked.append(f"sleep {checkin.sleep_hours:g}h")
+    if checkin.sleep_quality is not None:
+        tracked.append(f"sleep quality {checkin.sleep_quality}/5")
+    if checkin.readiness is not None:
+        tracked.append(f"readiness {checkin.readiness}/10")
+    if checkin.soreness is not None:
+        tracked.append(f"soreness {checkin.soreness}/10")
+    if checkin.stress is not None:
+        tracked.append(f"stress {checkin.stress}/10")
+    if checkin.bodyweight_kg is not None:
+        tracked.append(f"bodyweight {checkin.bodyweight_kg:g} kg")
+    if checkin.protein_g is not None:
+        tracked.append(f"protein {checkin.protein_g:g} g")
+    if checkin.calories is not None:
+        tracked.append(f"calories {checkin.calories:g}")
+    if checkin.nutrition_adherence is not None:
+        tracked.append(f"nutrition adherence {checkin.nutrition_adherence}/10")
+    lines = [f"✅ Check-in: {', '.join(tracked)}.", f"Readiness: {assessment.band.value} ({assessment.score}/100)."]
+    lines.extend(assessment.reasons)
+    if assessment.nutrition.protein_g_per_kg is not None:
+        lines.extend(assessment.nutrition.notes)
+    return "\n".join(lines)
+
+
+def format_prescription(prescription: Prescription) -> str:
+    method = (
+        prescription.methodology.value.replace("_", " ")
+        if prescription.methodology is not None
+        else "unselected"
+    )
+    lines = [f"*{prescription.lift.title()} — next session*", f"Method: {method}."]
+    if prescription.session is not None:
+        lines.append(f"Slot: {prescription.session.slot}.")
+    if not prescription.actionable:
+        lines.extend(prescription.reasons)
+        if prescription.required_inputs:
+            lines.append("Needed: " + ", ".join(prescription.required_inputs) + ".")
+        return "\n".join(lines)
+    work = ""
+    if prescription.sets and prescription.reps:
+        work = f"{prescription.sets}x{prescription.reps} @ "
+    lines.append(f"➡️ {work}{prescription.adjusted_weight_kg:g} kg")
+    if prescription.base_weight_kg != prescription.adjusted_weight_kg:
+        lines.append(f"Base load {prescription.base_weight_kg:g} kg, reduced by same-day readiness.")
+    lines.extend(prescription.reasons)
+    return "\n".join(lines)

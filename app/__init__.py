@@ -5,6 +5,7 @@ Three layers, deliberately separated:
     app.agent      Layer 1 — Gemini turns messy English into structured arguments.
     app.storage    Layer 2 — SQLite; one file, one table.
     app.decision   Layer 3 — plain Python; decides progressing / stalled / deload.
+    app.programming  Pure Python; selects a method and structures the next session.
 
 The model never decides anything an athlete acts on.
 """

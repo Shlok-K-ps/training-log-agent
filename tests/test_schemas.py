@@ -11,7 +11,10 @@ from datetime import date
 import pytest
 
 from app.agent.schemas import (
+    AskPrescription,
     Clarify,
+    ConfigureProgram,
+    LogCheckIn,
     LogSet,
     LogStatus,
     QueryProgress,
@@ -155,3 +158,52 @@ def test_clarify_needs_a_question():
 def test_a_tool_the_model_invented_is_rejected():
     with pytest.raises(ValidationError):
         call("delete_all_athletes", confirm=True)
+
+
+# --- readiness and programming ------------------------------------------------
+
+
+def test_a_numeric_daily_checkin_validates_without_inference():
+    action = call(
+        "log_checkin",
+        sleep_hours=7.5,
+        readiness=8,
+        soreness=3,
+        bodyweight_kg=80,
+        protein_g=150,
+    )
+    assert isinstance(action, LogCheckIn)
+    assert action.checked_on == TODAY.isoformat()
+    assert action.sleep_hours == 7.5
+
+
+def test_an_empty_or_out_of_range_checkin_is_rejected():
+    with pytest.raises(ValidationError):
+        call("log_checkin")
+    with pytest.raises(ValidationError):
+        call("log_checkin", readiness=11)
+    with pytest.raises(ValidationError):
+        call("log_checkin", sleep_hours=25)
+
+
+def test_prescription_intent_is_structured_not_answered_by_the_model():
+    assert call("ask_prescription", lift="BP") == AskPrescription(lift="bench press")
+
+
+def test_program_profile_accepts_only_known_methods_and_declared_facts():
+    action = call(
+        "configure_program",
+        methodology="auto",
+        experience="intermediate",
+        days_per_week=4,
+        meet_date="2026-12-01",
+    )
+    assert action == ConfigureProgram(
+        methodology="auto",
+        experience="intermediate",
+        days_per_week=4,
+        meet_date="2026-12-01",
+        has_specialty_equipment=None,
+    )
+    with pytest.raises(ValidationError):
+        call("configure_program", methodology="random_workouts")

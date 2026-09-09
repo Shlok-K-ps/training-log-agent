@@ -41,6 +41,20 @@ CREATE TABLE IF NOT EXISTS entries (
     phase         TEXT    CHECK (phase IS NULL OR phase IN ('cut', 'maintain', 'bulk')),
     injured       INTEGER CHECK (injured IS NULL OR injured IN (0, 1)),
     injury_note   TEXT,
+    sleep_hours   REAL,
+    sleep_quality INTEGER,
+    readiness     INTEGER,
+    soreness      INTEGER,
+    stress        INTEGER,
+    bodyweight_kg REAL,
+    protein_g     REAL,
+    calories      REAL,
+    nutrition_adherence INTEGER,
+    methodology   TEXT,
+    experience    TEXT,
+    days_per_week INTEGER,
+    meet_date     TEXT,
+    has_specialty_equipment INTEGER,
     session_date  TEXT    NOT NULL,
     raw_text      TEXT,
     created_at    TEXT    NOT NULL,
@@ -53,6 +67,26 @@ CREATE INDEX IF NOT EXISTS idx_entries_athlete_lift_date
 CREATE INDEX IF NOT EXISTS idx_entries_athlete_date
     ON entries (athlete_id, session_date);
 """
+
+CHECKIN_COLUMNS = {
+    "sleep_hours": "REAL",
+    "sleep_quality": "INTEGER",
+    "readiness": "INTEGER",
+    "soreness": "INTEGER",
+    "stress": "INTEGER",
+    "bodyweight_kg": "REAL",
+    "protein_g": "REAL",
+    "calories": "REAL",
+    "nutrition_adherence": "INTEGER",
+}
+
+PROGRAM_COLUMNS = {
+    "methodology": "TEXT",
+    "experience": "TEXT",
+    "days_per_week": "INTEGER",
+    "meet_date": "TEXT",
+    "has_specialty_equipment": "INTEGER",
+}
 
 
 @dataclass(frozen=True)
@@ -70,6 +104,20 @@ class Entry:
     phase: Phase | None = None
     injured: bool | None = None
     injury_note: str | None = None
+    sleep_hours: float | None = None
+    sleep_quality: int | None = None
+    readiness: int | None = None
+    soreness: int | None = None
+    stress: int | None = None
+    bodyweight_kg: float | None = None
+    protein_g: float | None = None
+    calories: float | None = None
+    nutrition_adherence: int | None = None
+    methodology: str | None = None
+    experience: str | None = None
+    days_per_week: int | None = None
+    meet_date: str | None = None
+    has_specialty_equipment: bool | None = None
     session_date: str = ""
     raw_text: str | None = None
     id: int | None = None
@@ -87,6 +135,20 @@ class Entry:
             phase=self.phase,
             injured=self.injured,
             injury_note=self.injury_note,
+            sleep_hours=self.sleep_hours,
+            sleep_quality=self.sleep_quality,
+            readiness=self.readiness,
+            soreness=self.soreness,
+            stress=self.stress,
+            bodyweight_kg=self.bodyweight_kg,
+            protein_g=self.protein_g,
+            calories=self.calories,
+            nutrition_adherence=self.nutrition_adherence,
+            methodology=self.methodology,
+            experience=self.experience,
+            days_per_week=self.days_per_week,
+            meet_date=self.meet_date,
+            has_specialty_equipment=self.has_specialty_equipment,
             session_date=self.session_date or date.today().isoformat(),
             raw_text=self.raw_text,
             id=self.id,
@@ -107,6 +169,10 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
+    for name, column_type in (CHECKIN_COLUMNS | PROGRAM_COLUMNS).items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE entries ADD COLUMN {name} {column_type}")
     conn.commit()
 
 
@@ -116,8 +182,11 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
         """
         INSERT INTO entries (
             athlete_id, athlete_name, kind, lift, sets, reps, weight_kg, rpe,
-            phase, injured, injury_note, session_date, raw_text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            phase, injured, injury_note, sleep_hours, sleep_quality, readiness,
+            soreness, stress, bodyweight_kg, protein_g, calories,
+            nutrition_adherence, methodology, experience, days_per_week,
+            meet_date, has_specialty_equipment, session_date, raw_text, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             e.athlete_id,
@@ -131,6 +200,20 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
             e.phase,
             None if e.injured is None else int(e.injured),
             e.injury_note,
+            e.sleep_hours,
+            e.sleep_quality,
+            e.readiness,
+            e.soreness,
+            e.stress,
+            e.bodyweight_kg,
+            e.protein_g,
+            e.calories,
+            e.nutrition_adherence,
+            e.methodology,
+            e.experience,
+            e.days_per_week,
+            e.meet_date,
+            None if e.has_specialty_equipment is None else int(e.has_specialty_equipment),
             e.session_date,
             e.raw_text,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -158,6 +241,24 @@ def _row_to_entry(row: sqlite3.Row) -> Entry:
         phase=row["phase"],
         injured=None if row["injured"] is None else bool(row["injured"]),
         injury_note=row["injury_note"],
+        sleep_hours=row["sleep_hours"],
+        sleep_quality=row["sleep_quality"],
+        readiness=row["readiness"],
+        soreness=row["soreness"],
+        stress=row["stress"],
+        bodyweight_kg=row["bodyweight_kg"],
+        protein_g=row["protein_g"],
+        calories=row["calories"],
+        nutrition_adherence=row["nutrition_adherence"],
+        methodology=row["methodology"],
+        experience=row["experience"],
+        days_per_week=row["days_per_week"],
+        meet_date=row["meet_date"],
+        has_specialty_equipment=(
+            None
+            if row["has_specialty_equipment"] is None
+            else bool(row["has_specialty_equipment"])
+        ),
         session_date=row["session_date"],
         raw_text=row["raw_text"],
     )
@@ -276,6 +377,56 @@ def recent_entries(
         (athlete_id, limit),
     ).fetchall()
     return [_row_to_entry(r) for r in rows]
+
+
+def latest_checkin(
+    conn: sqlite3.Connection, athlete_id: str, checked_on: str
+) -> Entry | None:
+    """Latest check-in on an exact date; stale recovery data never carries forward."""
+    columns = " OR ".join(f"{name} IS NOT NULL" for name in CHECKIN_COLUMNS)
+    row = conn.execute(
+        f"""
+        SELECT * FROM entries
+        WHERE athlete_id = ? AND kind = 'status' AND session_date = ?
+          AND ({columns})
+        ORDER BY id DESC LIMIT 1
+        """,
+        (athlete_id, checked_on),
+    ).fetchone()
+    return _row_to_entry(row) if row else None
+
+
+def latest_program_settings(conn: sqlite3.Connection, athlete_id: str) -> dict[str, object]:
+    """Derive each current programming setting from the latest row that states it."""
+    result: dict[str, object] = {}
+    for column in PROGRAM_COLUMNS:
+        row = conn.execute(
+            f"""
+            SELECT {column} AS value FROM entries
+            WHERE athlete_id = ? AND {column} IS NOT NULL
+            ORDER BY session_date DESC, id DESC LIMIT 1
+            """,
+            (athlete_id,),
+        ).fetchone()
+        if row is not None:
+            value = row["value"]
+            if column == "has_specialty_equipment":
+                value = bool(value)
+            result[column] = value
+    return result
+
+
+def rpe_logging_ratio(conn: sqlite3.Connection, athlete_id: str, limit: int = 20) -> float:
+    """Fraction of recent set rows with an explicit RPE."""
+    rows = conn.execute(
+        """
+        SELECT rpe FROM entries
+        WHERE athlete_id = ? AND kind = 'set'
+        ORDER BY session_date DESC, id DESC LIMIT ?
+        """,
+        (athlete_id, limit),
+    ).fetchall()
+    return sum(row["rpe"] is not None for row in rows) / len(rows) if rows else 0.0
 
 
 def iter_all(conn: sqlite3.Connection) -> Iterator[Entry]:

@@ -10,6 +10,22 @@ from app.storage import db
 from app.storage.lifts import normalize_lift
 from tests.conftest import entry
 
+
+def test_init_migrates_an_existing_database_without_losing_the_one_table_design():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE entries (
+            id INTEGER PRIMARY KEY, athlete_id TEXT NOT NULL, kind TEXT NOT NULL,
+            lift TEXT, session_date TEXT NOT NULL
+        )"""
+    )
+    db.init_db(conn)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
+    assert set(db.CHECKIN_COLUMNS) <= columns
+    assert set(db.PROGRAM_COLUMNS) <= columns
+    conn.close()
+
 ATHLETE = "+911"
 
 

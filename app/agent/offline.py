@@ -29,6 +29,9 @@ QUERY_RE = re.compile(
     r"\b(stall|stalling|stalled|progress|progressing|going|plateau|deload|next)\b",
     re.IGNORECASE,
 )
+PRESCRIPTION_RE = re.compile(
+    r"\b(what should i|what do i|next workout|prescribe|train today)\b", re.IGNORECASE
+)
 LIFT_IN_QUERY_RE = re.compile(
     r"\b(squat|bench(?: press)?|deadlift|ohp|overhead press|row|front squat|rdl)\b",
     re.IGNORECASE,
@@ -38,6 +41,15 @@ INJURY_RE = re.compile(
     r"\b(hurt|pain|painful|tweak(?:ed)?|injur(?:y|ed)|strain(?:ed)?|niggle)\b", re.IGNORECASE
 )
 RECOVERED_RE = re.compile(r"\b(cleared|recovered|healed|all good now)\b", re.IGNORECASE)
+CHECKIN_PATTERNS = {
+    "sleep_hours": re.compile(r"\b(?:slept|sleep)\s*(\d+(?:\.\d+)?)\s*(?:h|hours?)\b", re.I),
+    "readiness": re.compile(r"\breadiness\s*(\d{1,2})\b", re.I),
+    "soreness": re.compile(r"\bsoreness\s*(\d{1,2})\b", re.I),
+    "stress": re.compile(r"\bstress\s*(\d{1,2})\b", re.I),
+    "bodyweight_kg": re.compile(r"\b(?:bodyweight|bw)\s*(\d+(?:\.\d+)?)\s*kg\b", re.I),
+    "protein_g": re.compile(r"\bprotein\s*(\d+(?:\.\d+)?)\s*g\b", re.I),
+    "calories": re.compile(r"\b(?:calories|kcal)\s*(\d{3,5})\b", re.I),
+}
 
 
 class OfflineClient:
@@ -74,7 +86,18 @@ class OfflineClient:
         elif INJURY_RE.search(lowered):
             calls.append(("log_status", {"injured": True, "injury_note": text.strip()[:120]}))
 
-        if QUERY_RE.search(lowered) and not any(c[0] == "log_set" for c in calls):
+        checkin: dict[str, Any] = {}
+        for field, pattern in CHECKIN_PATTERNS.items():
+            match = pattern.search(text)
+            if match:
+                checkin[field] = float(match.group(1))
+        if checkin:
+            calls.append(("log_checkin", checkin))
+
+        if PRESCRIPTION_RE.search(lowered):
+            lift = LIFT_IN_QUERY_RE.search(lowered)
+            calls.append(("ask_prescription", {"lift": lift.group(1)} if lift else {}))
+        elif QUERY_RE.search(lowered) and not any(c[0] == "log_set" for c in calls):
             lift = LIFT_IN_QUERY_RE.search(lowered)
             calls.append(("query_progress", {"lift": lift.group(1)} if lift else {}))
 

@@ -153,3 +153,68 @@ def test_known_lifts_are_given_to_the_model_as_context(conn):
 def test_the_athletes_name_is_remembered(conn):
     send(conn, [("log_status", {"athlete_name": "Priya"})])
     assert db.athlete_name(conn, ATHLETE) == "Priya"
+
+
+def test_checkin_tracks_sleep_readiness_and_nutrition_together(conn):
+    reply = send(
+        conn,
+        [
+            (
+                "log_checkin",
+                {
+                    "sleep_hours": 7.5,
+                    "readiness": 8,
+                    "soreness": 3,
+                    "bodyweight_kg": 80,
+                    "protein_g": 144,
+                },
+            )
+        ],
+    )
+    stored = db.latest_checkin(conn, ATHLETE, TODAY.isoformat())
+    assert stored is not None and stored.sleep_hours == 7.5
+    assert "1.8 g/kg" in reply
+    assert "Readiness: green" in reply
+
+
+def test_prescription_waits_for_an_explicit_program_profile(conn):
+    send(conn, [("log_set", {"lift": "squat", "weight": 140, "sets": 3, "reps": 5})])
+    reply = send(conn, [("ask_prescription", {"lift": "squat"})])
+    assert "experience level" in reply
+    assert "days per week" in reply
+
+
+def test_novice_profile_history_and_readiness_feed_one_prescription(conn):
+    send(
+        conn,
+        [
+            (
+                "configure_program",
+                {"methodology": "auto", "experience": "novice", "days_per_week": 3},
+            )
+        ],
+    )
+    send(conn, [("log_set", {"lift": "squat", "weight": 140, "sets": 3, "reps": 5, "rpe": 8})])
+    reply = send(
+        conn,
+        [
+            ("log_checkin", {"sleep_hours": 6.5, "readiness": 6, "soreness": 5}),
+            ("ask_prescription", {"lift": "squat"}),
+        ],
+    )
+    assert "Method: linear progression" in reply
+    assert "Base load 145 kg, reduced by same-day readiness" in reply
+
+
+def test_red_readiness_suppresses_the_prescription(conn):
+    send(conn, [("configure_program", {"experience": "novice", "days_per_week": 3})])
+    send(conn, [("log_set", {"lift": "squat", "weight": 140, "sets": 3, "reps": 5})])
+    reply = send(
+        conn,
+        [
+            ("log_checkin", {"sleep_hours": 3, "readiness": 2, "soreness": 9}),
+            ("ask_prescription", {"lift": "squat"}),
+        ],
+    )
+    assert "severe recovery flag" in reply
+    assert "➡️" not in reply
