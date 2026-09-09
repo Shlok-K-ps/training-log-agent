@@ -147,7 +147,28 @@ python scripts/check_gemini.py
 ```
 
 It prints, for each sentence, the raw tool call the model returned and what the
-validator made of it — including the ones it rejects. Then:
+validator made of it — including the ones it rejects.
+
+To pick a model rather than guess at one, score several against the same cases:
+
+```bash
+export GROQ_API_KEY=...            # any subset; free keys, no card
+export GITHUB_MODELS_TOKEN=...
+python scripts/bench_providers.py
+```
+
+Seven labelled cases — a spelled-out weight, pounds, a relative date, an injury
+mentioned in passing, two lifts in one message, and one message with no weight in
+it at all. That last case is the one that decides it: a model that invents a
+number for *"did some squats"* will quietly corrupt an athlete's history, and no
+amount of downstream validation can recover a plausible-looking wrong weight.
+
+Swapping providers is a one-line change — see
+[`app/agent/providers.py`](app/agent/providers.py), where the OpenAI-format tool
+definitions are *derived* from the same declarations Gemini gets, so the two
+cannot drift.
+
+Then:
 
 ```bash
 python chat.py
@@ -189,7 +210,7 @@ anywhere else.
 ## Tests
 
 ```bash
-pytest -q          # 96 tests, no network, under two seconds
+pytest -q          # 109 tests, no network, under two seconds
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -266,5 +287,6 @@ app/
   main.py      FastAPI service
 chat.py        terminal harness, no phone required
 scripts/       check_gemini.py — prove Layer 1 against messy input
-tests/         96 tests, no network
+               bench_providers.py — score models against labelled cases
+tests/         109 tests, no network
 ```
