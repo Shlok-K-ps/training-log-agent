@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.decision.readiness import DailyCheckIn
 from app.scheduling.planner import (
     BusyEvent,
@@ -173,3 +175,23 @@ def test_a_later_confirmed_plan_updates_the_existing_calendar_event(conn):
     service.confirm(conn, ATHLETE, second.slots[-1].proposal_id)
     assert calendar.created[-1]["event_id"] == "google-event-1"
     assert db.schedule_proposal(conn, ATHLETE, first.slots[0].proposal_id)["status"] == "superseded"
+
+
+def test_injury_flag_blocks_both_proposal_and_stale_confirmation(conn):
+    service, calendar = configured_service(conn)
+    proposal = service.propose(conn, ATHLETE, day=DAY)
+    db.insert_entry(
+        conn,
+        db.Entry(
+            athlete_id=ATHLETE,
+            kind="status",
+            injured=True,
+            injury_note="left knee",
+            session_date=DAY.isoformat(),
+        ),
+    )
+    blocked = service.propose(conn, ATHLETE, day=DAY)
+    assert not blocked.actionable and "injury" in blocked.reasons[0]
+    with pytest.raises(ValueError, match="injury flag"):
+        service.confirm(conn, ATHLETE, proposal.slots[0].proposal_id)
+    assert calendar.created == []

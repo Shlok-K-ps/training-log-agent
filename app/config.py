@@ -40,6 +40,9 @@ class Settings:
     calendar_token_encryption_key: str = os.getenv(
         "CALENDAR_TOKEN_ENCRYPTION_KEY", ""
     )
+    team_approved_supplement_regimens_raw: str = os.getenv(
+        "TEAM_APPROVED_SUPPLEMENT_REGIMENS", ""
+    )
 
     database_path: str = os.getenv("DATABASE_PATH", "data/training_log.db")
 
@@ -74,6 +77,42 @@ class Settings:
     @property
     def google_calendar_redirect_uri(self) -> str:
         return self.public_base_url.rstrip("/") + "/integrations/google/calendar/callback"
+
+    def approved_supplement_source(
+        self, name: str, dose: float, unit: str, timing: str
+    ) -> str | None:
+        """Return the approver for an exact, team-verified regimen and batch."""
+        wanted = (name.casefold().strip(), float(dose), unit.casefold().strip(), timing.casefold())
+        for raw in self.team_approved_supplement_regimens_raw.split(";"):
+            pieces = [piece.strip() for piece in raw.split("|")]
+            if len(pieces) != 6:
+                continue
+            (
+                configured_name,
+                configured_dose,
+                configured_unit,
+                configured_timing,
+                approver,
+                batch_status,
+            ) = pieces
+            try:
+                configured = (
+                    configured_name.casefold(),
+                    float(configured_dose),
+                    configured_unit.casefold(),
+                    configured_timing.casefold(),
+                )
+            except ValueError:
+                continue
+            batch_verified = batch_status.casefold() in {
+                "batch_verified",
+                "verified",
+                "true",
+                "yes",
+            }
+            if configured == wanted and approver and batch_verified:
+                return approver[:80]
+        return None
 
 
 settings = Settings()

@@ -23,6 +23,11 @@ athlete's preferred training window. Same-day readiness can reduce or suppress
 the load through the existing readiness engine. It can never increase the base
 prescription. Severe recovery and open injury flags remain hard stops.
 
+An open injury flag also suppresses new training-slot proposals and blocks
+confirmation of proposals created before the injury was reported. Ordinary
+nutrition logging can continue because it is not a return-to-training protocol;
+the system does not generate rehabilitation sessions.
+
 If sleep triggers a nap, options after the nap plus a 60-minute buffer rank above
 earlier options. A completed nap requires another explicit readiness report; the
 original night's sleep is retained. Confirming an updated option moves the
@@ -50,6 +55,12 @@ the form `confirm CODE` creates or updates an event, and it does so on a separat
 - Events without a usable location receive a configurable privacy/travel buffer;
   the application does not guess where the athlete is.
 - OAuth tokens and saved places are encrypted with Fernet before SQLite storage.
+- Saved-place reads and writes fail closed if the encryption key is unavailable;
+  older plaintext rows are migrated to Fernet when a key is configured.
+- Canonical `my home/gym/office is ...` messages are parsed locally and do not
+  cross the language-model boundary. Looser natural-language messages may still
+  use the configured parser, so production requires an appropriate data-processing
+  arrangement for athlete messages.
 - `disconnect calendar` deletes tokens; `forget my locations` deletes saved places.
 - OAuth state is HMAC-signed, bound to the WhatsApp athlete identity and expires
   after 15 minutes.
@@ -77,6 +88,12 @@ Set the five calendar variables documented in `.env.example`. For a public
 launch, use separate Google Cloud projects for testing and production, publish
 the `/`, `/privacy`, and `/terms` pages on a verified domain, restrict the Maps
 key, and complete any OAuth verification Google requires.
+
+The included Render Blueprint describes a persistent single-instance layout.
+Render's free web service cannot attach its persistent disk and may spin down,
+so it cannot safely run the SQLite database plus in-process morning scheduler.
+Select a paid always-on service with disk, or move persistence and scheduling to
+external managed services before production deployment.
 
 WhatsApp setup sequence:
 

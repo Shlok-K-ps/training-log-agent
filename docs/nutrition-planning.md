@@ -10,7 +10,7 @@ Example setup:
 > Vegetarian. I can get rice, dal, paneer and bananas. I have basic cooking
 > access, eat four times per day, and my dietitian set 150 g protein.
 
-Example supplement setup:
+Example athlete report (stored, but not sufficient to schedule):
 
 > Creatine 5 g after training, approved by my coach, batch-tested product.
 
@@ -27,12 +27,25 @@ Safety boundaries:
 4. A training-day plan needs at least one compatible protein and carbohydrate
    option; otherwise the assistant asks for more available foods.
 5. Calorie and protein targets are recorded only when explicitly supplied.
-6. A supplement requires an exact athlete-reported dose and timing.
-7. A supplement without a named approval source may be stored but is not put on
-   the schedule.
-8. The system never diagnoses a deficiency, prescribes a medical diet, or
+6. A supplement requires an exact athlete-reported dose and timing, but athlete
+   messages cannot approve their own regimen.
+7. Scheduling requires an exact match in the team-controlled deployment setting
+   `TEAM_APPROVED_SUPPLEMENT_REGIMENS`, including a named approver and the
+   `batch_verified` marker. With no allowlist, no supplements are scheduled.
+8. A deterministic prohibited-substance safeguard blocks named WADA-list SARMs
+   even if an operator mistakenly allowlists one. The exact allowlist remains
+   the primary fail-closed boundary for unknown names.
+9. The system never diagnoses a deficiency, prescribes a medical diet, or
    recommends starting a supplement.
-9. Products recorded as not batch-tested produce an anti-doping warning.
+10. Unsupported allergy categories stop the plan for manual ingredient review;
+    recognized categories such as dairy exclude their mapped foods.
+
+Deployment format:
+
+`name|dose|unit|timing|approver|batch_verified`
+
+Multiple approved regimens are separated with semicolons. This setting belongs
+to the team operator, not a WhatsApp tool call.
 
 Supporting references:
 

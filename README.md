@@ -14,8 +14,10 @@ lift without ever exceeding the original base load.
 
 The same morning flow can build a food-access plan around training. It uses only
 the athlete's recorded diet style, allergies, cooking access and available
-foods. Supplements are scheduled only when an exact dose and approval source
-have been recorded; the model cannot recommend one or invent a dose.
+foods. Supplements are scheduled only when the exact regimen and a verified
+batch are allowlisted by the team operator outside athlete messages. The model
+cannot approve or recommend one, invent a dose, or override the
+prohibited-substance safeguard.
 
 Optional Google Calendar and Routes integrations find training slots around
 meetings, travel time, bedtime and same-day sleep/readiness. The athlete chooses
@@ -177,9 +179,12 @@ empirical findings.
 
 ## Design decisions, and what each one costs
 
-**Gemini free tier.** No card, no expiry, and Flash is plenty for parsing — the
-task is extraction, not reasoning. *Trade-off:* Google may train on free-tier
-inputs, so this moves to a paid tier before other athletes' data goes through it.
+**Gemini during development only.** Flash is used for extraction, not coaching.
+Athlete messages can contain health, nutrition and training data, so production
+must use a data-processing arrangement suitable for that data. Do not launch a
+team on a consumer/free-tier model account. Exact `my home/gym/office is ...`
+commands, OAuth commands and confirmation codes are parsed locally and never
+sent to the model.
 
 **SQLite.** Small, structured, single-writer data. One file you can copy, diff
 and open in any client. *Trade-off:* Postgres solves concurrency problems this
@@ -289,10 +294,12 @@ Text the sandbox number. It replies.
 
 ### 5. Deploy
 
-`render.yaml` is included — connect the repo on [Render](https://render.com), add
-the four environment variables, and point Twilio at
-`https://<service>.onrender.com/webhook/whatsapp`. A `Dockerfile` is there for
-anywhere else.
+`render.yaml` documents the intended single-instance service, but it is not a
+free-tier production deployment: the database needs a persistent disk and the
+morning scheduler needs an always-on process. Render offers those together only
+on a paid service. Choose that paid plan or move storage and scheduled jobs to
+managed external services before connecting a production Blueprint. A
+`Dockerfile` is included for other hosts.
 
 ### 6. Connect Google Calendar and travel time
 
@@ -317,12 +324,17 @@ The OAuth connection grants read-only event access and write access only to a
 calendar created by this app. Public apps may need Google's sensitive-scope
 verification; read the calendar planning document before launch.
 
+To enable a supplement reminder, a team operator must separately add the exact
+name, dose, unit, timing, approver and verified-batch status to
+`TEAM_APPROVED_SUPPLEMENT_REGIMENS`. Athlete-entered approval fields remain in
+the log but do not grant scheduling authority.
+
 ---
 
 ## Tests
 
 ```bash
-pytest -q          # 234 tests, no network
+pytest -q          # 245 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -343,6 +355,11 @@ the suite never makes a network call.
   isolation is tested.
 - Calendar tokens and saved places are encrypted at rest. Event titles, descriptions, attendees
   and meeting content are not persisted or sent to the model.
+- Saved-place writes fail closed when the encryption key is absent. Canonical
+  home, gym and office commands are parsed locally, before the model boundary.
+- Athlete training, recovery and nutrition messages may reach the configured
+  parsing provider. A suitable production data-processing agreement is a launch
+  requirement, not an optional hardening task.
 - Calendar writes go only to an app-created calendar after explicit WhatsApp
   confirmation. Athletes can disconnect Calendar and delete saved places by message.
 
@@ -414,5 +431,5 @@ reference/     OpenPowerlifting sample the validation bounds derive from
 docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         234 tests, no network
+tests/         245 tests, no network
 ```

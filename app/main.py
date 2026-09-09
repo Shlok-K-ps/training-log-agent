@@ -119,6 +119,9 @@ async def privacy_policy() -> str:
     integration is configured. Confirmed workout
     references are stored until the athlete asks to delete them. Calendar data is
     not sold and is not sent to the language model.</p>
+    <p>Training, sleep, readiness and nutrition messages may be sent to the
+    configured language-model provider for structured parsing. Coaching decisions
+    are made by deterministic application rules, not by that model.</p>
     <p>Send “disconnect calendar” in WhatsApp to delete stored calendar tokens. Send
     “forget my locations” to delete saved home, office and gym places.</p>
     """

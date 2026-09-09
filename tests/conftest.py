@@ -1,15 +1,27 @@
 from __future__ import annotations
 
+import base64
 from datetime import date, timedelta
 from typing import Any
 
 import pytest
 
 from app.storage import db
+from app.config import settings
 
 
 @pytest.fixture()
-def conn():
+def conn(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "calendar_token_encryption_key",
+        base64.urlsafe_b64encode(b"test-encryption-key-material-000").decode(),
+    )
+    monkeypatch.setattr(
+        settings,
+        "team_approved_supplement_regimens_raw",
+        "creatine|5|g|post_training|team coach|batch_verified",
+    )
     connection = db.connect(":memory:")
     db.init_db(connection)
     yield connection

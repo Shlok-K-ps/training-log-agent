@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.nutrition.safety import WADA_LIST_VERSION, prohibited_match
+
 
 DIET_STYLES = {"omnivore", "vegetarian", "vegan", "pescatarian", "halal"}
 COOKING_ACCESS = {"none", "basic", "full"}
@@ -49,6 +51,23 @@ NO_COOK_FOODS = {
     "yogurt", "paneer", "tofu", "whey", "plant protein",
 }
 
+ALLERGEN_GROUPS = {
+    "dairy": {"milk", "curd", "yogurt", "paneer", "whey", "cheese", "butter"},
+    "milk": {"milk", "curd", "yogurt", "paneer", "whey", "cheese", "butter"},
+    "gluten": {"bread", "roti", "pasta", "oats", "wheat"},
+    "wheat": {"bread", "roti", "pasta", "wheat"},
+    "nuts": {"peanut", "peanuts", "almond", "cashew", "walnut", "pistachio"},
+    "tree nuts": {"almond", "cashew", "walnut", "pistachio"},
+    "peanut": {"peanut", "peanuts"},
+    "peanuts": {"peanut", "peanuts"},
+    "shellfish": {"shrimp", "prawn", "prawns", "crab", "lobster", "shellfish"},
+    "soy": {"tofu", "soy chunks", "soy milk", "soy protein"},
+    "egg": {"egg", "eggs"},
+    "eggs": {"egg", "eggs"},
+    "fish": {"fish"},
+    "sesame": {"sesame", "tahini"},
+}
+
 
 @dataclass(frozen=True)
 class NutritionProfile:
@@ -70,6 +89,7 @@ class Supplement:
     timing: str
     approved_by: str | None
     batch_tested: bool | None = None
+    team_approved: bool = False
 
 
 @dataclass(frozen=True)
@@ -128,8 +148,11 @@ def _outside_busy(
 
 def _allowed(food: str, diet_style: str, allergies: tuple[str, ...]) -> bool:
     normalized = food.lower().strip()
-    if any(allergen.lower().strip() in normalized for allergen in allergies):
-        return False
+    for allergen in allergies:
+        allergy = allergen.lower().strip()
+        blocked_foods = ALLERGEN_GROUPS.get(allergy, {allergy})
+        if any(blocked in normalized for blocked in blocked_foods):
+            return False
     styles = PROTEIN_FOODS.get(normalized)
     return styles is None or diet_style in styles
 
@@ -147,11 +170,25 @@ def build_daily_plan(
     bedtime: str | None = None,
 ) -> NutritionPlan:
     """Build timing and choices without inventing foods, targets, or doses."""
+    raw_foods = tuple(food.strip().lower() for food in profile.foods_available if food.strip())
+    unsupported_allergens = tuple(
+        allergen.strip().lower()
+        for allergen in profile.allergies
+        if allergen.strip()
+        and allergen.strip().lower() not in ALLERGEN_GROUPS
+        and not any(allergen.strip().lower() in food for food in raw_foods)
+    )
+    if unsupported_allergens:
+        return NutritionPlan(
+            False,
+            (),
+            (),
+            ("Unsupported allergy labels require manual ingredient review.",),
+            ("manual review for: " + ", ".join(unsupported_allergens),),
+        )
     available = tuple(
         dict.fromkeys(
-            food.strip().lower()
-            for food in profile.foods_available
-            if food.strip() and _allowed(food, profile.diet_style, profile.allergies)
+            food for food in raw_foods if _allowed(food, profile.diet_style, profile.allergies)
         )
     )
     if profile.cooking_access == "none":
@@ -215,10 +252,25 @@ def build_daily_plan(
     meal_times = {meal.label: meal.time for meal in meals}
 
     supplement_slots: list[SupplementSlot] = []
-    skipped_unapproved = False
+    supplement_blocks: list[str] = []
     for supplement in supplements:
-        if not supplement.approved_by:
-            skipped_unapproved = True
+        prohibited = prohibited_match(supplement.name)
+        if prohibited:
+            supplement_blocks.append(
+                f"{supplement.name} was not scheduled: it matches the {WADA_LIST_VERSION} "
+                "prohibited-substance safeguard."
+            )
+            continue
+        if not supplement.team_approved or not supplement.approved_by:
+            supplement_blocks.append(
+                f"{supplement.name} was not scheduled: the exact regimen is not in the "
+                "team-controlled approval list."
+            )
+            continue
+        if supplement.batch_tested is not True:
+            supplement_blocks.append(
+                f"{supplement.name} was not scheduled: verified batch-testing is not recorded."
+            )
             continue
         if supplement.timing in {"breakfast", "with_food"}:
             when = meal_times.get("breakfast", meals[0].time if meals else "08:00")
@@ -247,10 +299,27 @@ def build_daily_plan(
     if busy_windows:
         notes.append("Meal and approved-supplement times were moved outside calendar busy windows.")
     if profile.protein_target_g is not None:
-        notes.append(f"Recorded professional/athlete protein target: {profile.protein_target_g:g} g/day.")
+        if profile.approved_by:
+            notes.append(
+                f"Recorded protein target approved by {profile.approved_by}: "
+                f"{profile.protein_target_g:g} g/day."
+            )
+        else:
+            notes.append(
+                f"Athlete-reported protein target: {profile.protein_target_g:g} g/day; "
+                "no professional review is recorded."
+            )
     if profile.calorie_target is not None:
-        notes.append(f"Recorded approved calorie target: {profile.calorie_target:g} kcal/day.")
-    if skipped_unapproved:
-        notes.append("Unapproved supplements were not scheduled.")
+        if profile.approved_by:
+            notes.append(
+                f"Recorded calorie target approved by {profile.approved_by}: "
+                f"{profile.calorie_target:g} kcal/day."
+            )
+        else:
+            notes.append(
+                f"Athlete-reported calorie target: {profile.calorie_target:g} kcal/day; "
+                "no professional review is recorded."
+            )
+    notes.extend(supplement_blocks)
     notes.append("This plan does not diagnose deficiencies or replace a dietitian or clinician.")
     return NutritionPlan(True, tuple(meals), tuple(supplement_slots), tuple(notes))

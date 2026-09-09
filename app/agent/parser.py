@@ -9,6 +9,7 @@ with a tool call rather than prose. Anything it returns that fails
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Protocol, Sequence
@@ -20,6 +21,14 @@ from app.agent.schemas import TOOL, Action, ValidationError, validate_call
 from app.config import settings
 
 log = logging.getLogger(__name__)
+
+_PRIVATE_PLACE = re.compile(
+    r"^\s*(?:my\s+)?(gym|home|office)(?:\s+location)?\s+is\s+(.{4,500})\s*$",
+    re.IGNORECASE,
+)
+_PRIVATE_CONFIRM = re.compile(
+    r"^\s*(?:confirm|book)\s+([a-f0-9]{4,20})\s*$", re.IGNORECASE
+)
 
 SYSTEM_INSTRUCTION = """\
 You are the parsing layer of a powerlifting training-log system. You do not
@@ -157,7 +166,11 @@ def parse_message(
     result = ParseResult()
 
     try:
-        raw_calls = client.call(text, instruction)
+        # Keep common identity, token and precise-address commands local. They
+        # do not need probabilistic parsing and should not be sent to an LLM.
+        raw_calls = _private_local_calls(text)
+        if raw_calls is None:
+            raw_calls = client.call(text, instruction)
     except Exception as exc:  # noqa: BLE001 - surfaced to the athlete, not swallowed
         log.exception("model call failed")
         result.rejected.append(f"model call failed: {exc}")
@@ -171,3 +184,22 @@ def parse_message(
             log.warning("rejected tool call %s(%s): %s", name, args, exc)
             result.rejected.append(str(exc))
     return result
+
+
+def _private_local_calls(text: str) -> list[tuple[str, dict[str, Any]]] | None:
+    lowered = text.strip().casefold()
+    if re.fullmatch(r"(?:connect|link) (?:my )?(?:google )?calendar", lowered):
+        return [("connect_calendar", {})]
+    if re.fullmatch(r"(?:disconnect|unlink) (?:my )?(?:google )?calendar", lowered):
+        return [("disconnect_calendar", {})]
+    if re.fullmatch(r"(?:forget|delete|clear) (?:my )?(?:saved )?(?:places|locations)", lowered):
+        return [("forget_places", {})]
+    confirmation = _PRIVATE_CONFIRM.fullmatch(text)
+    if confirmation:
+        return [("confirm_training_schedule", {"proposal_id": confirmation.group(1)})]
+    place = _PRIVATE_PLACE.fullmatch(text)
+    if place:
+        return [
+            ("configure_place", {"label": place.group(1), "location": place.group(2)})
+        ]
+    return None

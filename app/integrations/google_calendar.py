@@ -91,7 +91,8 @@ class OAuthStateSigner:
             encoded, signature = token.split(".", 1)
             expected = hmac.new(self._secret, encoded.encode(), hashlib.sha256).digest()
             actual = base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4))
-            if not hmac.compare_digest(expected, actual):
+            canonical = base64.urlsafe_b64encode(actual).rstrip(b"=").decode()
+            if signature != canonical or not hmac.compare_digest(expected, actual):
                 raise CalendarIntegrationError("Invalid OAuth state")
             raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
             payload = json.loads(raw)

@@ -850,11 +850,13 @@ def delete_oauth_connection(
 
 
 def save_place(conn: sqlite3.Connection, athlete_id: str, label: str, location: str) -> None:
-    stored_location = location.strip()
-    if settings.calendar_token_encryption_key:
-        stored_location = "fernet:" + SecretCipher(
-            settings.calendar_token_encryption_key
-        ).encrypt(stored_location)
+    if not settings.calendar_token_encryption_key:
+        raise RuntimeError(
+            "Saved locations are disabled until CALENDAR_TOKEN_ENCRYPTION_KEY is configured"
+        )
+    stored_location = "fernet:" + SecretCipher(
+        settings.calendar_token_encryption_key
+    ).encrypt(location.strip())
     conn.execute(
         """
         INSERT INTO saved_places (athlete_id, label, location, updated_at)
@@ -877,14 +879,39 @@ def saved_places(conn: sqlite3.Connection, athlete_id: str) -> dict[str, str]:
         "SELECT label, location FROM saved_places WHERE athlete_id = ? ORDER BY label",
         (athlete_id,),
     ).fetchall()
+    if rows and not settings.calendar_token_encryption_key:
+        raise RuntimeError(
+            "Saved locations cannot be read until CALENDAR_TOKEN_ENCRYPTION_KEY is configured"
+        )
+    cipher = (
+        SecretCipher(settings.calendar_token_encryption_key)
+        if settings.calendar_token_encryption_key
+        else None
+    )
     result: dict[str, str] = {}
     for row in rows:
         value = str(row["location"])
         if value.startswith("fernet:"):
-            value = SecretCipher(settings.calendar_token_encryption_key).decrypt(
-                value.removeprefix("fernet:")
+            value = cipher.decrypt(value.removeprefix("fernet:"))
+        elif cipher is not None:
+            # One-time migration for places written by the earlier fail-open version.
+            plaintext = value
+            encrypted = "fernet:" + cipher.encrypt(plaintext)
+            conn.execute(
+                """
+                UPDATE saved_places SET location = ?, updated_at = ?
+                WHERE athlete_id = ? AND label = ?
+                """,
+                (
+                    encrypted,
+                    datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    athlete_id,
+                    str(row["label"]),
+                ),
             )
+            value = plaintext
         result[str(row["label"])] = value
+    conn.commit()
     return result
 
 

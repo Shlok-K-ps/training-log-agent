@@ -94,6 +94,17 @@ class SchedulingService:
         lift: str | None = None,
         gym_label: str = "gym",
     ) -> ProposalResult:
+        injured, injury_note = db.injury_state(conn, athlete_id)
+        if injured:
+            detail = f" ({injury_note})" if injury_note else ""
+            return ProposalResult(
+                False,
+                (),
+                (
+                    "An open injury flag suppresses training-slot proposals" + detail + ".",
+                    "Clear the flag only after appropriate professional guidance.",
+                ),
+            )
         if not self.calendar.connected(athlete_id):
             return ProposalResult(False, (), ("Google Calendar is not connected.",))
         places = db.saved_places(conn, athlete_id)
@@ -208,6 +219,12 @@ class SchedulingService:
             raise ValueError("That schedule option does not exist.")
         if row["status"] != "pending":
             raise ValueError(f"That schedule option is already {row['status']}.")
+        injured, injury_note = db.injury_state(conn, athlete_id)
+        if injured:
+            detail = f" ({injury_note})" if injury_note else ""
+            raise ValueError(
+                "The workout was not added because an injury flag is open" + detail + "."
+            )
         places = db.saved_places(conn, athlete_id)
         gym_label = str(row["gym_label"])
         gym_location = places.get(gym_label)

@@ -52,6 +52,7 @@ from app.decision.prescribe import prescribe_next
 from app.decision.readiness import DailyCheckIn, evaluate_readiness
 from app.decision.sleep import SleepSchedule, plan_nap
 from app.decision.rules import evaluate
+from app.config import settings as app_settings
 from app.programming import Experience, Methodology, ProgrammingProfile, choose_methodology
 from app.nutrition import NutritionProfile, Supplement, build_daily_plan
 from app.integrations.factory import connection_link, scheduling_service
@@ -437,6 +438,11 @@ def _apply(
                 warnings.append(
                     "⚠️ It will not be scheduled until you record who approved the dose."
                 )
+            if action.active:
+                warnings.append(
+                    "⚠️ This is stored as athlete-reported. Scheduling also requires the exact "
+                    "regimen in the team's deployment approval list and verified batch-testing."
+                )
             if action.batch_tested is False:
                 warnings.append(
                     "⚠️ This product is not recorded as batch-tested; competitive athletes should review anti-doping risk."
@@ -501,10 +507,13 @@ def _apply(
             confirmations.append("✅ Program profile: " + ", ".join(p for p in pieces if p) + ".")
 
         elif isinstance(action, ConfigurePlace):
-            db.save_place(conn, athlete_id, action.label, action.location)
-            confirmations.append(
-                f"✅ Saved {action.label}. I use it only for travel-time planning."
-            )
+            try:
+                db.save_place(conn, athlete_id, action.label, action.location)
+                confirmations.append(
+                    f"✅ Saved {action.label} with encryption for travel-time planning."
+                )
+            except RuntimeError as exc:
+                questions.append(f"❓ {exc}")
 
         elif isinstance(action, ConfigureCalendarPlanning):
             db.save_scheduling_preferences(
@@ -598,7 +607,7 @@ def _apply(
                 )
                 if confirmed.lift:
                     lifts_to_prescribe.append(confirmed.lift)
-        except (CalendarIntegrationError, RoutingIntegrationError, ValueError) as exc:
+        except (CalendarIntegrationError, RoutingIntegrationError, RuntimeError, ValueError) as exc:
             questions.append(f"❓ {exc}")
 
     if assess_all:
@@ -730,21 +739,35 @@ def _apply(
                 else None
             ),
         )
-        supplements = tuple(
-            Supplement(
-                name=str(entry.supplement_name),
-                dose=float(entry.supplement_dose),
-                unit=str(entry.supplement_unit),
-                timing=str(entry.supplement_timing),
-                approved_by=entry.supplement_approved_by,
-                batch_tested=entry.supplement_batch_tested,
+        supplement_rows: list[Supplement] = []
+        for entry in db.active_supplements(conn, athlete_id):
+            if not (
+                entry.supplement_name
+                and entry.supplement_dose is not None
+                and entry.supplement_unit
+                and entry.supplement_timing
+            ):
+                continue
+            approval_source = app_settings.approved_supplement_source(
+                str(entry.supplement_name),
+                float(entry.supplement_dose),
+                str(entry.supplement_unit),
+                str(entry.supplement_timing),
             )
-            for entry in db.active_supplements(conn, athlete_id)
-            if entry.supplement_name
-            and entry.supplement_dose is not None
-            and entry.supplement_unit
-            and entry.supplement_timing
-        )
+            supplement_rows.append(
+                Supplement(
+                    name=str(entry.supplement_name),
+                    dose=float(entry.supplement_dose),
+                    unit=str(entry.supplement_unit),
+                    timing=str(entry.supplement_timing),
+                    approved_by=approval_source,
+                    # Athlete-entered approval and testing claims are retained as
+                    # observations, but scheduling trusts only deployment config.
+                    batch_tested=approval_source is not None,
+                    team_approved=approval_source is not None,
+                )
+            )
+        supplements = tuple(supplement_rows)
         nutrition_plans.append(
             format_nutrition_plan(
                 build_daily_plan(

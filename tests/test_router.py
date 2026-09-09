@@ -333,7 +333,8 @@ def test_unapproved_supplement_is_saved_but_not_scheduled(conn):
         ],
     )
     plan = send(conn, [("ask_nutrition_plan", {"training_time": "18:30"})])
-    assert "mystery blend" not in plan
+    assert "mystery blend 1 scoop" not in plan
+    assert "mystery blend was not scheduled" in plan
 
 
 def test_nutrition_plan_asks_for_access_instead_of_inventing_food(conn):
