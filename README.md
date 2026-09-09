@@ -10,6 +10,11 @@ proactive WhatsApp sleep prompt, proposes a bounded nap window when recovery is
 low, asks for a post-nap readiness update, and recalculates the day's planned
 lift without ever exceeding the original base load.
 
+The same morning flow can build a food-access plan around training. It uses only
+the athlete's recorded diet style, allergies, cooking access and available
+foods. Supplements are scheduled only when an exact dose and approval source
+have been recorded; the model cannot recommend one or invent a dose.
+
 ```
 athlete                                                        agent
    │
@@ -59,7 +64,7 @@ model is the right tool for reading "ground out the last two at one forty" and
 the wrong tool for deciding whether someone should strip 15% off their squat.
 
 The model never sees the reply text. It cannot write one. Its entire vocabulary
-is nine function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
+is thirteen function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
 anything it returns outside them is thrown away before it reaches the database.
 
 The same boundary now covers coaching. [`app/programming/`](app/programming/)
@@ -74,6 +79,8 @@ See [programming methodologies](docs/programming-methodologies.md) and
 policy cutoffs, and safety boundaries.
 The proactive workflow and nap rules are documented in
 [sleep and nap scheduling](docs/sleep-and-naps.md).
+Food access, meal timing and supplement boundaries are in
+[nutrition planning](docs/nutrition-planning.md).
 
 ---
 
@@ -282,7 +289,7 @@ anywhere else.
 ## Tests
 
 ```bash
-pytest -q          # 201 tests, no network
+pytest -q          # 217 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -322,7 +329,7 @@ trustworthy:
         │
   injury flags     graded return-to-load protocols, physio in the loop
         │
-  nutrition        tracking built; personalised targets need coach/dietitian input
+  nutrition        food-access timing built; targets still need athlete/pro approval
 ```
 
 You cannot autoregulate on data you cannot parse reliably, and you cannot
@@ -365,5 +372,5 @@ reference/     OpenPowerlifting sample the validation bounds derive from
 docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         201 tests, no network
+tests/         217 tests, no network
 ```

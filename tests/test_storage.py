@@ -25,10 +25,43 @@ def test_init_migrates_an_existing_database_without_losing_the_one_table_design(
     assert set(db.CHECKIN_COLUMNS) <= columns
     assert set(db.PROGRAM_COLUMNS) <= columns
     assert set(db.SCHEDULE_COLUMNS) <= columns
+    assert set(db.NUTRITION_COLUMNS) <= columns
+    assert set(db.SUPPLEMENT_COLUMNS) <= columns
     assert conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_deliveries'"
     ).fetchone()
     conn.close()
+
+
+def test_latest_nutrition_settings_and_active_supplements_are_derived(conn):
+    db.insert_entry(
+        conn,
+        db.Entry(
+            athlete_id="+911",
+            kind="status",
+            diet_style="vegan",
+            foods_available='["rice", "tofu"]',
+            session_date="2026-09-01",
+        ),
+    )
+    db.insert_entry(
+        conn,
+        db.Entry(
+            athlete_id="+911",
+            kind="status",
+            supplement_name="creatine",
+            supplement_dose=5,
+            supplement_unit="g",
+            supplement_timing="post_training",
+            supplement_approved_by="coach",
+            supplement_active=True,
+            session_date="2026-09-01",
+        ),
+    )
+    assert db.latest_nutrition_settings(conn, "+911")["diet_style"] == "vegan"
+    assert [entry.supplement_name for entry in db.active_supplements(conn, "+911")] == [
+        "creatine"
+    ]
 
 ATHLETE = "+911"
 

@@ -32,6 +32,10 @@ QUERY_RE = re.compile(
 PRESCRIPTION_RE = re.compile(
     r"\b(what should i|what do i|next workout|prescribe|train today)\b", re.IGNORECASE
 )
+NUTRITION_PLAN_RE = re.compile(
+    r"\b(what should i eat|when should i eat|meal plan|nutrition plan|food plan)\b",
+    re.IGNORECASE,
+)
 LIFT_IN_QUERY_RE = re.compile(
     r"\b(squat|bench(?: press)?|deadlift|ohp|overhead press|row|front squat|rdl)\b",
     re.IGNORECASE,
@@ -113,6 +117,9 @@ class OfflineClient:
         elif QUERY_RE.search(lowered) and not any(c[0] == "log_set" for c in calls):
             lift = LIFT_IN_QUERY_RE.search(lowered)
             calls.append(("query_progress", {"lift": lift.group(1)} if lift else {}))
+
+        if NUTRITION_PLAN_RE.search(lowered):
+            calls.append(("ask_nutrition_plan", {}))
 
         if not calls:
             calls.append(

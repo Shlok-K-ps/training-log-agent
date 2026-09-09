@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from google.genai import types
 
 from app.reference import LB_TO_KG, ceiling_for
+from app.nutrition.planner import COOKING_ACCESS, DIET_STYLES, SUPPLEMENT_TIMINGS
 from app.storage.lifts import normalize_lift
 
 # --- Bounds. A model that hallucinates a 900 kg bench gets stopped here. -------
@@ -114,6 +115,40 @@ class ConfigureSchedule:
 
 
 @dataclass(frozen=True)
+class ConfigureNutrition:
+    diet_style: str | None = None
+    foods_available: tuple[str, ...] = ()
+    allergies: tuple[str, ...] = ()
+    cooking_access: str | None = None
+    meals_per_day: int | None = None
+    protein_target_g: float | None = None
+    calorie_target: float | None = None
+    approved_by: str | None = None
+
+
+@dataclass(frozen=True)
+class ConfigureSupplement:
+    name: str
+    dose: float
+    unit: str
+    timing: str
+    approved_by: str | None = None
+    batch_tested: bool | None = None
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class LogSupplementTaken:
+    name: str
+    taken_on: str
+
+
+@dataclass(frozen=True)
+class AskNutritionPlan:
+    training_time: str | None = None
+
+
+@dataclass(frozen=True)
 class AskPrescription:
     lift: str | None = None
 
@@ -139,6 +174,10 @@ Action = (
     | LogCheckIn
     | LogNap
     | ConfigureSchedule
+    | ConfigureNutrition
+    | ConfigureSupplement
+    | LogSupplementTaken
+    | AskNutritionPlan
     | AskPrescription
     | ConfigureProgram
     | Clarify
@@ -342,6 +381,94 @@ CONFIGURE_SCHEDULE = types.FunctionDeclaration(
     ),
 )
 
+CONFIGURE_NUTRITION = types.FunctionDeclaration(
+    name="configure_nutrition",
+    description=(
+        "Record explicit diet constraints and foods the athlete can actually access. "
+        "Targets must already come from the athlete, coach, dietitian, or clinician."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "diet_style": types.Schema(type=types.Type.STRING, enum=sorted(DIET_STYLES)),
+            "foods_available": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(type=types.Type.STRING),
+                description="Foods the athlete says are regularly available.",
+            ),
+            "allergies": types.Schema(
+                type=types.Type.ARRAY,
+                items=types.Schema(type=types.Type.STRING),
+                description="Explicit allergies or excluded ingredients.",
+            ),
+            "cooking_access": types.Schema(
+                type=types.Type.STRING, enum=sorted(COOKING_ACCESS)
+            ),
+            "meals_per_day": types.Schema(type=types.Type.INTEGER),
+            "protein_target_g": types.Schema(
+                type=types.Type.NUMBER,
+                description="Existing daily protein target; never invent one.",
+            ),
+            "calorie_target": types.Schema(
+                type=types.Type.NUMBER,
+                description="Existing approved calorie target; never invent one.",
+            ),
+            "approved_by": types.Schema(
+                type=types.Type.STRING,
+                description="Who set or approved the targets, if stated.",
+            ),
+        },
+    ),
+)
+
+CONFIGURE_SUPPLEMENT = types.FunctionDeclaration(
+    name="configure_supplement",
+    description=(
+        "Record a supplement the athlete already takes or has been told to take. "
+        "Never recommend a new supplement or invent its dose."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "name": types.Schema(type=types.Type.STRING),
+            "dose": types.Schema(type=types.Type.NUMBER),
+            "unit": types.Schema(type=types.Type.STRING),
+            "timing": types.Schema(type=types.Type.STRING, enum=sorted(SUPPLEMENT_TIMINGS)),
+            "approved_by": types.Schema(type=types.Type.STRING),
+            "batch_tested": types.Schema(type=types.Type.BOOLEAN),
+            "active": types.Schema(type=types.Type.BOOLEAN),
+        },
+        required=["name", "dose", "unit", "timing"],
+    ),
+)
+
+LOG_SUPPLEMENT_TAKEN = types.FunctionDeclaration(
+    name="log_supplement_taken",
+    description="Record that the athlete explicitly says they took a configured supplement.",
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "name": types.Schema(type=types.Type.STRING),
+            "taken_on": types.Schema(type=types.Type.STRING, description="Date as YYYY-MM-DD."),
+        },
+        required=["name"],
+    ),
+)
+
+ASK_NUTRITION_PLAN = types.FunctionDeclaration(
+    name="ask_nutrition_plan",
+    description=(
+        "The athlete asks what or when to eat or take today. The deterministic planner "
+        "uses recorded access, exclusions, training time, and approved supplements."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "training_time": types.Schema(type=types.Type.STRING, description="Local HH:MM."),
+        },
+    ),
+)
+
 ASK_PRESCRIPTION = types.FunctionDeclaration(
     name="ask_prescription",
     description=(
@@ -418,6 +545,10 @@ TOOL = types.Tool(
         LOG_CHECKIN,
         LOG_NAP,
         CONFIGURE_SCHEDULE,
+        CONFIGURE_NUTRITION,
+        CONFIGURE_SUPPLEMENT,
+        LOG_SUPPLEMENT_TAKEN,
+        ASK_NUTRITION_PLAN,
         ASK_PRESCRIPTION,
         CONFIGURE_PROGRAM,
         CLARIFY,
@@ -431,6 +562,10 @@ TOOL_NAMES = (
     "log_checkin",
     "log_nap",
     "configure_schedule",
+    "configure_nutrition",
+    "configure_supplement",
+    "log_supplement_taken",
+    "ask_nutrition_plan",
     "ask_prescription",
     "configure_program",
     "clarify",
@@ -517,6 +652,18 @@ def _timezone(value: Any) -> str | None:
         ZoneInfo(result)
     except ZoneInfoNotFoundError:
         raise ValidationError(f"unknown IANA timezone: {result!r}") from None
+    return result
+
+
+def _string_list(value: Any, field: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    values = value if isinstance(value, (list, tuple)) else str(value).split(",")
+    result = tuple(
+        dict.fromkeys(str(item).strip().lower() for item in values if str(item).strip())
+    )
+    if len(result) > 30:
+        raise ValidationError(f"{field} has too many values")
     return result
 
 
@@ -652,6 +799,69 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
         ):
             raise ValidationError("nap window start must be before nap window end")
         return action
+
+    if name == "configure_nutrition":
+        diet_style = str(args.get("diet_style") or "").strip().lower() or None
+        cooking = str(args.get("cooking_access") or "").strip().lower() or None
+        if diet_style is not None and diet_style not in DIET_STYLES:
+            raise ValidationError(f"unknown diet style: {diet_style!r}")
+        if cooking is not None and cooking not in COOKING_ACCESS:
+            raise ValidationError(f"unknown cooking access: {cooking!r}")
+        approved = str(args.get("approved_by") or "").strip()[:80] or None
+        action = ConfigureNutrition(
+            diet_style=diet_style,
+            foods_available=_string_list(args.get("foods_available"), "foods_available"),
+            allergies=_string_list(args.get("allergies"), "allergies"),
+            cooking_access=cooking,
+            meals_per_day=_int(args.get("meals_per_day"), "meals_per_day", 8),
+            protein_target_g=_bounded_num(
+                args.get("protein_target_g"), "protein_target_g", 0, 600
+            ),
+            calorie_target=_bounded_num(args.get("calorie_target"), "calorie_target", 0, 15000),
+            approved_by=approved,
+        )
+        if all(value in {None, ()} for value in action.__dict__.values()):
+            raise ValidationError("configure_nutrition carried no usable field")
+        return action
+
+    if name == "configure_supplement":
+        supplement_name = str(args.get("name") or "").strip()[:80]
+        dose = _bounded_num(args.get("dose"), "dose", 0.001, 100000)
+        unit = str(args.get("unit") or "").strip().lower()[:20]
+        timing = str(args.get("timing") or "").strip().lower()
+        if not supplement_name or dose is None or not unit:
+            raise ValidationError("configure_supplement requires name, dose, and unit")
+        if timing not in SUPPLEMENT_TIMINGS:
+            raise ValidationError(f"unknown supplement timing: {timing!r}")
+        active = args.get("active", True)
+        if not isinstance(active, bool):
+            active = str(active).strip().lower() in {"true", "1", "yes"}
+        batch_tested = args.get("batch_tested")
+        if batch_tested is not None and not isinstance(batch_tested, bool):
+            batch_tested = str(batch_tested).strip().lower() in {"true", "1", "yes"}
+        return ConfigureSupplement(
+            name=supplement_name,
+            dose=dose,
+            unit=unit,
+            timing=timing,
+            approved_by=str(args.get("approved_by") or "").strip()[:80] or None,
+            batch_tested=batch_tested,
+            active=active,
+        )
+
+    if name == "log_supplement_taken":
+        supplement_name = str(args.get("name") or "").strip()[:80]
+        if not supplement_name:
+            raise ValidationError("log_supplement_taken requires a name")
+        return LogSupplementTaken(
+            name=supplement_name,
+            taken_on=_resolve_date(args.get("taken_on"), today),
+        )
+
+    if name == "ask_nutrition_plan":
+        return AskNutritionPlan(
+            training_time=_clock(args.get("training_time"), "training_time")
+        )
 
     if name == "ask_prescription":
         return AskPrescription(lift=normalize_lift(args.get("lift")))

@@ -47,6 +47,13 @@ Rules:
   not completed. Post-nap readiness must be explicitly stated.
 - Local morning check-in, training, bedtime and nap-window settings go to
   configure_schedule. Never guess a timezone or clock time.
+- Diet style, allergies, cooking access, foods actually available, meal count,
+  and existing approved targets go to configure_nutrition. Never create targets.
+- Supplements already taken or approved go to configure_supplement with the
+  exact stated dose. A statement that it was taken today is log_supplement_taken.
+  Never recommend a supplement, diagnose a deficiency, or invent a dose.
+- Questions about what or when to eat or take today are ask_nutrition_plan. Do
+  not answer them yourself.
 - Explicit programming facts such as novice/intermediate/advanced, training
   days per week, a meet date, specialty equipment, or a named method go to
   configure_program. Never infer experience from a lift number.

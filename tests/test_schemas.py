@@ -25,8 +25,8 @@ from app.agent.schemas import (
 TODAY = date(2026, 9, 8)
 
 
-def call(name: str, **args):
-    return validate_call(name, args, TODAY)
+def call(tool_name: str, **args):
+    return validate_call(tool_name, args, TODAY)
 
 
 # --- log_set ------------------------------------------------------------------
@@ -231,3 +231,40 @@ def test_completed_nap_requires_minutes_and_validates_readiness():
     assert action.nap_minutes == 35 and action.readiness == 7
     with pytest.raises(ValidationError, match="requires nap_minutes"):
         call("log_nap", readiness=7)
+
+
+def test_nutrition_profile_accepts_food_access_but_not_unknown_diets():
+    action = call(
+        "configure_nutrition",
+        diet_style="vegetarian",
+        foods_available=["rice", "dal", "paneer"],
+        allergies=["peanuts"],
+        cooking_access="basic",
+        meals_per_day=4,
+    )
+    assert action.foods_available == ("rice", "dal", "paneer")
+    with pytest.raises(ValidationError, match="diet style"):
+        call("configure_nutrition", diet_style="anything")
+
+
+def test_supplement_configuration_never_invents_dose_or_timing():
+    action = call(
+        "configure_supplement",
+        name="creatine",
+        dose=5,
+        unit="g",
+        timing="post_training",
+        approved_by="coach",
+        batch_tested=True,
+    )
+    assert action.dose == 5 and action.approved_by == "coach"
+    with pytest.raises(ValidationError, match="requires name, dose, and unit"):
+        call("configure_supplement", name="creatine", timing="post_training")
+    with pytest.raises(ValidationError, match="timing"):
+        call("configure_supplement", name="creatine", dose=5, unit="g", timing="whenever")
+
+
+def test_nutrition_plan_and_supplement_intake_are_structured_actions():
+    assert call("ask_nutrition_plan", training_time="18:30").training_time == "18:30"
+    taken = call("log_supplement_taken", name="creatine")
+    assert taken.name == "creatine" and taken.taken_on == TODAY.isoformat()

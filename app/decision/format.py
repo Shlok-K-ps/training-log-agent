@@ -11,6 +11,7 @@ from app.decision.rules import Assessment, Verdict
 from app.decision.prescribe import Prescription
 from app.decision.readiness import DailyCheckIn, ReadinessAssessment
 from app.decision.sleep import NapPlan
+from app.nutrition import NutritionPlan
 
 PHASE_LABEL = {"cut": "cut", "maintain": "maintenance", "bulk": "bulk"}
 
@@ -170,6 +171,20 @@ def format_nap_logged(
         "The original night's sleep remains part of today's readiness calculation.",
     ]
     lines.extend(assessment.reasons)
+    return "\n".join(lines)
+
+
+def format_nutrition_plan(plan: NutritionPlan) -> str:
+    lines = ["*Today's food and approved supplements*"]
+    if not plan.actionable:
+        lines.append("I need: " + ", ".join(plan.missing) + ".")
+        return "\n".join(lines)
+    for meal in plan.meals:
+        choices = " + ".join(meal.foods) if meal.foods else "recorded meal"
+        lines.append(f"{meal.time} — {meal.label}: {choices}")
+    for supplement in plan.supplements:
+        lines.append(f"{supplement.time} — {supplement.description}")
+    lines.extend(plan.notes)
     return "\n".join(lines)
 
 

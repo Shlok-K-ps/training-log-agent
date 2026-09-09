@@ -276,3 +276,95 @@ def test_nap_cannot_override_a_severe_sleep_flag(conn):
     reply = send(conn, [("log_nap", {"nap_minutes": 45, "readiness": 8})])
     assert "severe recovery flag" in reply
     assert "➡️" not in reply
+
+
+def test_food_access_and_approved_supplement_build_a_training_day_plan(conn):
+    send(
+        conn,
+        [
+            (
+                "configure_nutrition",
+                {
+                    "diet_style": "vegetarian",
+                    "foods_available": ["rice", "dal", "paneer", "banana"],
+                    "allergies": ["peanuts"],
+                    "cooking_access": "basic",
+                    "meals_per_day": 4,
+                },
+            ),
+            (
+                "configure_supplement",
+                {
+                    "name": "creatine",
+                    "dose": 5,
+                    "unit": "g",
+                    "timing": "post_training",
+                    "approved_by": "coach",
+                    "batch_tested": True,
+                },
+            ),
+        ],
+    )
+    reply = send(conn, [("ask_nutrition_plan", {"training_time": "18:30"})])
+    assert "pre-training meal" in reply and "16:30" in reply
+    assert "post-training meal" in reply and "19:30" in reply
+    assert "creatine 5 g" in reply
+    assert "peanuts" not in reply
+
+
+def test_unapproved_supplement_is_saved_but_not_scheduled(conn):
+    reply = send(
+        conn,
+        [
+            (
+                "configure_supplement",
+                {"name": "mystery blend", "dose": 1, "unit": "scoop", "timing": "pre_training"},
+            )
+        ],
+    )
+    assert "will not be scheduled" in reply
+    send(
+        conn,
+        [
+            (
+                "configure_nutrition",
+                {"diet_style": "vegan", "foods_available": ["rice", "tofu", "banana"]},
+            )
+        ],
+    )
+    plan = send(conn, [("ask_nutrition_plan", {"training_time": "18:30"})])
+    assert "mystery blend" not in plan
+
+
+def test_nutrition_plan_asks_for_access_instead_of_inventing_food(conn):
+    reply = send(conn, [("ask_nutrition_plan", {"training_time": "18:30"})])
+    assert "diet style" in reply and "foods" in reply
+
+
+def test_supplement_intake_is_logged_and_unknown_schedule_is_flagged(conn):
+    reply = send(conn, [("log_supplement_taken", {"name": "creatine"})])
+    assert "Taken: creatine" in reply
+    assert "no active dose schedule" in reply
+
+
+def test_morning_training_time_can_trigger_the_food_plan(conn):
+    send(
+        conn,
+        [
+            (
+                "configure_nutrition",
+                {"diet_style": "vegan", "foods_available": ["rice", "tofu", "banana"]},
+            )
+        ],
+    )
+    reply = send(
+        conn,
+        [
+            (
+                "log_checkin",
+                {"sleep_hours": 7, "readiness": 8, "training_time": "18:30"},
+            )
+        ],
+    )
+    assert "Today's food and approved supplements" in reply
+    assert "pre-training meal" in reply

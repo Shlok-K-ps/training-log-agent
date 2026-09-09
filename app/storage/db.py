@@ -64,6 +64,22 @@ CREATE TABLE IF NOT EXISTS entries (
     bedtime       TEXT,
     nap_window_start TEXT,
     nap_window_end TEXT,
+    diet_style TEXT,
+    foods_available TEXT,
+    allergies TEXT,
+    cooking_access TEXT,
+    meals_per_day INTEGER,
+    protein_target_g REAL,
+    calorie_target REAL,
+    nutrition_approved_by TEXT,
+    supplement_name TEXT,
+    supplement_dose REAL,
+    supplement_unit TEXT,
+    supplement_timing TEXT,
+    supplement_approved_by TEXT,
+    supplement_batch_tested INTEGER,
+    supplement_active INTEGER,
+    supplement_taken INTEGER,
     session_date  TEXT    NOT NULL,
     raw_text      TEXT,
     created_at    TEXT    NOT NULL,
@@ -117,6 +133,28 @@ SCHEDULE_COLUMNS = {
     "nap_window_end": "TEXT",
 }
 
+NUTRITION_COLUMNS = {
+    "diet_style": "TEXT",
+    "foods_available": "TEXT",
+    "allergies": "TEXT",
+    "cooking_access": "TEXT",
+    "meals_per_day": "INTEGER",
+    "protein_target_g": "REAL",
+    "calorie_target": "REAL",
+    "nutrition_approved_by": "TEXT",
+}
+
+SUPPLEMENT_COLUMNS = {
+    "supplement_name": "TEXT",
+    "supplement_dose": "REAL",
+    "supplement_unit": "TEXT",
+    "supplement_timing": "TEXT",
+    "supplement_approved_by": "TEXT",
+    "supplement_batch_tested": "INTEGER",
+    "supplement_active": "INTEGER",
+    "supplement_taken": "INTEGER",
+}
+
 
 @dataclass(frozen=True)
 class Entry:
@@ -156,6 +194,22 @@ class Entry:
     bedtime: str | None = None
     nap_window_start: str | None = None
     nap_window_end: str | None = None
+    diet_style: str | None = None
+    foods_available: str | None = None
+    allergies: str | None = None
+    cooking_access: str | None = None
+    meals_per_day: int | None = None
+    protein_target_g: float | None = None
+    calorie_target: float | None = None
+    nutrition_approved_by: str | None = None
+    supplement_name: str | None = None
+    supplement_dose: float | None = None
+    supplement_unit: str | None = None
+    supplement_timing: str | None = None
+    supplement_approved_by: str | None = None
+    supplement_batch_tested: bool | None = None
+    supplement_active: bool | None = None
+    supplement_taken: bool | None = None
     session_date: str = ""
     raw_text: str | None = None
     id: int | None = None
@@ -196,6 +250,22 @@ class Entry:
             bedtime=self.bedtime,
             nap_window_start=self.nap_window_start,
             nap_window_end=self.nap_window_end,
+            diet_style=self.diet_style,
+            foods_available=self.foods_available,
+            allergies=self.allergies,
+            cooking_access=self.cooking_access,
+            meals_per_day=self.meals_per_day,
+            protein_target_g=self.protein_target_g,
+            calorie_target=self.calorie_target,
+            nutrition_approved_by=self.nutrition_approved_by,
+            supplement_name=self.supplement_name,
+            supplement_dose=self.supplement_dose,
+            supplement_unit=self.supplement_unit,
+            supplement_timing=self.supplement_timing,
+            supplement_approved_by=self.supplement_approved_by,
+            supplement_batch_tested=self.supplement_batch_tested,
+            supplement_active=self.supplement_active,
+            supplement_taken=self.supplement_taken,
             session_date=self.session_date or date.today().isoformat(),
             raw_text=self.raw_text,
             id=self.id,
@@ -217,7 +287,13 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
-    for name, column_type in (CHECKIN_COLUMNS | PROGRAM_COLUMNS | SCHEDULE_COLUMNS).items():
+    for name, column_type in (
+        CHECKIN_COLUMNS
+        | PROGRAM_COLUMNS
+        | SCHEDULE_COLUMNS
+        | NUTRITION_COLUMNS
+        | SUPPLEMENT_COLUMNS
+    ).items():
         if name not in existing:
             conn.execute(f"ALTER TABLE entries ADD COLUMN {name} {column_type}")
     conn.commit()
@@ -225,19 +301,20 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
     e = entry.with_defaults()
-    cur = conn.execute(
-        """
-        INSERT INTO entries (
-            athlete_id, athlete_name, kind, lift, sets, reps, weight_kg, rpe,
-            phase, injured, injury_note, sleep_hours, sleep_quality, readiness,
-            soreness, stress, bodyweight_kg, protein_g, calories,
-            nutrition_adherence, nap_minutes, planned_lift, planned_training_time,
-            methodology, experience, days_per_week, meet_date,
-            has_specialty_equipment, timezone, morning_checkin_time, training_time,
-            bedtime, nap_window_start, nap_window_end, session_date, raw_text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
+    columns = (
+        "athlete_id", "athlete_name", "kind", "lift", "sets", "reps", "weight_kg", "rpe",
+        "phase", "injured", "injury_note", "sleep_hours", "sleep_quality", "readiness",
+        "soreness", "stress", "bodyweight_kg", "protein_g", "calories", "nutrition_adherence",
+        "nap_minutes", "planned_lift", "planned_training_time", "methodology", "experience",
+        "days_per_week", "meet_date", "has_specialty_equipment", "timezone",
+        "morning_checkin_time", "training_time", "bedtime", "nap_window_start", "nap_window_end",
+        "diet_style", "foods_available", "allergies", "cooking_access", "meals_per_day",
+        "protein_target_g", "calorie_target", "nutrition_approved_by", "supplement_name",
+        "supplement_dose", "supplement_unit", "supplement_timing", "supplement_approved_by",
+        "supplement_batch_tested", "supplement_active", "supplement_taken", "session_date",
+        "raw_text", "created_at",
+    )
+    values = (
             e.athlete_id,
             e.athlete_name,
             e.kind,
@@ -272,10 +349,30 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
             e.bedtime,
             e.nap_window_start,
             e.nap_window_end,
+            e.diet_style,
+            e.foods_available,
+            e.allergies,
+            e.cooking_access,
+            e.meals_per_day,
+            e.protein_target_g,
+            e.calorie_target,
+            e.nutrition_approved_by,
+            e.supplement_name,
+            e.supplement_dose,
+            e.supplement_unit,
+            e.supplement_timing,
+            e.supplement_approved_by,
+            None if e.supplement_batch_tested is None else int(e.supplement_batch_tested),
+            None if e.supplement_active is None else int(e.supplement_active),
+            None if e.supplement_taken is None else int(e.supplement_taken),
             e.session_date,
             e.raw_text,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        ),
+    )
+    placeholders = ", ".join("?" for _ in columns)
+    cur = conn.execute(
+        f"INSERT INTO entries ({', '.join(columns)}) VALUES ({placeholders})",
+        values,
     )
     conn.commit()
     return int(cur.lastrowid)
@@ -326,6 +423,28 @@ def _row_to_entry(row: sqlite3.Row) -> Entry:
         bedtime=row["bedtime"],
         nap_window_start=row["nap_window_start"],
         nap_window_end=row["nap_window_end"],
+        diet_style=row["diet_style"],
+        foods_available=row["foods_available"],
+        allergies=row["allergies"],
+        cooking_access=row["cooking_access"],
+        meals_per_day=row["meals_per_day"],
+        protein_target_g=row["protein_target_g"],
+        calorie_target=row["calorie_target"],
+        nutrition_approved_by=row["nutrition_approved_by"],
+        supplement_name=row["supplement_name"],
+        supplement_dose=row["supplement_dose"],
+        supplement_unit=row["supplement_unit"],
+        supplement_timing=row["supplement_timing"],
+        supplement_approved_by=row["supplement_approved_by"],
+        supplement_batch_tested=(
+            None if row["supplement_batch_tested"] is None else bool(row["supplement_batch_tested"])
+        ),
+        supplement_active=(
+            None if row["supplement_active"] is None else bool(row["supplement_active"])
+        ),
+        supplement_taken=(
+            None if row["supplement_taken"] is None else bool(row["supplement_taken"])
+        ),
         session_date=row["session_date"],
         raw_text=row["raw_text"],
     )
@@ -498,6 +617,42 @@ def latest_schedule_settings(conn: sqlite3.Connection, athlete_id: str) -> dict[
         if row is not None:
             result[column] = row["value"]
     return result
+
+
+def latest_nutrition_settings(conn: sqlite3.Connection, athlete_id: str) -> dict[str, object]:
+    """Derive each current nutrition constraint from the latest row that states it."""
+    result: dict[str, object] = {}
+    for column in NUTRITION_COLUMNS:
+        row = conn.execute(
+            f"""
+            SELECT {column} AS value FROM entries
+            WHERE athlete_id = ? AND {column} IS NOT NULL
+            ORDER BY session_date DESC, id DESC LIMIT 1
+            """,
+            (athlete_id,),
+        ).fetchone()
+        if row is not None:
+            result[column] = row["value"]
+    return result
+
+
+def active_supplements(conn: sqlite3.Connection, athlete_id: str) -> list[Entry]:
+    """Latest configured row for every active supplement, ordered by name."""
+    rows = conn.execute(
+        """
+        SELECT e.* FROM entries e
+        JOIN (
+            SELECT supplement_name, MAX(id) AS latest_id
+            FROM entries
+            WHERE athlete_id = ? AND supplement_dose IS NOT NULL
+            GROUP BY supplement_name
+        ) latest ON latest.latest_id = e.id
+        WHERE e.supplement_active = 1
+        ORDER BY e.supplement_name
+        """,
+        (athlete_id,),
+    ).fetchall()
+    return [_row_to_entry(row) for row in rows]
 
 
 def list_scheduled_athletes(conn: sqlite3.Connection) -> list[str]:

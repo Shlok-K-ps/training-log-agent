@@ -7,18 +7,23 @@ verdict, and stitches the templated reply together.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import date
 
 from app.agent.parser import ModelClient, parse_message
 from app.agent.schemas import (
     Action,
+    AskNutritionPlan,
     AskPrescription,
     Clarify,
     ConfigureProgram,
+    ConfigureNutrition,
     ConfigureSchedule,
+    ConfigureSupplement,
     LogCheckIn,
     LogNap,
+    LogSupplementTaken,
     LogSet,
     LogStatus,
     QueryProgress,
@@ -29,6 +34,7 @@ from app.decision.format import (
     format_logged,
     format_nap_logged,
     format_nap_plan,
+    format_nutrition_plan,
     format_prescription,
     format_status,
 )
@@ -38,6 +44,7 @@ from app.decision.readiness import DailyCheckIn, evaluate_readiness
 from app.decision.sleep import SleepSchedule, plan_nap
 from app.decision.rules import evaluate
 from app.programming import Experience, Methodology, ProgrammingProfile, choose_methodology
+from app.nutrition import NutritionProfile, Supplement, build_daily_plan
 from app.storage import db
 
 MAX_VERDICTS_PER_REPLY = 3
@@ -61,6 +68,9 @@ HELP = (
     "• _slept 7h, readiness 6, soreness 4, protein 150g_  — daily check-in\n"
     "• _morning check-in 7:30, timezone Asia/Kolkata, train 18:30_ — schedule\n"
     "• _napped 30 minutes, readiness 7_ — post-nap reassessment\n"
+    "• _vegetarian; I have rice, dal, paneer, bananas_ — food access\n"
+    "• _creatine 5g after training, approved by my coach_ — supplement setup\n"
+    "• _what should I eat today?_ — meal and approved-supplement timing\n"
     "• _I'm intermediate and train 4 days/week_  — configures programming\n"
     "• _what should I squat today?_  — deterministic next-session plan\n\n"
     "Verdicts come from fixed rules over your own log, not from a chatbot's opinion."
@@ -108,6 +118,7 @@ def _apply(
     lifts_to_assess: list[str] = []
     lifts_to_prescribe: list[str] = []
     assess_all = False
+    nutrition_plan_times: list[str | None] = []
 
     warnings: list[str] = []
 
@@ -240,6 +251,8 @@ def _apply(
                     nap_window_end=str(schedule_values.get("nap_window_end", "16:00")),
                 )
                 confirmations.append(format_nap_plan(plan_nap(checkin, schedule)))
+            if action.training_time and db.latest_nutrition_settings(conn, athlete_id):
+                nutrition_plan_times.append(action.training_time)
 
         elif isinstance(action, LogNap):
             previous = db.latest_checkin(conn, athlete_id, action.checked_on)
@@ -332,6 +345,89 @@ def _apply(
             confirmations.append(
                 "✅ Recovery schedule: " + ", ".join(piece for piece in pieces if piece) + "."
             )
+
+        elif isinstance(action, ConfigureNutrition):
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=today.isoformat(),
+                    raw_text=raw_text,
+                    diet_style=action.diet_style,
+                    foods_available=(
+                        json.dumps(action.foods_available) if action.foods_available else None
+                    ),
+                    allergies=json.dumps(action.allergies) if action.allergies else None,
+                    cooking_access=action.cooking_access,
+                    meals_per_day=action.meals_per_day,
+                    protein_target_g=action.protein_target_g,
+                    calorie_target=action.calorie_target,
+                    nutrition_approved_by=action.approved_by,
+                ),
+            )
+            confirmations.append(
+                "✅ Nutrition access saved. Plans will use only recorded foods and exclusions."
+            )
+
+        elif isinstance(action, ConfigureSupplement):
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=today.isoformat(),
+                    raw_text=raw_text,
+                    supplement_name=action.name,
+                    supplement_dose=action.dose,
+                    supplement_unit=action.unit,
+                    supplement_timing=action.timing,
+                    supplement_approved_by=action.approved_by,
+                    supplement_batch_tested=action.batch_tested,
+                    supplement_active=action.active,
+                ),
+            )
+            state = "active" if action.active else "paused"
+            confirmations.append(
+                f"✅ Supplement {state}: {action.name} {action.dose:g} {action.unit}."
+            )
+            if action.active and not action.approved_by:
+                warnings.append(
+                    "⚠️ It will not be scheduled until you record who approved the dose."
+                )
+            if action.batch_tested is False:
+                warnings.append(
+                    "⚠️ This product is not recorded as batch-tested; competitive athletes should review anti-doping risk."
+                )
+
+        elif isinstance(action, LogSupplementTaken):
+            configured = {
+                entry.supplement_name.lower(): entry
+                for entry in db.active_supplements(conn, athlete_id)
+                if entry.supplement_name
+            }
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=action.taken_on,
+                    raw_text=raw_text,
+                    supplement_name=action.name,
+                    supplement_taken=True,
+                ),
+            )
+            confirmations.append(f"✅ Taken: {action.name} ({action.taken_on}).")
+            if action.name.lower() not in configured:
+                questions.append(
+                    "❓ That supplement has no active dose schedule. Tell me its dose, timing, and who approved it."
+                )
+
+        elif isinstance(action, AskNutritionPlan):
+            nutrition_plan_times.append(action.training_time)
 
         elif isinstance(action, ConfigureProgram):
             db.insert_entry(
@@ -466,6 +562,67 @@ def _apply(
             )
             prescriptions.append(format_prescription(prescription))
 
+    nutrition_plans: list[str] = []
+    for requested_time in nutrition_plan_times[:1]:
+        nutrition = db.latest_nutrition_settings(conn, athlete_id)
+        if not {"diet_style", "foods_available"} <= nutrition.keys():
+            questions.append(
+                "❓ Tell me your diet style and foods you can regularly access before I build the day."
+            )
+            continue
+        schedule = db.latest_schedule_settings(conn, athlete_id)
+        training_time = requested_time or (
+            str(schedule["training_time"]) if schedule.get("training_time") else None
+        )
+        foods = tuple(json.loads(str(nutrition["foods_available"])))
+        allergies = (
+            tuple(json.loads(str(nutrition["allergies"])))
+            if nutrition.get("allergies")
+            else ()
+        )
+        profile = NutritionProfile(
+            diet_style=str(nutrition["diet_style"]),
+            foods_available=foods,
+            allergies=allergies,
+            cooking_access=str(nutrition.get("cooking_access", "basic")),
+            meals_per_day=int(nutrition.get("meals_per_day", 4)),
+            protein_target_g=(
+                float(nutrition["protein_target_g"])
+                if nutrition.get("protein_target_g") is not None
+                else None
+            ),
+            calorie_target=(
+                float(nutrition["calorie_target"])
+                if nutrition.get("calorie_target") is not None
+                else None
+            ),
+            approved_by=(
+                str(nutrition["nutrition_approved_by"])
+                if nutrition.get("nutrition_approved_by")
+                else None
+            ),
+        )
+        supplements = tuple(
+            Supplement(
+                name=str(entry.supplement_name),
+                dose=float(entry.supplement_dose),
+                unit=str(entry.supplement_unit),
+                timing=str(entry.supplement_timing),
+                approved_by=entry.supplement_approved_by,
+                batch_tested=entry.supplement_batch_tested,
+            )
+            for entry in db.active_supplements(conn, athlete_id)
+            if entry.supplement_name
+            and entry.supplement_dose is not None
+            and entry.supplement_unit
+            and entry.supplement_timing
+        )
+        nutrition_plans.append(
+            format_nutrition_plan(
+                build_daily_plan(profile, training_time=training_time, supplements=supplements)
+            )
+        )
+
     blocks = [
         b
         for b in [
@@ -473,6 +630,7 @@ def _apply(
             "\n".join(warnings),
             "\n\n".join(verdicts),
             "\n\n".join(prescriptions),
+            "\n\n".join(nutrition_plans),
             "\n".join(questions),
         ]
         if b
