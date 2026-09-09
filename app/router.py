@@ -13,6 +13,7 @@ from datetime import date
 from app.agent.parser import ModelClient, parse_message
 from app.agent.schemas import Action, Clarify, LogSet, LogStatus, QueryProgress
 from app.decision.format import format_assessment, format_logged, format_status
+from app.decision.plausibility import review
 from app.decision.rules import evaluate
 from app.storage import db
 
@@ -79,8 +80,19 @@ def _apply(
     lifts_to_assess: list[str] = []
     assess_all = False
 
+    warnings: list[str] = []
+
     for action in actions:
         if isinstance(action, LogSet):
+            # Read the athlete's own history *before* inserting, so "last session"
+            # means the one before this message, not this message.
+            flags = review(
+                action.lift,
+                action.weight_kg,
+                last_weight_kg=db.last_weight(conn, athlete_id, action.lift),
+                best_squat_kg=db.best_weight(conn, athlete_id, "squat"),
+            )
+            warnings.extend(f"⚠️ {f.message}" for f in flags)
             db.insert_entry(
                 conn,
                 db.Entry(
@@ -164,5 +176,14 @@ def _apply(
         )
         verdicts.append(format_assessment(assessment, athlete_name=None))
 
-    blocks = [b for b in ["\n".join(confirmations), "\n\n".join(verdicts), "\n".join(questions)] if b]
+    blocks = [
+        b
+        for b in [
+            "\n".join(confirmations),
+            "\n".join(warnings),
+            "\n\n".join(verdicts),
+            "\n".join(questions),
+        ]
+        if b
+    ]
     return "\n\n".join(blocks) if blocks else FALLBACK

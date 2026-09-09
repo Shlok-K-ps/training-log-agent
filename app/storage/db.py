@@ -235,6 +235,34 @@ def athlete_name(conn: sqlite3.Connection, athlete_id: str) -> str | None:
     return row["athlete_name"] if row else None
 
 
+def last_weight(conn: sqlite3.Connection, athlete_id: str, lift: str) -> float | None:
+    """Top weight from this athlete's most recent session on this lift."""
+    row = conn.execute(
+        """
+        SELECT MAX(weight_kg) AS w FROM entries
+        WHERE athlete_id = ? AND kind = 'set' AND lift = ? AND weight_kg IS NOT NULL
+          AND session_date = (
+              SELECT MAX(session_date) FROM entries
+              WHERE athlete_id = ? AND kind = 'set' AND lift = ? AND weight_kg IS NOT NULL
+          )
+        """,
+        (athlete_id, normalize_lift(lift), athlete_id, normalize_lift(lift)),
+    ).fetchone()
+    return row["w"] if row and row["w"] is not None else None
+
+
+def best_weight(conn: sqlite3.Connection, athlete_id: str, lift: str) -> float | None:
+    """Heaviest this athlete has ever logged for this lift."""
+    row = conn.execute(
+        """
+        SELECT MAX(weight_kg) AS w FROM entries
+        WHERE athlete_id = ? AND kind = 'set' AND lift = ?
+        """,
+        (athlete_id, normalize_lift(lift)),
+    ).fetchone()
+    return row["w"] if row and row["w"] is not None else None
+
+
 def recent_entries(
     conn: sqlite3.Connection, athlete_id: str, limit: int = 10
 ) -> list[Entry]:

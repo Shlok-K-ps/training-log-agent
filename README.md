@@ -87,6 +87,59 @@ they had failed, which is the opposite of true.
 
 ---
 
+## Where the numbers come from
+
+Validation bounds are derived from real competition results, not invented.
+[`reference/openpowerlifting_top_lifters.csv`](reference/openpowerlifting_top_lifters.csv)
+holds the top ~115 lifters of all time by Dots (Raw+Wraps) from
+[openpowerlifting.org](https://www.openpowerlifting.org/); the constants live in
+[`app/reference.py`](app/reference.py) and
+[`tests/test_reference.py`](tests/test_reference.py) recomputes every one of them
+from that file on each run, so a constant cannot quietly drift away from its
+evidence.
+
+| Derived from the data | Value |
+|---|---|
+| Heaviest squat in the sample | 500.0 kg |
+| Heaviest bench | 292.6 kg |
+| Heaviest deadlift | 492.5 kg |
+| bench ÷ squat, elite range | 0.38 – 0.76 |
+| deadlift ÷ squat, elite range | 0.79 – 1.41 |
+
+**Why this matters.** The validator's job is not to reject impossible lifts —
+nobody texts their coach a 900 kg bench. Its job is to catch **parse errors**:
+"one forty" landing as 14, a rep count read as a weight, pounds read as kilos. A
+single global 600 kg cap catches almost none of them, because it sits far above
+every real lift for every movement. Per-lift ceilings are twice as tight on the
+bench, and three checks now run in increasing order of how much they know about
+the athlete:
+
+1. **Ceiling** — above anything ever lifted. Rejected before storage.
+2. **Ratio** — against the athlete's own best squat. A 180 kg bench from someone
+   who squats 140 is almost always two numbers swapped in one message.
+3. **History** — against their own last session. The sharpest of the three,
+   because 140 kg is suspicious for a 100 kg squatter and routine for a 200 kg
+   one, and no global constant can tell those apart.
+
+Checks 2 and 3 **never reject**. The row is stored, a flag is attached, and the
+reply asks. Dropping a real session to guard against a possible typo is the worse
+failure: the athlete loses data they cannot recover and stops trusting the log,
+whereas a wrong number they were asked about is fixed in one message.
+
+A test runs all 115 real lifters through the ratio and ceiling checks and asserts
+that not one of them is flagged — the bands are validated against the population
+they were drawn from.
+
+**What this data cannot tell you.** OpenPowerlifting is *meet* data: single
+maximal attempts on a platform, months apart. It bounds what is physically
+possible and how the three lifts relate. It contains no training sessions at all,
+so it says nothing about week-to-week progression, what a stall looks like, or
+whether 85% is the right deload. Those are coaching policy, and they sit in one
+named block at the top of `rules.py` labelled as such — not dressed up as
+empirical findings.
+
+---
+
 ## Design decisions, and what each one costs
 
 **Gemini free tier.** No card, no expiry, and Flash is plenty for parsing — the
@@ -210,7 +263,7 @@ anywhere else.
 ## Tests
 
 ```bash
-pytest -q          # 109 tests, no network, under two seconds
+pytest -q          # 146 tests, no network, under two seconds
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -286,7 +339,8 @@ app/
   router.py    the seam: parse → store → decide → reply
   main.py      FastAPI service
 chat.py        terminal harness, no phone required
+reference/     OpenPowerlifting sample the validation bounds derive from
 scripts/       check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         109 tests, no network
+tests/         146 tests, no network
 ```

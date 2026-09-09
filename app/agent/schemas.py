@@ -17,19 +17,23 @@ from typing import Any, Literal
 
 from google.genai import types
 
+from app.reference import LB_TO_KG, ceiling_for
 from app.storage.lifts import normalize_lift
 
 # --- Bounds. A model that hallucinates a 900 kg bench gets stopped here. -------
+#
+# The ceilings are per-lift and empirical: see app/reference.py, where they are
+# derived from the top ~115 competition totals of all time. One global cap would
+# have to sit above the heaviest squat ever (500 kg) and would therefore wave
+# through a 500 kg bench, which is nearly twice the world record.
 
 MIN_WEIGHT_KG = 0.0
-MAX_WEIGHT_KG = 600.0
 MAX_SETS = 30
 MAX_REPS = 100
 MIN_RPE = 1.0
 MAX_RPE = 10.0
 MAX_PAST_DAYS = 400
 MAX_FUTURE_DAYS = 1
-LB_TO_KG = 0.45359237
 
 PHASES = ("cut", "maintain", "bulk")
 
@@ -257,7 +261,8 @@ def _resolve_date(value: Any, today: date) -> str:
     return parsed.isoformat()
 
 
-def _to_kg(weight: float | None, unit: Any) -> float | None:
+def _to_kg(weight: float | None, unit: Any, lift: str) -> float | None:
+    """Convert to kilograms and range-check against this lift's own ceiling."""
     if weight is None:
         return None
     unit_str = str(unit or "kg").strip().lower()
@@ -266,8 +271,11 @@ def _to_kg(weight: float | None, unit: Any) -> float | None:
     elif unit_str not in {"kg", "kgs", "kilo", "kilos", "kilogram", "kilograms"}:
         raise ValidationError(f"unknown weight unit: {unit!r}")
     weight = round(weight, 2)
-    if not (MIN_WEIGHT_KG < weight <= MAX_WEIGHT_KG):
-        raise ValidationError(f"weight out of range (0-{MAX_WEIGHT_KG} kg): {weight}")
+    ceiling = ceiling_for(lift)
+    if not (MIN_WEIGHT_KG < weight <= ceiling):
+        raise ValidationError(
+            f"weight out of range for {lift} (0-{ceiling:g} kg): {weight}"
+        )
     return weight
 
 
@@ -295,7 +303,7 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
             lift=lift,
             sets=_int(args.get("sets"), "sets", MAX_SETS),
             reps=_int(args.get("reps"), "reps", MAX_REPS),
-            weight_kg=_to_kg(_num(args.get("weight"), "weight"), args.get("unit")),
+            weight_kg=_to_kg(_num(args.get("weight"), "weight"), args.get("unit"), lift),
             rpe=rpe,
             session_date=_resolve_date(args.get("session_date"), today),
             phase=_phase(args.get("phase")),

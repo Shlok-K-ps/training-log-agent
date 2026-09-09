@@ -2,10 +2,12 @@
 
 from app.storage.db import (
     Entry,
+    best_weight,
     connect,
     init_db,
     insert_entry,
     injury_state,
+    last_weight,
     latest_phase,
     list_lifts,
     recent_entries,
@@ -14,10 +16,12 @@ from app.storage.db import (
 
 __all__ = [
     "Entry",
+    "best_weight",
     "connect",
     "init_db",
     "insert_entry",
     "injury_state",
+    "last_weight",
     "latest_phase",
     "list_lifts",
     "recent_entries",

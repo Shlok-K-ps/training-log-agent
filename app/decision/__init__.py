@@ -4,6 +4,7 @@ Athletes act on what comes out of here, so it must be identical on every run and
 provable line by line. Every rule in `rules.py` has a test in `tests/`.
 """
 
+from app.decision.plausibility import Flag, review
 from app.decision.rules import (
     BAR_INCREMENT,
     DELOAD_FACTOR,
@@ -20,6 +21,8 @@ from app.decision.rules import (
 
 __all__ = [
     "Assessment",
+    "Flag",
+    "review",
     "SessionPoint",
     "Verdict",
     "evaluate",
