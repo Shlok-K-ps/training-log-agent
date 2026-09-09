@@ -50,11 +50,20 @@ CREATE TABLE IF NOT EXISTS entries (
     protein_g     REAL,
     calories      REAL,
     nutrition_adherence INTEGER,
+    nap_minutes   INTEGER,
+    planned_lift  TEXT,
+    planned_training_time TEXT,
     methodology   TEXT,
     experience    TEXT,
     days_per_week INTEGER,
     meet_date     TEXT,
     has_specialty_equipment INTEGER,
+    timezone      TEXT,
+    morning_checkin_time TEXT,
+    training_time TEXT,
+    bedtime       TEXT,
+    nap_window_start TEXT,
+    nap_window_end TEXT,
     session_date  TEXT    NOT NULL,
     raw_text      TEXT,
     created_at    TEXT    NOT NULL,
@@ -66,6 +75,14 @@ CREATE INDEX IF NOT EXISTS idx_entries_athlete_lift_date
 
 CREATE INDEX IF NOT EXISTS idx_entries_athlete_date
     ON entries (athlete_id, session_date);
+
+CREATE TABLE IF NOT EXISTS scheduled_deliveries (
+    athlete_id   TEXT NOT NULL,
+    message_kind TEXT NOT NULL,
+    local_date   TEXT NOT NULL,
+    sent_at      TEXT NOT NULL,
+    PRIMARY KEY (athlete_id, message_kind, local_date)
+);
 """
 
 CHECKIN_COLUMNS = {
@@ -78,6 +95,9 @@ CHECKIN_COLUMNS = {
     "protein_g": "REAL",
     "calories": "REAL",
     "nutrition_adherence": "INTEGER",
+    "nap_minutes": "INTEGER",
+    "planned_lift": "TEXT",
+    "planned_training_time": "TEXT",
 }
 
 PROGRAM_COLUMNS = {
@@ -86,6 +106,15 @@ PROGRAM_COLUMNS = {
     "days_per_week": "INTEGER",
     "meet_date": "TEXT",
     "has_specialty_equipment": "INTEGER",
+}
+
+SCHEDULE_COLUMNS = {
+    "timezone": "TEXT",
+    "morning_checkin_time": "TEXT",
+    "training_time": "TEXT",
+    "bedtime": "TEXT",
+    "nap_window_start": "TEXT",
+    "nap_window_end": "TEXT",
 }
 
 
@@ -113,11 +142,20 @@ class Entry:
     protein_g: float | None = None
     calories: float | None = None
     nutrition_adherence: int | None = None
+    nap_minutes: int | None = None
+    planned_lift: str | None = None
+    planned_training_time: str | None = None
     methodology: str | None = None
     experience: str | None = None
     days_per_week: int | None = None
     meet_date: str | None = None
     has_specialty_equipment: bool | None = None
+    timezone: str | None = None
+    morning_checkin_time: str | None = None
+    training_time: str | None = None
+    bedtime: str | None = None
+    nap_window_start: str | None = None
+    nap_window_end: str | None = None
     session_date: str = ""
     raw_text: str | None = None
     id: int | None = None
@@ -144,11 +182,20 @@ class Entry:
             protein_g=self.protein_g,
             calories=self.calories,
             nutrition_adherence=self.nutrition_adherence,
+            nap_minutes=self.nap_minutes,
+            planned_lift=normalize_lift(self.planned_lift),
+            planned_training_time=self.planned_training_time,
             methodology=self.methodology,
             experience=self.experience,
             days_per_week=self.days_per_week,
             meet_date=self.meet_date,
             has_specialty_equipment=self.has_specialty_equipment,
+            timezone=self.timezone,
+            morning_checkin_time=self.morning_checkin_time,
+            training_time=self.training_time,
+            bedtime=self.bedtime,
+            nap_window_start=self.nap_window_start,
+            nap_window_end=self.nap_window_end,
             session_date=self.session_date or date.today().isoformat(),
             raw_text=self.raw_text,
             id=self.id,
@@ -170,7 +217,7 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
-    for name, column_type in (CHECKIN_COLUMNS | PROGRAM_COLUMNS).items():
+    for name, column_type in (CHECKIN_COLUMNS | PROGRAM_COLUMNS | SCHEDULE_COLUMNS).items():
         if name not in existing:
             conn.execute(f"ALTER TABLE entries ADD COLUMN {name} {column_type}")
     conn.commit()
@@ -184,9 +231,11 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
             athlete_id, athlete_name, kind, lift, sets, reps, weight_kg, rpe,
             phase, injured, injury_note, sleep_hours, sleep_quality, readiness,
             soreness, stress, bodyweight_kg, protein_g, calories,
-            nutrition_adherence, methodology, experience, days_per_week,
-            meet_date, has_specialty_equipment, session_date, raw_text, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            nutrition_adherence, nap_minutes, planned_lift, planned_training_time,
+            methodology, experience, days_per_week, meet_date,
+            has_specialty_equipment, timezone, morning_checkin_time, training_time,
+            bedtime, nap_window_start, nap_window_end, session_date, raw_text, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             e.athlete_id,
@@ -209,11 +258,20 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
             e.protein_g,
             e.calories,
             e.nutrition_adherence,
+            e.nap_minutes,
+            e.planned_lift,
+            e.planned_training_time,
             e.methodology,
             e.experience,
             e.days_per_week,
             e.meet_date,
             None if e.has_specialty_equipment is None else int(e.has_specialty_equipment),
+            e.timezone,
+            e.morning_checkin_time,
+            e.training_time,
+            e.bedtime,
+            e.nap_window_start,
+            e.nap_window_end,
             e.session_date,
             e.raw_text,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -250,6 +308,9 @@ def _row_to_entry(row: sqlite3.Row) -> Entry:
         protein_g=row["protein_g"],
         calories=row["calories"],
         nutrition_adherence=row["nutrition_adherence"],
+        nap_minutes=row["nap_minutes"],
+        planned_lift=row["planned_lift"],
+        planned_training_time=row["planned_training_time"],
         methodology=row["methodology"],
         experience=row["experience"],
         days_per_week=row["days_per_week"],
@@ -259,6 +320,12 @@ def _row_to_entry(row: sqlite3.Row) -> Entry:
             if row["has_specialty_equipment"] is None
             else bool(row["has_specialty_equipment"])
         ),
+        timezone=row["timezone"],
+        morning_checkin_time=row["morning_checkin_time"],
+        training_time=row["training_time"],
+        bedtime=row["bedtime"],
+        nap_window_start=row["nap_window_start"],
+        nap_window_end=row["nap_window_end"],
         session_date=row["session_date"],
         raw_text=row["raw_text"],
     )
@@ -414,6 +481,66 @@ def latest_program_settings(conn: sqlite3.Connection, athlete_id: str) -> dict[s
                 value = bool(value)
             result[column] = value
     return result
+
+
+def latest_schedule_settings(conn: sqlite3.Connection, athlete_id: str) -> dict[str, object]:
+    """Derive current local schedule settings from the athlete's event log."""
+    result: dict[str, object] = {}
+    for column in SCHEDULE_COLUMNS:
+        row = conn.execute(
+            f"""
+            SELECT {column} AS value FROM entries
+            WHERE athlete_id = ? AND {column} IS NOT NULL
+            ORDER BY session_date DESC, id DESC LIMIT 1
+            """,
+            (athlete_id,),
+        ).fetchone()
+        if row is not None:
+            result[column] = row["value"]
+    return result
+
+
+def list_scheduled_athletes(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT athlete_id FROM entries
+        WHERE morning_checkin_time IS NOT NULL
+        ORDER BY athlete_id
+        """
+    ).fetchall()
+    return [str(row["athlete_id"]) for row in rows]
+
+
+def scheduled_delivery_exists(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1 FROM scheduled_deliveries
+        WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
+        """,
+        (athlete_id, message_kind, local_date),
+    ).fetchone()
+    return row is not None
+
+
+def mark_scheduled_delivery(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO scheduled_deliveries
+            (athlete_id, message_kind, local_date, sent_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            athlete_id,
+            message_kind,
+            local_date,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
 
 
 def rpe_logging_ratio(conn: sqlite3.Connection, athlete_id: str, limit: int = 20) -> float:

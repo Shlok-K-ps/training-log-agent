@@ -207,3 +207,27 @@ def test_program_profile_accepts_only_known_methods_and_declared_facts():
     )
     with pytest.raises(ValidationError):
         call("configure_program", methodology="random_workouts")
+
+
+def test_sleep_schedule_requires_real_clock_times_and_timezone():
+    action = call(
+        "configure_schedule",
+        timezone="Asia/Kolkata",
+        morning_checkin_time="7:30",
+        training_time="18:30",
+        nap_window_start="13:00",
+        nap_window_end="15:00",
+    )
+    assert action.morning_checkin_time == "07:30"
+    assert action.timezone == "Asia/Kolkata"
+    with pytest.raises(ValidationError, match="HH:MM"):
+        call("configure_schedule", training_time="25:00")
+    with pytest.raises(ValidationError, match="timezone"):
+        call("configure_schedule", timezone="Mars/Olympus")
+
+
+def test_completed_nap_requires_minutes_and_validates_readiness():
+    action = call("log_nap", nap_minutes=35, readiness=7)
+    assert action.nap_minutes == 35 and action.readiness == 7
+    with pytest.raises(ValidationError, match="requires nap_minutes"):
+        call("log_nap", readiness=7)

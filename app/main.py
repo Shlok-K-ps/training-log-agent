@@ -11,8 +11,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from contextlib import suppress
 from functools import lru_cache
 
 from fastapi import FastAPI, Request, Response
@@ -23,6 +25,7 @@ from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
 from app.config import settings
 from app.router import handle_message
+from app.scheduling import send_due_morning_prompts
 from app.storage import db
 
 logging.basicConfig(
@@ -51,7 +54,35 @@ async def lifespan(app: FastAPI):
     db.init_db(conn)
     conn.close()
     log.info("database ready at %s", settings.db_file)
-    yield
+    task = None
+    if settings.enable_morning_scheduler:
+        task = asyncio.create_task(_morning_scheduler_loop())
+        log.info("proactive morning check-in scheduler enabled")
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+async def _morning_scheduler_loop() -> None:
+    while True:
+        try:
+            await run_in_threadpool(_send_morning_prompts)
+        except Exception:  # noqa: BLE001 - keep the web service alive and retry later
+            log.exception("morning check-in scheduler failed")
+        await asyncio.sleep(60)
+
+
+def _send_morning_prompts() -> int:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        return send_due_morning_prompts(conn, whatsapp.send_outbound)
+    finally:
+        conn.close()
 
 
 app = FastAPI(
@@ -69,6 +100,7 @@ async def health() -> dict[str, object]:
         "model": settings.gemini_model if settings.gemini_api_key else "offline-stub",
         "database": str(settings.db_file),
         "signature_validation": settings.validate_twilio_signature,
+        "morning_scheduler": settings.enable_morning_scheduler,
     }
 
 

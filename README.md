@@ -5,6 +5,11 @@ in plain English. The agent parses them into structured data, tracks training,
 sleep, readiness, soreness, stress, bodyweight and nutrition, then returns a
 deterministic verdict or next-session plan.
 
+Athletes can also configure a local morning check-in time. The service sends a
+proactive WhatsApp sleep prompt, proposes a bounded nap window when recovery is
+low, asks for a post-nap readiness update, and recalculates the day's planned
+lift without ever exceeding the original base load.
+
 ```
 athlete                                                        agent
    │
@@ -54,7 +59,7 @@ model is the right tool for reading "ground out the last two at one forty" and
 the wrong tool for deciding whether someone should strip 15% off their squat.
 
 The model never sees the reply text. It cannot write one. Its entire vocabulary
-is seven function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
+is nine function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
 anything it returns outside them is thrown away before it reaches the database.
 
 The same boundary now covers coaching. [`app/programming/`](app/programming/)
@@ -67,6 +72,8 @@ method, calculates a readiness score, invents a working max, or phrases advice.
 See [programming methodologies](docs/programming-methodologies.md) and
 [readiness and nutrition](docs/readiness-and-nutrition.md) for the research,
 policy cutoffs, and safety boundaries.
+The proactive workflow and nap rules are documented in
+[sleep and nap scheduling](docs/sleep-and-naps.md).
 
 ---
 
@@ -275,7 +282,7 @@ anywhere else.
 ## Tests
 
 ```bash
-pytest -q          # 187 tests, no network
+pytest -q          # 201 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -309,6 +316,7 @@ trustworthy:
                     verified training-max, block, or variation inputs
         │
   push daily       the agent messages first, instead of waiting
+                    morning sleep check-ins are built; meal/supplement schedules remain
         │
   autoregulate     built: same-day readiness may only hold or reduce load
         │
@@ -357,5 +365,5 @@ reference/     OpenPowerlifting sample the validation bounds derive from
 docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         187 tests, no network
+tests/         201 tests, no network
 ```

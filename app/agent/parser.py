@@ -40,8 +40,13 @@ Rules:
   query_progress. Explicit workout requests like "what should I squat today?"
   are ask_prescription. Do not answer either yourself.
 - Sleep, readiness, soreness, stress, bodyweight, calories, protein and stated
-  nutrition adherence go to log_checkin. Record only explicit numbers; never
-  translate "slept badly" or "feel great" into a score.
+  nutrition adherence go to log_checkin. Include today's planned lift/time when
+  explicitly stated. Record only explicit numbers; never translate "slept badly"
+  or "feel great" into a score.
+- A completed nap goes to log_nap with minutes actually slept. A planned nap is
+  not completed. Post-nap readiness must be explicitly stated.
+- Local morning check-in, training, bedtime and nap-window settings go to
+  configure_schedule. Never guess a timezone or clock time.
 - Explicit programming facts such as novice/intermediate/advanced, training
   days per week, a meet date, specialty equipment, or a named method go to
   configure_program. Never infer experience from a lift number.

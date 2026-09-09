@@ -16,7 +16,9 @@ from app.agent.schemas import (
     AskPrescription,
     Clarify,
     ConfigureProgram,
+    ConfigureSchedule,
     LogCheckIn,
+    LogNap,
     LogSet,
     LogStatus,
     QueryProgress,
@@ -25,12 +27,15 @@ from app.decision.format import (
     format_assessment,
     format_checkin,
     format_logged,
+    format_nap_logged,
+    format_nap_plan,
     format_prescription,
     format_status,
 )
 from app.decision.plausibility import review
 from app.decision.prescribe import prescribe_next
 from app.decision.readiness import DailyCheckIn, evaluate_readiness
+from app.decision.sleep import SleepSchedule, plan_nap
 from app.decision.rules import evaluate
 from app.programming import Experience, Methodology, ProgrammingProfile, choose_methodology
 from app.storage import db
@@ -54,6 +59,8 @@ HELP = (
     "• _tweaked my left knee_  — flags an injury; I stop suggesting loads\n"
     "• _how's my bench going?_  — progressing, stalled, or deload\n\n"
     "• _slept 7h, readiness 6, soreness 4, protein 150g_  — daily check-in\n"
+    "• _morning check-in 7:30, timezone Asia/Kolkata, train 18:30_ — schedule\n"
+    "• _napped 30 minutes, readiness 7_ — post-nap reassessment\n"
     "• _I'm intermediate and train 4 days/week_  — configures programming\n"
     "• _what should I squat today?_  — deterministic next-session plan\n\n"
     "Verdicts come from fixed rules over your own log, not from a chatbot's opinion."
@@ -175,7 +182,18 @@ def _apply(
                 assess_all = True
 
         elif isinstance(action, LogCheckIn):
-            checkin = DailyCheckIn(**action.__dict__)
+            checkin = DailyCheckIn(
+                checked_on=action.checked_on,
+                sleep_hours=action.sleep_hours,
+                sleep_quality=action.sleep_quality,
+                readiness=action.readiness,
+                soreness=action.soreness,
+                stress=action.stress,
+                bodyweight_kg=action.bodyweight_kg,
+                protein_g=action.protein_g,
+                calories=action.calories,
+                nutrition_adherence=action.nutrition_adherence,
+            )
             db.insert_entry(
                 conn,
                 db.Entry(
@@ -193,9 +211,127 @@ def _apply(
                     protein_g=action.protein_g,
                     calories=action.calories,
                     nutrition_adherence=action.nutrition_adherence,
+                    planned_lift=action.training_lift,
+                    planned_training_time=action.training_time,
                 ),
             )
             confirmations.append(format_checkin(checkin, evaluate_readiness(checkin)))
+            if action.sleep_hours is not None:
+                schedule_values = db.latest_schedule_settings(conn, athlete_id)
+                schedule = SleepSchedule(
+                    timezone=str(schedule_values.get("timezone", "UTC")),
+                    morning_checkin_time=str(
+                        schedule_values.get("morning_checkin_time", "08:00")
+                    ),
+                    training_time=(
+                        action.training_time
+                        or (
+                            str(schedule_values["training_time"])
+                            if schedule_values.get("training_time")
+                            else None
+                        )
+                    ),
+                    bedtime=(
+                        str(schedule_values["bedtime"])
+                        if schedule_values.get("bedtime")
+                        else None
+                    ),
+                    nap_window_start=str(schedule_values.get("nap_window_start", "13:00")),
+                    nap_window_end=str(schedule_values.get("nap_window_end", "16:00")),
+                )
+                confirmations.append(format_nap_plan(plan_nap(checkin, schedule)))
+
+        elif isinstance(action, LogNap):
+            previous = db.latest_checkin(conn, athlete_id, action.checked_on)
+            checkin = DailyCheckIn(
+                checked_on=action.checked_on,
+                sleep_hours=previous.sleep_hours if previous else None,
+                sleep_quality=previous.sleep_quality if previous else None,
+                readiness=(
+                    action.readiness
+                    if action.readiness is not None
+                    else previous.readiness if previous else None
+                ),
+                soreness=(
+                    action.soreness
+                    if action.soreness is not None
+                    else previous.soreness if previous else None
+                ),
+                stress=previous.stress if previous else None,
+                bodyweight_kg=previous.bodyweight_kg if previous else None,
+                protein_g=previous.protein_g if previous else None,
+                calories=previous.calories if previous else None,
+                nutrition_adherence=previous.nutrition_adherence if previous else None,
+            )
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=action.checked_on,
+                    raw_text=raw_text,
+                    sleep_hours=checkin.sleep_hours,
+                    sleep_quality=checkin.sleep_quality,
+                    readiness=checkin.readiness,
+                    soreness=checkin.soreness,
+                    stress=checkin.stress,
+                    bodyweight_kg=checkin.bodyweight_kg,
+                    protein_g=checkin.protein_g,
+                    calories=checkin.calories,
+                    nutrition_adherence=checkin.nutrition_adherence,
+                    nap_minutes=action.nap_minutes,
+                    planned_lift=previous.planned_lift if previous else None,
+                    planned_training_time=(
+                        previous.planned_training_time if previous else None
+                    ),
+                ),
+            )
+            confirmations.append(
+                format_nap_logged(action.nap_minutes, checkin, evaluate_readiness(checkin))
+            )
+            if previous and previous.planned_lift:
+                lifts_to_prescribe.append(previous.planned_lift)
+            else:
+                questions.append(
+                    "❓ Which lift is planned today? I need it to recalculate the workout."
+                )
+
+        elif isinstance(action, ConfigureSchedule):
+            db.insert_entry(
+                conn,
+                db.Entry(
+                    athlete_id=athlete_id,
+                    athlete_name=name,
+                    kind="status",
+                    session_date=today.isoformat(),
+                    raw_text=raw_text,
+                    timezone=action.timezone,
+                    morning_checkin_time=action.morning_checkin_time,
+                    training_time=action.training_time,
+                    bedtime=action.bedtime,
+                    nap_window_start=action.nap_window_start,
+                    nap_window_end=action.nap_window_end,
+                ),
+            )
+            pieces = [
+                f"timezone {action.timezone}" if action.timezone else None,
+                (
+                    f"morning check-in {action.morning_checkin_time}"
+                    if action.morning_checkin_time
+                    else None
+                ),
+                f"training {action.training_time}" if action.training_time else None,
+                f"bedtime {action.bedtime}" if action.bedtime else None,
+                (
+                    f"nap window {action.nap_window_start}–{action.nap_window_end}"
+                    if action.nap_window_start and action.nap_window_end
+                    else None
+                ),
+            ]
+            confirmations.append(
+                "✅ Recovery schedule: " + ", ".join(piece for piece in pieces if piece) + "."
+            )
 
         elif isinstance(action, ConfigureProgram):
             db.insert_entry(

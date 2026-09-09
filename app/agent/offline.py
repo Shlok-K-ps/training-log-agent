@@ -50,6 +50,7 @@ CHECKIN_PATTERNS = {
     "protein_g": re.compile(r"\bprotein\s*(\d+(?:\.\d+)?)\s*g\b", re.I),
     "calories": re.compile(r"\b(?:calories|kcal)\s*(\d{3,5})\b", re.I),
 }
+NAP_RE = re.compile(r"\bnap(?:ped)?\s*(?:for\s*)?(\d{1,3})\s*(?:m|min|mins|minutes)\b", re.I)
 
 
 class OfflineClient:
@@ -91,6 +92,18 @@ class OfflineClient:
             match = pattern.search(text)
             if match:
                 checkin[field] = float(match.group(1))
+        nap = NAP_RE.search(text)
+        if nap:
+            calls.append(
+                (
+                    "log_nap",
+                    {
+                        "nap_minutes": int(nap.group(1)),
+                        **({"readiness": int(checkin.pop("readiness"))} if "readiness" in checkin else {}),
+                        **({"soreness": int(checkin.pop("soreness"))} if "soreness" in checkin else {}),
+                    },
+                )
+            )
         if checkin:
             calls.append(("log_checkin", checkin))
 

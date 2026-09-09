@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from google.genai import types
 
@@ -90,6 +91,26 @@ class LogCheckIn:
     protein_g: float | None = None
     calories: float | None = None
     nutrition_adherence: int | None = None
+    training_lift: str | None = None
+    training_time: str | None = None
+
+
+@dataclass(frozen=True)
+class LogNap:
+    checked_on: str
+    nap_minutes: int
+    readiness: int | None = None
+    soreness: int | None = None
+
+
+@dataclass(frozen=True)
+class ConfigureSchedule:
+    timezone: str | None = None
+    morning_checkin_time: str | None = None
+    training_time: str | None = None
+    bedtime: str | None = None
+    nap_window_start: str | None = None
+    nap_window_end: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +137,8 @@ Action = (
     | LogStatus
     | QueryProgress
     | LogCheckIn
+    | LogNap
+    | ConfigureSchedule
     | AskPrescription
     | ConfigureProgram
     | Clarify
@@ -263,10 +286,58 @@ LOG_CHECKIN = types.FunctionDeclaration(
                 type=types.Type.INTEGER,
                 description="Athlete-rated adherence to their existing nutrition plan, 1-10.",
             ),
+            "training_lift": types.Schema(
+                type=types.Type.STRING,
+                description="The lift planned for today, only when explicitly stated.",
+            ),
+            "training_time": types.Schema(
+                type=types.Type.STRING,
+                description="Today's planned training time as local HH:MM.",
+            ),
             "checked_on": types.Schema(
                 type=types.Type.STRING,
                 description="Check-in date as YYYY-MM-DD. Default to today when unstated.",
             ),
+        },
+    ),
+)
+
+LOG_NAP = types.FunctionDeclaration(
+    name="log_nap",
+    description=(
+        "Record a completed daytime nap and explicit post-nap readiness or soreness. "
+        "Never infer improvement merely because a nap was planned."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "nap_minutes": types.Schema(type=types.Type.INTEGER, description="Minutes actually slept."),
+            "readiness": types.Schema(type=types.Type.INTEGER, description="Post-nap readiness 1-10."),
+            "soreness": types.Schema(type=types.Type.INTEGER, description="Post-nap soreness 1-10."),
+            "checked_on": types.Schema(type=types.Type.STRING, description="Date as YYYY-MM-DD."),
+        },
+        required=["nap_minutes"],
+    ),
+)
+
+CONFIGURE_SCHEDULE = types.FunctionDeclaration(
+    name="configure_schedule",
+    description=(
+        "Record the athlete's explicit local schedule for proactive morning check-ins "
+        "and nap planning. Never guess times or timezone."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "timezone": types.Schema(
+                type=types.Type.STRING,
+                description="IANA timezone such as Asia/Kolkata or Europe/London.",
+            ),
+            "morning_checkin_time": types.Schema(type=types.Type.STRING, description="Local HH:MM."),
+            "training_time": types.Schema(type=types.Type.STRING, description="Usual local training HH:MM."),
+            "bedtime": types.Schema(type=types.Type.STRING, description="Usual local bedtime HH:MM."),
+            "nap_window_start": types.Schema(type=types.Type.STRING, description="Earliest local nap HH:MM."),
+            "nap_window_end": types.Schema(type=types.Type.STRING, description="Latest local nap end HH:MM."),
         },
     ),
 )
@@ -345,6 +416,8 @@ TOOL = types.Tool(
         LOG_STATUS,
         QUERY_PROGRESS,
         LOG_CHECKIN,
+        LOG_NAP,
+        CONFIGURE_SCHEDULE,
         ASK_PRESCRIPTION,
         CONFIGURE_PROGRAM,
         CLARIFY,
@@ -356,6 +429,8 @@ TOOL_NAMES = (
     "log_status",
     "query_progress",
     "log_checkin",
+    "log_nap",
+    "configure_schedule",
     "ask_prescription",
     "configure_program",
     "clarify",
@@ -419,6 +494,30 @@ def _resolve_meet_date(value: Any, today: date) -> str | None:
     if parsed > today + timedelta(days=730):
         raise ValidationError(f"meet_date is implausibly far away: {parsed}")
     return parsed.isoformat()
+
+
+def _clock(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    try:
+        hour, minute = (int(piece) for piece in raw.split(":"))
+    except (TypeError, ValueError):
+        raise ValidationError(f"{field} must be local HH:MM: {value!r}") from None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise ValidationError(f"{field} must be local HH:MM: {value!r}")
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _timezone(value: Any) -> str | None:
+    if value is None:
+        return None
+    result = str(value).strip()
+    try:
+        ZoneInfo(result)
+    except ZoneInfoNotFoundError:
+        raise ValidationError(f"unknown IANA timezone: {result!r}") from None
+    return result
 
 
 def _to_kg(weight: float | None, unit: Any, lift: str) -> float | None:
@@ -502,6 +601,8 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
             nutrition_adherence=_int(
                 args.get("nutrition_adherence"), "nutrition_adherence", 10
             ),
+            training_lift=normalize_lift(args.get("training_lift")),
+            training_time=_clock(args.get("training_time"), "training_time"),
         )
         metrics = (
             action.sleep_hours,
@@ -513,9 +614,43 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
             action.protein_g,
             action.calories,
             action.nutrition_adherence,
+            action.training_lift,
+            action.training_time,
         )
         if all(value is None for value in metrics):
             raise ValidationError("log_checkin carried no usable field")
+        return action
+
+    if name == "log_nap":
+        minutes = _int(args.get("nap_minutes"), "nap_minutes", 180)
+        if minutes is None:
+            raise ValidationError("log_nap requires nap_minutes")
+        return LogNap(
+            checked_on=_resolve_date(args.get("checked_on"), today),
+            nap_minutes=minutes,
+            readiness=_int(args.get("readiness"), "readiness", 10),
+            soreness=_int(args.get("soreness"), "soreness", 10),
+        )
+
+    if name == "configure_schedule":
+        action = ConfigureSchedule(
+            timezone=_timezone(args.get("timezone")),
+            morning_checkin_time=_clock(
+                args.get("morning_checkin_time"), "morning_checkin_time"
+            ),
+            training_time=_clock(args.get("training_time"), "training_time"),
+            bedtime=_clock(args.get("bedtime"), "bedtime"),
+            nap_window_start=_clock(args.get("nap_window_start"), "nap_window_start"),
+            nap_window_end=_clock(args.get("nap_window_end"), "nap_window_end"),
+        )
+        if all(value is None for value in action.__dict__.values()):
+            raise ValidationError("configure_schedule carried no usable field")
+        if (
+            action.nap_window_start
+            and action.nap_window_end
+            and action.nap_window_start >= action.nap_window_end
+        ):
+            raise ValidationError("nap window start must be before nap window end")
         return action
 
     if name == "ask_prescription":

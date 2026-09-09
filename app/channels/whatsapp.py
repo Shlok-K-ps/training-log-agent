@@ -10,6 +10,7 @@ import re
 from xml.sax.saxutils import escape
 
 from twilio.request_validator import RequestValidator
+from twilio.rest import Client
 
 from app.config import settings
 
@@ -84,3 +85,10 @@ def twiml(messages: list[str]) -> str:
     """Build the TwiML reply by hand — one dependency fewer, and easy to read."""
     body = "".join(f"<Message>{escape(m)}</Message>" for m in messages if m)
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
+
+
+def send_outbound(athlete_id: str, body: str) -> None:
+    """Send one proactive WhatsApp message through the configured Twilio sender."""
+    sid, token, sender = settings.require_twilio()
+    recipient = athlete_id if athlete_id.startswith("whatsapp:") else f"whatsapp:{athlete_id}"
+    Client(sid, token).messages.create(from_=sender, to=recipient, body=body)

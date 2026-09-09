@@ -31,6 +31,7 @@ class Settings:
 
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "")
     validate_twilio_signature: bool = _flag("VALIDATE_TWILIO_SIGNATURE", True)
+    enable_morning_scheduler: bool = _flag("ENABLE_MORNING_SCHEDULER", False)
 
     database_path: str = os.getenv("DATABASE_PATH", "data/training_log.db")
 
@@ -45,6 +46,11 @@ class Settings:
                 "from https://aistudio.google.com/apikey"
             )
         return self.gemini_api_key
+
+    def require_twilio(self) -> tuple[str, str, str]:
+        if not self.twilio_account_sid or not self.twilio_auth_token or not self.twilio_whatsapp_from:
+            raise RuntimeError("Twilio credentials and TWILIO_WHATSAPP_FROM are required")
+        return self.twilio_account_sid, self.twilio_auth_token, self.twilio_whatsapp_from
 
 
 settings = Settings()

@@ -23,6 +23,8 @@ services:
         sync: false
       - key: VALIDATE_TWILIO_SIGNATURE
         value: "true"
+      - key: ENABLE_MORNING_SCHEDULER
+        value: "true"
       - key: DATABASE_PATH
         value: /var/data/training_log.db
     disk:

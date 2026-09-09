@@ -24,6 +24,10 @@ def test_init_migrates_an_existing_database_without_losing_the_one_table_design(
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
     assert set(db.CHECKIN_COLUMNS) <= columns
     assert set(db.PROGRAM_COLUMNS) <= columns
+    assert set(db.SCHEDULE_COLUMNS) <= columns
+    assert conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='scheduled_deliveries'"
+    ).fetchone()
     conn.close()
 
 ATHLETE = "+911"

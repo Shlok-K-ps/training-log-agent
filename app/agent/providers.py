@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from app.agent.schemas import LOG_SET, LOG_STATUS, QUERY_PROGRESS, CLARIFY
+from app.agent.schemas import TOOL
 
 
 # --- schema conversion --------------------------------------------------------
@@ -45,7 +45,7 @@ def _schema_to_json(schema: Any) -> dict[str, Any]:
 
 
 def openai_tools() -> list[dict[str, Any]]:
-    """The same four tools, in OpenAI function-calling format."""
+    """Every Gemini declaration, converted to OpenAI function-calling format."""
     return [
         {
             "type": "function",
@@ -55,7 +55,7 @@ def openai_tools() -> list[dict[str, Any]]:
                 "parameters": _schema_to_json(decl.parameters),
             },
         }
-        for decl in (LOG_SET, LOG_STATUS, QUERY_PROGRESS, CLARIFY)
+        for decl in TOOL.function_declarations
     ]
 
 

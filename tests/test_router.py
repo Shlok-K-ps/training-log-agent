@@ -218,3 +218,61 @@ def test_red_readiness_suppresses_the_prescription(conn):
     )
     assert "severe recovery flag" in reply
     assert "➡️" not in reply
+
+
+def test_morning_sleep_checkin_schedules_a_nap(conn):
+    send(
+        conn,
+        [
+            (
+                "configure_schedule",
+                {
+                    "timezone": "Asia/Kolkata",
+                    "morning_checkin_time": "07:30",
+                    "training_time": "18:30",
+                    "nap_window_start": "13:00",
+                    "nap_window_end": "15:00",
+                },
+            )
+        ],
+    )
+    reply = send(
+        conn,
+        [
+            (
+                "log_checkin",
+                {"sleep_hours": 5.5, "readiness": 5, "training_lift": "squat"},
+            )
+        ],
+    )
+    assert "Nap: 45 minutes at 13:00" in reply
+
+
+def test_completed_nap_recalculates_the_planned_lift_without_erasing_sleep(conn):
+    send(conn, [("configure_program", {"experience": "novice", "days_per_week": 3})])
+    send(conn, [("log_set", {"lift": "squat", "weight": 140, "sets": 3, "reps": 5})])
+    send(
+        conn,
+        [
+            (
+                "log_checkin",
+                {"sleep_hours": 5, "readiness": 4, "training_lift": "squat"},
+            )
+        ],
+    )
+    reply = send(conn, [("log_nap", {"nap_minutes": 40, "readiness": 7})])
+    assert "Nap logged: 40 minutes" in reply
+    assert "original night's sleep remains" in reply
+    assert "Squat — next session" in reply
+
+
+def test_nap_cannot_override_a_severe_sleep_flag(conn):
+    send(conn, [("configure_program", {"experience": "novice", "days_per_week": 3})])
+    send(conn, [("log_set", {"lift": "squat", "weight": 140, "sets": 3, "reps": 5})])
+    send(
+        conn,
+        [("log_checkin", {"sleep_hours": 3, "readiness": 2, "training_lift": "squat"})],
+    )
+    reply = send(conn, [("log_nap", {"nap_minutes": 45, "readiness": 8})])
+    assert "severe recovery flag" in reply
+    assert "➡️" not in reply

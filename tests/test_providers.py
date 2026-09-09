@@ -11,12 +11,12 @@ import pytest
 
 from app.agent.offline import OfflineClient
 from app.agent.providers import PROVIDERS, _schema_to_json, openai_tools
-from app.agent.schemas import LOG_SET
+from app.agent.schemas import LOG_SET, TOOL_NAMES
 
 
-def test_the_same_four_tools_are_offered_in_both_dialects():
+def test_every_tool_is_offered_in_both_dialects():
     names = [t["function"]["name"] for t in openai_tools()]
-    assert names == ["log_set", "log_status", "query_progress", "clarify"]
+    assert names == list(TOOL_NAMES)
 
 
 def test_every_openai_tool_is_a_well_formed_function_definition():

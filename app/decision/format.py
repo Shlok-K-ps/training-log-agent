@@ -10,6 +10,7 @@ from __future__ import annotations
 from app.decision.rules import Assessment, Verdict
 from app.decision.prescribe import Prescription
 from app.decision.readiness import DailyCheckIn, ReadinessAssessment
+from app.decision.sleep import NapPlan
 
 PHASE_LABEL = {"cut": "cut", "maintain": "maintenance", "bulk": "bulk"}
 
@@ -143,6 +144,32 @@ def format_checkin(checkin: DailyCheckIn, assessment: ReadinessAssessment) -> st
     lines.extend(assessment.reasons)
     if assessment.nutrition.protein_g_per_kg is not None:
         lines.extend(assessment.nutrition.notes)
+    return "\n".join(lines)
+
+
+def format_nap_plan(plan: NapPlan) -> str:
+    if not plan.recommended:
+        return "Nap: not scheduled. " + " ".join(plan.reasons)
+    if plan.start_time is None:
+        return "Nap: recommended, but no safe configured window is available. " + " ".join(
+            plan.reasons
+        )
+    return (
+        f"Nap: {plan.duration_minutes} minutes at {plan.start_time}. "
+        "Reply after waking with the minutes slept and readiness 1–10. "
+        "The workout will be recalculated, never raised above the original plan."
+    )
+
+
+def format_nap_logged(
+    minutes: int, checkin: DailyCheckIn, assessment: ReadinessAssessment
+) -> str:
+    lines = [
+        f"✅ Nap logged: {minutes} minutes.",
+        f"Updated readiness: {assessment.band.value} ({assessment.score}/100).",
+        "The original night's sleep remains part of today's readiness calculation.",
+    ]
+    lines.extend(assessment.reasons)
     return "\n".join(lines)
 
 
