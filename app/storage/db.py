@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS entries (
     phase         TEXT    CHECK (phase IS NULL OR phase IN ('cut', 'maintain', 'bulk')),
     injured       INTEGER CHECK (injured IS NULL OR injured IN (0, 1)),
     injury_note   TEXT,
+    injury_cleared_by TEXT,
+    injury_cleared_at TEXT,
+    injury_clearance_reason TEXT,
+    injury_clearance_requested INTEGER,
     sleep_hours   REAL,
     sleep_quality INTEGER,
     readiness     INTEGER,
@@ -156,6 +160,13 @@ CREATE INDEX IF NOT EXISTS idx_schedule_proposals_athlete_status
     ON schedule_proposals (athlete_id, status, created_at);
 """
 
+INJURY_COLUMNS = {
+    "injury_cleared_by": "TEXT",
+    "injury_cleared_at": "TEXT",
+    "injury_clearance_reason": "TEXT",
+    "injury_clearance_requested": "INTEGER",
+}
+
 CHECKIN_COLUMNS = {
     "sleep_hours": "REAL",
     "sleep_quality": "INTEGER",
@@ -226,6 +237,10 @@ class Entry:
     phase: Phase | None = None
     injured: bool | None = None
     injury_note: str | None = None
+    injury_cleared_by: str | None = None
+    injury_cleared_at: str | None = None
+    injury_clearance_reason: str | None = None
+    injury_clearance_requested: bool | None = None
     sleep_hours: float | None = None
     sleep_quality: int | None = None
     readiness: int | None = None
@@ -282,6 +297,10 @@ class Entry:
             phase=self.phase,
             injured=self.injured,
             injury_note=self.injury_note,
+            injury_cleared_by=self.injury_cleared_by,
+            injury_cleared_at=self.injury_cleared_at,
+            injury_clearance_reason=self.injury_clearance_reason,
+            injury_clearance_requested=self.injury_clearance_requested,
             sleep_hours=self.sleep_hours,
             sleep_quality=self.sleep_quality,
             readiness=self.readiness,
@@ -344,6 +363,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
     for name, column_type in (
         CHECKIN_COLUMNS
+        | INJURY_COLUMNS
         | PROGRAM_COLUMNS
         | SCHEDULE_COLUMNS
         | NUTRITION_COLUMNS
@@ -358,7 +378,9 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
     e = entry.with_defaults()
     columns = (
         "athlete_id", "athlete_name", "kind", "lift", "sets", "reps", "weight_kg", "rpe",
-        "phase", "injured", "injury_note", "sleep_hours", "sleep_quality", "readiness",
+        "phase", "injured", "injury_note", "injury_cleared_by", "injury_cleared_at",
+        "injury_clearance_reason", "injury_clearance_requested",
+        "sleep_hours", "sleep_quality", "readiness",
         "soreness", "stress", "bodyweight_kg", "protein_g", "calories", "nutrition_adherence",
         "nap_minutes", "planned_lift", "planned_training_time", "methodology", "experience",
         "days_per_week", "meet_date", "has_specialty_equipment", "timezone",
@@ -381,6 +403,10 @@ def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
             e.phase,
             None if e.injured is None else int(e.injured),
             e.injury_note,
+            e.injury_cleared_by,
+            e.injury_cleared_at,
+            e.injury_clearance_reason,
+            None if e.injury_clearance_requested is None else int(e.injury_clearance_requested),
             e.sleep_hours,
             e.sleep_quality,
             e.readiness,
@@ -451,6 +477,13 @@ def _row_to_entry(row: sqlite3.Row) -> Entry:
         phase=row["phase"],
         injured=None if row["injured"] is None else bool(row["injured"]),
         injury_note=row["injury_note"],
+        injury_cleared_by=row["injury_cleared_by"],
+        injury_cleared_at=row["injury_cleared_at"],
+        injury_clearance_reason=row["injury_clearance_reason"],
+        injury_clearance_requested=(
+            None if row["injury_clearance_requested"] is None
+            else bool(row["injury_clearance_requested"])
+        ),
         sleep_hours=row["sleep_hours"],
         sleep_quality=row["sleep_quality"],
         readiness=row["readiness"],
@@ -550,10 +583,16 @@ def latest_phase(conn: sqlite3.Connection, athlete_id: str) -> str:
 
 
 def injury_state(conn: sqlite3.Connection, athlete_id: str) -> tuple[bool, str | None]:
-    """(is_injured, note) from the most recent row that recorded injury status."""
+    """(is_injured, note) from the most recent row that recorded injury status.
+
+    A row that says `injured = 0` only counts as a clearance when it also names
+    who cleared it. Anything else — including a row written by a model that
+    decided the athlete sounded better — leaves the flag open. The gate fails
+    closed on purpose: the cost of a wrong clearance is somebody getting hurt.
+    """
     row = conn.execute(
         """
-        SELECT injured, injury_note FROM entries
+        SELECT injured, injury_note, injury_cleared_by FROM entries
         WHERE athlete_id = ? AND injured IS NOT NULL
         ORDER BY session_date DESC, id DESC
         LIMIT 1
@@ -562,7 +601,96 @@ def injury_state(conn: sqlite3.Connection, athlete_id: str) -> tuple[bool, str |
     ).fetchone()
     if row is None:
         return False, None
+    if not bool(row["injured"]) and not row["injury_cleared_by"]:
+        return True, row["injury_note"]
     return bool(row["injured"]), row["injury_note"]
+
+
+def injury_opened_on(conn: sqlite3.Connection, athlete_id: str) -> str | None:
+    """Session date the currently-open injury episode was first reported."""
+    row = conn.execute(
+        """
+        SELECT session_date FROM entries
+        WHERE athlete_id = ? AND injured = 1
+          AND id > COALESCE((
+              SELECT MAX(id) FROM entries
+              WHERE athlete_id = ? AND injured = 0 AND injury_cleared_by IS NOT NULL
+          ), 0)
+        ORDER BY session_date ASC, id ASC
+        LIMIT 1
+        """,
+        (athlete_id, athlete_id),
+    ).fetchone()
+    return None if row is None else str(row["session_date"])
+
+
+def clearance_requested_on(conn: sqlite3.Connection, athlete_id: str) -> str | None:
+    """Most recent date the athlete asked to be cleared, within this episode."""
+    row = conn.execute(
+        """
+        SELECT session_date FROM entries
+        WHERE athlete_id = ? AND injury_clearance_requested = 1
+        ORDER BY session_date DESC, id DESC
+        LIMIT 1
+        """,
+        (athlete_id,),
+    ).fetchone()
+    return None if row is None else str(row["session_date"])
+
+
+def request_injury_clearance(
+    conn: sqlite3.Connection, athlete_id: str, *, note: str | None, on: str, raw_text: str | None = None
+) -> None:
+    """Record that the athlete says they feel better. Does not close the flag."""
+    insert_entry(
+        conn,
+        Entry(
+            athlete_id=athlete_id,
+            kind="status",
+            session_date=on,
+            raw_text=raw_text,
+            injury_clearance_requested=True,
+            injury_note=note,
+        ),
+    )
+
+
+def clear_injury(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    *,
+    actor: str,
+    reason: str,
+    on: str | None = None,
+) -> None:
+    """Close an injury. Requires a named actor who is not the athlete.
+
+    There is deliberately no path to this function from an inbound WhatsApp
+    message. It is called by an operator tool, and the actor it records is a
+    person who can be asked why they cleared it.
+    """
+    actor = (actor or "").strip()
+    reason = (reason or "").strip()
+    if not actor:
+        raise ValueError("clearing an injury requires a named actor")
+    if actor == athlete_id.strip():
+        raise ValueError("an athlete cannot clear their own injury")
+    if not reason:
+        raise ValueError("clearing an injury requires a recorded reason")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    insert_entry(
+        conn,
+        Entry(
+            athlete_id=athlete_id,
+            kind="status",
+            session_date=on or date.today().isoformat(),
+            injured=False,
+            injury_note=None,
+            injury_cleared_by=actor,
+            injury_cleared_at=now,
+            injury_clearance_reason=reason,
+        ),
+    )
 
 
 def athlete_name(conn: sqlite3.Connection, athlete_id: str) -> str | None:

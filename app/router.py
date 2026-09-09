@@ -34,6 +34,7 @@ from app.agent.schemas import (
     LogSet,
     LogStatus,
     QueryProgress,
+    RequestInjuryClearance,
 )
 from app.decision.format import (
     format_assessment,
@@ -45,8 +46,11 @@ from app.decision.format import (
     format_prescription,
     format_schedule_confirmation,
     format_schedule_proposal,
+    format_clearance_request,
+    format_stale_injury,
     format_status,
 )
+from app.decision.guardian import InjuryVeto, assess as assess_safety, is_cleared
 from app.decision.plausibility import review
 from app.decision.prescribe import prescribe_next
 from app.decision.readiness import DailyCheckIn, evaluate_readiness
@@ -209,6 +213,18 @@ def _apply(
                 )
             elif action.athlete_name:
                 confirmations.append(f"✅ Got it, {action.athlete_name}.")
+
+        elif isinstance(action, RequestInjuryClearance):
+            db.request_injury_clearance(
+                conn,
+                athlete_id,
+                note=action.note,
+                on=today.isoformat(),
+                raw_text=raw_text,
+            )
+            confirmations.append(
+                format_clearance_request(app_settings.injury_clearance_reviewer or None)
+            )
 
         elif isinstance(action, QueryProgress):
             if action.lift:
@@ -618,6 +634,12 @@ def _apply(
     phase = db.latest_phase(conn, athlete_id)
     injured, injury_note = db.injury_state(conn, athlete_id)
 
+    # The Safety Guardian is asked once per message. Everything downstream that
+    # could produce a load needs the clearance object it returns.
+    safety = assess_safety(conn, athlete_id, today=today)
+    if isinstance(safety, InjuryVeto) and safety.stale and not safety.clearance_requested:
+        questions.append(format_stale_injury(safety.days_open or 0))
+
     verdicts: list[str] = []
     for lift in lifts_to_assess[:MAX_VERDICTS_PER_REPLY]:
         history = db.session_history(conn, athlete_id, lift)
@@ -689,10 +711,17 @@ def _apply(
                 injured=injured,
                 injury_note=injury_note,
             )
+            if not is_cleared(safety):
+                prescriptions.append(
+                    "🛑 *Programming suppressed* — an injury flag is open. "
+                    "I won't suggest a load until a coach closes it."
+                )
+                continue
             prescription = prescribe_next(
                 assessment,
                 history,
                 choice,
+                clearance=safety,
                 session_number=len(history) + 1,
                 today=today,
                 checkin=checkin,

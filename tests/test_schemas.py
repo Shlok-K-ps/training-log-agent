@@ -11,6 +11,7 @@ from datetime import date
 import pytest
 
 from app.agent.schemas import (
+    RequestInjuryClearance,
     AskTrainingSchedule,
     AskPrescription,
     Clarify,
@@ -130,8 +131,16 @@ def test_an_empty_status_is_rejected():
         call("log_status")
 
 
-def test_injury_can_be_cleared():
-    assert call("log_status", injured=False).injured is False
+def test_the_model_cannot_clear_an_injury_only_request_review():
+    """injured=false is downgraded to a review request, never a clearance.
+
+    Regression for the shipped bug: Gemini emitting log_status{injured:false}
+    closed the flag and restored load advice on the same message.
+    """
+    action = call("log_status", injured=False, injury_note="back feels fine")
+    assert isinstance(action, RequestInjuryClearance)
+    assert action.note == "back feels fine"
+    assert not hasattr(action, "injured")
 
 
 def test_long_injury_notes_are_truncated():

@@ -116,7 +116,7 @@ class OfflineClient:
             )
 
         if RECOVERED_RE.search(lowered):
-            calls.append(("log_status", {"injured": False}))
+            calls.append(("log_status", {"injured": False, "injury_note": text.strip()[:120]}))
         elif INJURY_RE.search(lowered):
             calls.append(("log_status", {"injured": True, "injury_note": text.strip()[:120]}))
 

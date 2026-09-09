@@ -76,6 +76,17 @@ class LogStatus:
 
 
 @dataclass(frozen=True)
+class RequestInjuryClearance:
+    """An athlete saying they feel better. Never closes the flag by itself.
+
+    The model may emit this; it may not emit a clearance. Closing an injury
+    requires a named actor who is not the athlete (see storage.clear_injury).
+    """
+
+    note: str | None = None
+
+
+@dataclass(frozen=True)
 class QueryProgress:
     lift: str | None = None
 
@@ -214,6 +225,7 @@ class Clarify:
 Action = (
     LogSet
     | LogStatus
+    | RequestInjuryClearance
     | QueryProgress
     | LogCheckIn
     | LogNap
@@ -307,7 +319,7 @@ LOG_STATUS = types.FunctionDeclaration(
     name="log_status",
     description=(
         "Record something about the athlete rather than a set: a change of "
-        "nutrition phase, an injury being reported or cleared, or their name."
+        "nutrition phase, an injury being reported, or their name."
     ),
     parameters=types.Schema(
         type=types.Type.OBJECT,
@@ -320,9 +332,9 @@ LOG_STATUS = types.FunctionDeclaration(
             "injured": types.Schema(
                 type=types.Type.BOOLEAN,
                 description=(
-                    "true when the athlete reports pain or an injury, false when they "
-                    "say they are recovered or cleared. Report it; do not judge how bad "
-                    "it is."
+                    "true when the athlete reports pain or an injury. Set false only "
+                    "when they say they feel recovered — that is recorded as a request "
+                    "for review, not a clearance. Report it; do not judge how bad it is."
                 ),
             ),
             "injury_note": types.Schema(
@@ -885,6 +897,10 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
             injured = str(injured).strip().lower() in {"true", "1", "yes"}
         note = args.get("injury_note")
         athlete = args.get("athlete_name")
+        if injured is False:
+            # The model cannot close an injury. Downgrade to a review request and
+            # keep any other field the message carried.
+            return RequestInjuryClearance(note=str(note).strip()[:200] if note else None)
         status = LogStatus(
             phase=_phase(args.get("phase")),
             injured=injured,

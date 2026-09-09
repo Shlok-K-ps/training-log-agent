@@ -44,6 +44,9 @@ class Settings:
         "TEAM_APPROVED_SUPPLEMENT_REGIMENS", ""
     )
 
+    injury_clearance_reviewer: str = os.getenv("INJURY_CLEARANCE_REVIEWER", "")
+    injury_stale_after_days: int = int(os.getenv("INJURY_STALE_AFTER_DAYS", "21"))
+
     database_path: str = os.getenv("DATABASE_PATH", "data/training_log.db")
 
     @property

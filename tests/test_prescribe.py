@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
+from app.decision.guardian import clearance_for_tests
 from app.decision.prescribe import prescribe_next
 from app.decision.readiness import DailyCheckIn
 from app.decision.rules import evaluate
@@ -29,6 +30,7 @@ def prescription(weights, *, rpes=None, method=Methodology.LINEAR_PROGRESSION, c
         assessment,
         entries,
         choice(method, injured=injured),
+        clearance=clearance_for_tests(),
         session_number=len(weights) + 1,
         today=TODAY,
         checkin=checkin,

@@ -15,6 +15,7 @@ from typing import Sequence
 from app.decision.readiness import DailyCheckIn, ReadinessAssessment, evaluate_readiness
 from app.decision.rules import Assessment, Verdict, round_to_increment, to_session_points
 from app.programming import Methodology, MethodologyChoice, SessionStructure, session_structure
+from app.decision.guardian import SafetyClearance
 from app.storage.db import Entry
 
 LOWER_INCREMENT_KG = 5.0
@@ -43,12 +44,19 @@ def prescribe_next(
     entries: Sequence[Entry],
     choice: MethodologyChoice,
     *,
+    clearance: SafetyClearance,
     session_number: int,
     today: date,
     checkin: DailyCheckIn | None = None,
     block_phase: str | None = None,
 ) -> Prescription:
-    """Return the next load only when the history and method support one."""
+    """Return the next load only when the history and method support one.
+
+    `clearance` is not optional and has no default: a caller with an open injury
+    flag cannot obtain one, so this function cannot be reached for an injured
+    athlete. The `assessment.injured` check below is defence in depth, not the
+    gate itself.
+    """
     if choice.methodology is None or not choice.actionable or assessment.injured:
         return Prescription(
             lift=assessment.lift,

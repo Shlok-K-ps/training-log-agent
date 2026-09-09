@@ -114,6 +114,9 @@ def test_injury_state_is_derived_from_the_log_not_stored_separately(conn):
         conn,
         db.Entry(athlete_id=ATHLETE, kind="status", injured=False, session_date="2026-09-05"),
     )
+    assert db.injury_state(conn, ATHLETE)[0] is True, "a clearance with no actor is not a clearance"
+    db.clear_injury(conn, ATHLETE, actor="Coach Rao", reason="physio signed off",
+                    on="2026-09-06")
     assert db.injury_state(conn, ATHLETE)[0] is False
 
 

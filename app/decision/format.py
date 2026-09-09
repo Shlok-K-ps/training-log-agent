@@ -116,9 +116,31 @@ def format_status(
             f"Injury flag on{note}. I'll keep logging your sessions but I won't "
             "suggest loads until it's cleared. Please see a physio."
         )
-    elif injured is False:
-        bits.append("Injury flag cleared. Load suggestions are back on.")
     return "✅ " + " ".join(bits) if bits else "✅ Noted."
+
+
+def format_clearance_request(reviewer: str | None) -> str:
+    """Verbatim safety copy. No persona layer is ever applied to this."""
+    who = reviewer or "Your coach"
+    return (
+        "📝 Noted that you're feeling better — I've logged it as a review request.\n"
+        "I can't lift the injury flag myself, and neither can the model that reads "
+        f"your messages. {who} closes it after a physio signs off, and "
+        "load suggestions stay off until then."
+    )
+
+
+def format_clearance(actor: str, reason: str) -> str:
+    return f"✅ Injury flag cleared by {actor} — {reason}. Load suggestions are back on."
+
+
+def format_stale_injury(days: int) -> str:
+    return (
+        f"❓ Your injury flag has been open {days} days with no update. If a physio has "
+        "cleared you, ask your coach to close it. If it's still a problem, that's worth "
+        "a review too — I'm holding load suggestions either way."
+    )
+
 
 
 def format_checkin(checkin: DailyCheckIn, assessment: ReadinessAssessment) -> str:

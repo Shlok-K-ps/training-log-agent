@@ -110,14 +110,26 @@ def test_an_injury_flag_suppresses_load_advice_on_later_replies(conn):
     assert "➡️" not in reply
 
 
-def test_clearing_the_injury_restores_advice(conn):
+def test_an_athlete_saying_they_feel_better_does_not_restore_advice(conn):
     for day in ("2026-09-01", "2026-09-04", "2026-09-08"):
         send(conn, [("log_set", {"lift": "squat", "sets": 3, "reps": 5,
                                  "weight": 140, "rpe": 8, "session_date": day})])
     send(conn, [("log_status", {"injured": True})])
-    send(conn, [("log_status", {"injured": False})])
-    reply = send(conn, [("query_progress", {"lift": "squat"})])
-    assert "physio" not in reply.lower()
+    reply = send(conn, [("log_status", {"injured": False})])
+    assert "review request" in reply.lower()
+    assert db.injury_state(conn, ATHLETE)[0] is True
+    assert "physio" in send(conn, [("query_progress", {"lift": "squat"})]).lower()
+
+
+def test_a_named_actor_clears_the_injury_and_advice_returns(conn):
+    for day in ("2026-09-01", "2026-09-04", "2026-09-08"):
+        send(conn, [("log_set", {"lift": "squat", "sets": 3, "reps": 5,
+                                 "weight": 140, "rpe": 8, "session_date": day})])
+    send(conn, [("log_status", {"injured": True})])
+    db.clear_injury(conn, ATHLETE, actor="Coach Rao", reason="physio signed off",
+                    on="2026-09-09")
+    assert db.injury_state(conn, ATHLETE)[0] is False
+    assert "physio" not in send(conn, [("query_progress", {"lift": "squat"})]).lower()
 
 
 def test_a_cut_changes_the_meaning_of_the_same_log(conn):
