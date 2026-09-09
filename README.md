@@ -1,5 +1,7 @@
 # Training-Log Agent
 
+GitHub: <https://github.com/Shlok-K-ps/training-log-agent>
+
 A WhatsApp agent for a 20-athlete powerlifting team. Athletes text their sessions
 in plain English. The agent parses them into structured data, tracks training,
 sleep, readiness, soreness, stress, bodyweight and nutrition, then returns a
@@ -14,6 +16,11 @@ The same morning flow can build a food-access plan around training. It uses only
 the athlete's recorded diet style, allergies, cooking access and available
 foods. Supplements are scheduled only when an exact dose and approval source
 have been recorded; the model cannot recommend one or invent a dose.
+
+Optional Google Calendar and Routes integrations find training slots around
+meetings, travel time, bedtime and same-day sleep/readiness. The athlete chooses
+from WhatsApp options; only `confirm CODE` writes to an app-owned Power Coach
+calendar. The best slot also drives meal and approved-supplement timing.
 
 ```
 athlete                                                        agent
@@ -44,9 +51,9 @@ Three layers, and the split is the whole point.
    │                            range-checked before storage.      │
    │                                   │                           │
    │                                   ▼                           │
-   │  LAYER 2   app/storage/    SQLite. One file, one table.       │
-   │  store     ────────────    athlete, lift, sets, reps, weight, │
-   │                            RPE, date, phase, injury flag.     │
+   │  LAYER 2   app/storage/    SQLite. One coaching timeline,    │
+   │  store     ────────────    plus encrypted integration state  │
+   │                            and approved slot proposals.      │
    │                                   │                           │
    │                                   ▼                           │
    │  LAYER 3   app/decision/   Plain Python. Compares against     │
@@ -64,7 +71,7 @@ model is the right tool for reading "ground out the last two at one forty" and
 the wrong tool for deciding whether someone should strip 15% off their squat.
 
 The model never sees the reply text. It cannot write one. Its entire vocabulary
-is thirteen function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
+is twenty function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
 anything it returns outside them is thrown away before it reaches the database.
 
 The same boundary now covers coaching. [`app/programming/`](app/programming/)
@@ -81,6 +88,8 @@ The proactive workflow and nap rules are documented in
 [sleep and nap scheduling](docs/sleep-and-naps.md).
 Food access, meal timing and supplement boundaries are in
 [nutrition planning](docs/nutrition-planning.md).
+Calendar permissions, travel logic and the approval boundary are in
+[calendar and location planning](docs/calendar-and-location-planning.md).
 
 ---
 
@@ -177,10 +186,11 @@ and open in any client. *Trade-off:* Postgres solves concurrency problems this
 project does not have, at the cost of a server to run and a connection string to
 keep secret. Twenty athletes is not a scale problem.
 
-**One table.** Every row is one observation about one athlete at one moment. Sets
-carry a lift, status updates don't. Current phase and injury state are *derived*
-by reading the latest row, never stored separately, so they can't drift out of
-sync with the log.
+**One coaching timeline.** Every `entries` row is one observation about one
+athlete at one moment. Sets carry a lift, status updates don't. Current phase and
+injury state are *derived* from the latest fact. OAuth tokens, saved places and
+calendar proposals live in supporting tables because they are operational state,
+not coaching observations.
 
 **Injury as a flag, not advice.** A logged injury suppresses every progression
 suggestion and says see a physio. The agent tracks and withholds. It never
@@ -284,12 +294,35 @@ the four environment variables, and point Twilio at
 `https://<service>.onrender.com/webhook/whatsapp`. A `Dockerfile` is there for
 anywhere else.
 
+### 6. Connect Google Calendar and travel time
+
+Enable Google Calendar API and Routes API in a Google Cloud project, create a
+web OAuth client, and register this callback:
+
+`https://<service>.onrender.com/integrations/google/calendar/callback`
+
+Add `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`,
+`GOOGLE_MAPS_API_KEY`, `OAUTH_STATE_SECRET`, and
+`CALENDAR_TOKEN_ENCRYPTION_KEY` from `.env.example`. Then use WhatsApp:
+
+```text
+connect my calendar
+my gym is 123 High Street
+my home is 456 Park Road
+schedule my squat today
+confirm A1B2C3
+```
+
+The OAuth connection grants read-only event access and write access only to a
+calendar created by this app. Public apps may need Google's sensitive-scope
+verification; read the calendar planning document before launch.
+
 ---
 
 ## Tests
 
 ```bash
-pytest -q          # 217 tests, no network
+pytest -q          # 234 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -308,6 +341,10 @@ the suite never makes a network call.
   a 403.
 - Athlete data is keyed by phone number and never crosses between athletes; the
   isolation is tested.
+- Calendar tokens and saved places are encrypted at rest. Event titles, descriptions, attendees
+  and meeting content are not persisted or sent to the model.
+- Calendar writes go only to an app-created calendar after explicit WhatsApp
+  confirmation. Athletes can disconnect Calendar and delete saved places by message.
 
 ---
 
@@ -323,13 +360,16 @@ trustworthy:
                     verified training-max, block, or variation inputs
         │
   push daily       the agent messages first, instead of waiting
-                    morning sleep check-ins are built; meal/supplement schedules remain
+                    morning sleep check-ins and meal/supplement plans are built
         │
   autoregulate     built: same-day readiness may only hold or reduce load
         │
   injury flags     graded return-to-load protocols, physio in the loop
         │
   nutrition        food-access timing built; targets still need athlete/pro approval
+        │
+  calendar agent   built: reads events/locations, computes travel, proposes slots,
+                    writes only a confirmed option to an app-owned calendar
 ```
 
 You cannot autoregulate on data you cannot parse reliably, and you cannot
@@ -365,6 +405,8 @@ app/
   decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
   programming/ Pure Python — five methods, selector, session structure
   channels/    Twilio/WhatsApp transport: identity, signatures, chunking
+  integrations/ Google Calendar OAuth/API and Google Routes travel facts
+  scheduling/   deterministic slot search, sleep/travel gates, approval service
   router.py    the seam: parse → store → decide → reply
   main.py      FastAPI service
 chat.py        terminal harness, no phone required
@@ -372,5 +414,5 @@ reference/     OpenPowerlifting sample the validation bounds derive from
 docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         217 tests, no network
+tests/         234 tests, no network
 ```

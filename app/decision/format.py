@@ -12,6 +12,7 @@ from app.decision.prescribe import Prescription
 from app.decision.readiness import DailyCheckIn, ReadinessAssessment
 from app.decision.sleep import NapPlan
 from app.nutrition import NutritionPlan
+from app.scheduling.service import ConfirmationResult, ProposalResult
 
 PHASE_LABEL = {"cut": "cut", "maintain": "maintenance", "bulk": "bulk"}
 
@@ -210,3 +211,32 @@ def format_prescription(prescription: Prescription) -> str:
         lines.append(f"Base load {prescription.base_weight_kg:g} kg, reduced by same-day readiness.")
     lines.extend(prescription.reasons)
     return "\n".join(lines)
+
+
+def format_schedule_proposal(result: ProposalResult) -> str:
+    lines = ["*Calendar-aware training options*"]
+    if not result.actionable:
+        lines.extend(result.reasons)
+        return "\n".join(lines)
+    if result.nap_start and result.nap_minutes:
+        lines.append(
+            f"Recovery window: nap {result.nap_minutes} minutes at {result.nap_start}; "
+            "later training options are prioritised."
+        )
+    for index, slot in enumerate(result.slots, start=1):
+        lines.append(
+            f"{index}. {slot.starts_at:%H:%M}–{slot.ends_at:%H:%M} at {slot.gym_label} "
+            f"— code *{slot.proposal_id}*"
+        )
+        lines.append("   " + " ".join(slot.reasons))
+    lines.append("Reply *confirm CODE* to add one option to the Power Coach calendar.")
+    lines.append("Meetings are never moved and no calendar write happens before confirmation.")
+    return "\n".join(lines)
+
+
+def format_schedule_confirmation(result: ConfirmationResult) -> str:
+    lift = f" ({result.lift.title()})" if result.lift else ""
+    return (
+        f"✅ Workout scheduled{lift}: {result.starts_at:%a %d %b, %H:%M}–"
+        f"{result.ends_at:%H:%M} at {result.gym_label}."
+    )

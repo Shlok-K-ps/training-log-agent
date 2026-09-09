@@ -11,9 +11,12 @@ from datetime import date
 import pytest
 
 from app.agent.schemas import (
+    AskTrainingSchedule,
     AskPrescription,
     Clarify,
     ConfigureProgram,
+    ConfigurePlace,
+    ConfirmTrainingSchedule,
     LogCheckIn,
     LogSet,
     LogStatus,
@@ -268,3 +271,18 @@ def test_nutrition_plan_and_supplement_intake_are_structured_actions():
     assert call("ask_nutrition_plan", training_time="18:30").training_time == "18:30"
     taken = call("log_supplement_taken", name="creatine")
     assert taken.name == "creatine" and taken.taken_on == TODAY.isoformat()
+
+
+def test_calendar_actions_are_a_validated_closed_world():
+    assert call("configure_place", label="gym", location="123 High Street") == ConfigurePlace(
+        "gym", "123 High Street"
+    )
+    request = call("ask_training_schedule", lift="squat")
+    assert request == AskTrainingSchedule(TODAY.isoformat(), "squat", "gym")
+    assert call("confirm_training_schedule", proposal_id="a1b2c3") == ConfirmTrainingSchedule(
+        "A1B2C3"
+    )
+    with pytest.raises(ValidationError, match="30 days"):
+        call("ask_training_schedule", scheduled_on="2026-12-01")
+    with pytest.raises(ValidationError, match="travel mode"):
+        call("configure_calendar_planning", travel_mode="teleport")

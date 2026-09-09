@@ -18,12 +18,15 @@ from contextlib import suppress
 from functools import lru_cache
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
 from app.config import settings
+from app.integrations.factory import calendar_client, calendar_oauth, state_signer
+from app.integrations.google_calendar import CalendarIntegrationError
 from app.router import handle_message
 from app.scheduling import send_due_morning_prompts
 from app.storage import db
@@ -87,10 +90,49 @@ def _send_morning_prompts() -> int:
 
 app = FastAPI(
     title="Powerlifting Training-Log Agent",
-    version="0.1.0",
-    description="WhatsApp in, deterministic coaching verdict out.",
+    version="0.2.0",
+    description="WhatsApp coaching with deterministic readiness, nutrition and calendar planning.",
     lifespan=lifespan,
 )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def product_home() -> str:
+    return """
+    <h1>Power Coach</h1>
+    <p>A WhatsApp powerlifting assistant that plans training from athlete-provided
+    readiness, food access and approved supplement information.</p>
+    <p>Optional Google Calendar access finds feasible workout times around busy
+    events and travel. Calendar changes require confirmation in WhatsApp.</p>
+    <p><a href='/privacy'>Privacy</a> · <a href='/terms'>Terms</a></p>
+    """
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy() -> str:
+    return """
+    <h1>Privacy</h1>
+    <p>Calendar connection is optional. The service reads event start/end times and
+    usable locations only to plan travel and training. It does not retain event
+    titles, descriptions, attendees or meeting content.</p>
+    <p>OAuth tokens and saved places are encrypted at rest when the calendar
+    integration is configured. Confirmed workout
+    references are stored until the athlete asks to delete them. Calendar data is
+    not sold and is not sent to the language model.</p>
+    <p>Send “disconnect calendar” in WhatsApp to delete stored calendar tokens. Send
+    “forget my locations” to delete saved home, office and gym places.</p>
+    """
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms() -> str:
+    return """
+    <h1>Terms</h1>
+    <p>This service is a training-log and planning aid, not medical care. Athletes
+    remain responsible for confirming calendar changes and following advice from
+    their coach, clinician or dietitian. Injury and severe-recovery flags suppress
+    load advice.</p>
+    """
 
 
 @app.get("/health")
@@ -101,7 +143,45 @@ async def health() -> dict[str, object]:
         "database": str(settings.db_file),
         "signature_validation": settings.validate_twilio_signature,
         "morning_scheduler": settings.enable_morning_scheduler,
+        "calendar_integration": settings.calendar_configured,
     }
+
+
+@app.get("/integrations/google/calendar/start")
+async def google_calendar_start(token: str) -> Response:
+    """Validate the WhatsApp-issued identity link before sending it to Google."""
+    if not settings.calendar_configured:
+        return HTMLResponse("Calendar integration is not configured.", status_code=503)
+    try:
+        state_signer().verify(token)
+        return RedirectResponse(calendar_oauth().authorization_url(token), status_code=302)
+    except CalendarIntegrationError as exc:
+        return HTMLResponse(str(exc), status_code=400)
+
+
+@app.get("/integrations/google/calendar/callback")
+async def google_calendar_callback(request: Request) -> Response:
+    """Exchange the one-time Google code and store only encrypted tokens."""
+    if request.query_params.get("error"):
+        return HTMLResponse("Calendar access was not granted. You can close this tab.", status_code=400)
+    code = request.query_params.get("code", "")
+    state = request.query_params.get("state", "")
+    conn = db.connect()
+    try:
+        if not code or not state:
+            raise CalendarIntegrationError("Google returned an incomplete authorization response")
+        db.init_db(conn)
+        athlete_id = state_signer().verify(state)
+        tokens = calendar_oauth().exchange_code(code)
+        calendar_client(conn).save_tokens(athlete_id, tokens)
+        return HTMLResponse(
+            "<h1>Calendar connected</h1><p>Return to WhatsApp and ask me to plan training.</p>"
+        )
+    except CalendarIntegrationError as exc:
+        log.warning("calendar OAuth failed: %s", exc)
+        return HTMLResponse(f"Calendar connection failed: {exc}", status_code=400)
+    finally:
+        conn.close()
 
 
 @app.post("/webhook/whatsapp")

@@ -16,11 +16,18 @@ from app.agent.schemas import (
     Action,
     AskNutritionPlan,
     AskPrescription,
+    AskTrainingSchedule,
     Clarify,
+    ConfigureCalendarPlanning,
+    ConfigurePlace,
     ConfigureProgram,
     ConfigureNutrition,
     ConfigureSchedule,
     ConfigureSupplement,
+    ConfirmTrainingSchedule,
+    ConnectCalendar,
+    DisconnectCalendar,
+    ForgetPlaces,
     LogCheckIn,
     LogNap,
     LogSupplementTaken,
@@ -36,6 +43,8 @@ from app.decision.format import (
     format_nap_plan,
     format_nutrition_plan,
     format_prescription,
+    format_schedule_confirmation,
+    format_schedule_proposal,
     format_status,
 )
 from app.decision.plausibility import review
@@ -45,6 +54,10 @@ from app.decision.sleep import SleepSchedule, plan_nap
 from app.decision.rules import evaluate
 from app.programming import Experience, Methodology, ProgrammingProfile, choose_methodology
 from app.nutrition import NutritionProfile, Supplement, build_daily_plan
+from app.integrations.factory import connection_link, scheduling_service
+from app.integrations.google_calendar import CalendarIntegrationError
+from app.integrations.google_routes import RoutingIntegrationError
+from app.scheduling import SchedulingService
 from app.storage import db
 
 MAX_VERDICTS_PER_REPLY = 3
@@ -71,6 +84,10 @@ HELP = (
     "• _vegetarian; I have rice, dal, paneer, bananas_ — food access\n"
     "• _creatine 5g after training, approved by my coach_ — supplement setup\n"
     "• _what should I eat today?_ — meal and approved-supplement timing\n"
+    "• _connect my calendar_ — private Google Calendar connection link\n"
+    "• _my gym is 123 High Street_ — saves a travel-planning place\n"
+    "• _schedule my squat today_ — sleep + calendar + commute options\n"
+    "• _confirm A1B2C3_ — writes only that option to the coach calendar\n"
     "• _I'm intermediate and train 4 days/week_  — configures programming\n"
     "• _what should I squat today?_  — deterministic next-session plan\n\n"
     "Verdicts come from fixed rules over your own log, not from a chatbot's opinion."
@@ -84,6 +101,7 @@ def handle_message(
     client: ModelClient,
     *,
     today: date | None = None,
+    scheduling: SchedulingService | None = None,
 ) -> str:
     """One inbound WhatsApp message in, one reply out."""
     today = today or date.today()
@@ -102,7 +120,7 @@ def handle_message(
             return FALLBACK + "\n\n_(rejected: " + parsed.rejected[0] + ")_"
         return FALLBACK
 
-    return _apply(conn, athlete_id, text, parsed.actions, today)
+    return _apply(conn, athlete_id, text, parsed.actions, today, scheduling=scheduling)
 
 
 def _apply(
@@ -111,6 +129,8 @@ def _apply(
     raw_text: str,
     actions: list[Action],
     today: date,
+    *,
+    scheduling: SchedulingService | None = None,
 ) -> str:
     name = db.athlete_name(conn, athlete_id)
     confirmations: list[str] = []
@@ -118,7 +138,11 @@ def _apply(
     lifts_to_assess: list[str] = []
     lifts_to_prescribe: list[str] = []
     assess_all = False
-    nutrition_plan_times: list[str | None] = []
+    nutrition_plan_requests: list[
+        tuple[str | None, tuple[tuple[str, str], ...]]
+    ] = []
+    schedule_requests: list[AskTrainingSchedule] = []
+    schedule_confirmations: list[str] = []
 
     warnings: list[str] = []
 
@@ -252,7 +276,15 @@ def _apply(
                 )
                 confirmations.append(format_nap_plan(plan_nap(checkin, schedule)))
             if action.training_time and db.latest_nutrition_settings(conn, athlete_id):
-                nutrition_plan_times.append(action.training_time)
+                nutrition_plan_requests.append((action.training_time, ()))
+            if action.training_lift and db.oauth_connection(conn, athlete_id):
+                schedule_requests.append(
+                    AskTrainingSchedule(
+                        scheduled_on=action.checked_on,
+                        lift=action.training_lift,
+                        gym_label="gym",
+                    )
+                )
 
         elif isinstance(action, LogNap):
             previous = db.latest_checkin(conn, athlete_id, action.checked_on)
@@ -305,6 +337,14 @@ def _apply(
             )
             if previous and previous.planned_lift:
                 lifts_to_prescribe.append(previous.planned_lift)
+                if db.oauth_connection(conn, athlete_id):
+                    schedule_requests.append(
+                        AskTrainingSchedule(
+                            scheduled_on=action.checked_on,
+                            lift=previous.planned_lift,
+                            gym_label="gym",
+                        )
+                    )
             else:
                 questions.append(
                     "❓ Which lift is planned today? I need it to recalculate the workout."
@@ -427,7 +467,7 @@ def _apply(
                 )
 
         elif isinstance(action, AskNutritionPlan):
-            nutrition_plan_times.append(action.training_time)
+            nutrition_plan_requests.append((action.training_time, ()))
 
         elif isinstance(action, ConfigureProgram):
             db.insert_entry(
@@ -460,6 +500,61 @@ def _apply(
             ]
             confirmations.append("✅ Program profile: " + ", ".join(p for p in pieces if p) + ".")
 
+        elif isinstance(action, ConfigurePlace):
+            db.save_place(conn, athlete_id, action.label, action.location)
+            confirmations.append(
+                f"✅ Saved {action.label}. I use it only for travel-time planning."
+            )
+
+        elif isinstance(action, ConfigureCalendarPlanning):
+            db.save_scheduling_preferences(
+                conn,
+                athlete_id,
+                preferred_start=action.preferred_start,
+                preferred_end=action.preferred_end,
+                session_minutes=action.session_minutes,
+                pre_buffer_minutes=action.pre_buffer_minutes,
+                post_buffer_minutes=action.post_buffer_minutes,
+                travel_mode=action.travel_mode,
+                default_location_label=action.default_location_label,
+            )
+            confirmations.append(
+                "✅ Calendar-planning preferences saved. Sleep and travel remain hard constraints."
+            )
+
+        elif isinstance(action, ConnectCalendar):
+            link = connection_link(athlete_id)
+            if link:
+                confirmations.append(
+                    "Connect Google Calendar with this private 15-minute link:\n" + link
+                )
+            else:
+                questions.append(
+                    "❓ Calendar credentials are not configured on the server yet. See the deployment setup."
+                )
+
+        elif isinstance(action, DisconnectCalendar):
+            try:
+                planner = scheduling or scheduling_service(conn)
+                planner.calendar.disconnect(athlete_id)
+                confirmations.append(
+                    "✅ Google Calendar disconnected and its stored tokens were deleted; saved places remain."
+                )
+            except (CalendarIntegrationError, RoutingIntegrationError) as exc:
+                db.delete_oauth_connection(conn, athlete_id)
+                confirmations.append("✅ Stored Google Calendar tokens were deleted locally.")
+                warnings.append(f"⚠️ {exc}")
+
+        elif isinstance(action, ForgetPlaces):
+            db.delete_saved_places(conn, athlete_id)
+            confirmations.append("✅ Saved home, office, and gym locations were deleted.")
+
+        elif isinstance(action, AskTrainingSchedule):
+            schedule_requests.append(action)
+
+        elif isinstance(action, ConfirmTrainingSchedule):
+            schedule_confirmations.append(action.proposal_id)
+
         elif isinstance(action, AskPrescription):
             if action.lift:
                 lifts_to_prescribe.append(action.lift)
@@ -472,6 +567,39 @@ def _apply(
 
         elif isinstance(action, Clarify):
             questions.append(f"❓ {action.question}")
+
+    schedule_blocks: list[str] = []
+    if schedule_requests or schedule_confirmations:
+        try:
+            planner = scheduling or scheduling_service(conn)
+            for request in schedule_requests[:1]:
+                result = planner.propose(
+                    conn,
+                    athlete_id,
+                    day=date.fromisoformat(request.scheduled_on),
+                    lift=request.lift,
+                    gym_label=request.gym_label,
+                )
+                schedule_blocks.append(format_schedule_proposal(result))
+                if result.actionable and result.slots:
+                    nutrition_plan_requests.append(
+                        (
+                            result.slots[0].starts_at.strftime("%H:%M"),
+                            result.busy_windows,
+                        )
+                    )
+                    if request.lift:
+                        lifts_to_prescribe.append(request.lift)
+            for proposal_id in schedule_confirmations[:1]:
+                confirmed = planner.confirm(conn, athlete_id, proposal_id)
+                schedule_blocks.append(format_schedule_confirmation(confirmed))
+                nutrition_plan_requests.append(
+                    (confirmed.starts_at.strftime("%H:%M"), confirmed.busy_windows)
+                )
+                if confirmed.lift:
+                    lifts_to_prescribe.append(confirmed.lift)
+        except (CalendarIntegrationError, RoutingIntegrationError, ValueError) as exc:
+            questions.append(f"❓ {exc}")
 
     if assess_all:
         for lift in db.list_lifts(conn, athlete_id):
@@ -563,7 +691,7 @@ def _apply(
             prescriptions.append(format_prescription(prescription))
 
     nutrition_plans: list[str] = []
-    for requested_time in nutrition_plan_times[:1]:
+    for requested_time, busy_windows in nutrition_plan_requests[:1]:
         nutrition = db.latest_nutrition_settings(conn, athlete_id)
         if not {"diet_style", "foods_available"} <= nutrition.keys():
             questions.append(
@@ -619,7 +747,13 @@ def _apply(
         )
         nutrition_plans.append(
             format_nutrition_plan(
-                build_daily_plan(profile, training_time=training_time, supplements=supplements)
+                build_daily_plan(
+                    profile,
+                    training_time=training_time,
+                    supplements=supplements,
+                    busy_windows=busy_windows,
+                    bedtime=(str(schedule["bedtime"]) if schedule.get("bedtime") else None),
+                )
             )
         )
 
@@ -630,6 +764,7 @@ def _apply(
             "\n".join(warnings),
             "\n\n".join(verdicts),
             "\n\n".join(prescriptions),
+            "\n\n".join(schedule_blocks),
             "\n\n".join(nutrition_plans),
             "\n".join(questions),
         ]

@@ -76,3 +76,22 @@ def test_planner_is_deterministic():
     first = build_daily_plan(profile(), training_time="18:30")
     second = build_daily_plan(profile(), training_time="18:30")
     assert first == second
+
+
+def test_meals_and_supplements_move_out_of_calendar_events_and_use_bedtime():
+    plan = build_daily_plan(
+        profile(),
+        training_time="18:30",
+        busy_windows=(("16:00", "17:00"),),
+        bedtime="22:45",
+        supplements=(
+            Supplement("approved pre", 1, "serving", "pre_training", "coach"),
+            Supplement("approved night", 1, "serving", "bedtime", "clinician"),
+        ),
+    )
+    meal_times = {meal.label: meal.time for meal in plan.meals}
+    assert meal_times["pre-training meal"] == "15:45"
+    assert any(
+        slot.description.startswith("approved night") and slot.time == "22:45"
+        for slot in plan.supplements
+    )

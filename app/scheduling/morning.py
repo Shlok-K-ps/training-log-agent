@@ -24,7 +24,8 @@ def morning_prompt(training_time: str | None = None) -> str:
     return (
         "Good morning — recovery check-in. How many hours did you sleep? "
         "Sleep quality 1–5, readiness 1–10, soreness 1–10, and stress 1–10?"
-        f"{training} If you train today, include the lift and time so I can check a nap window."
+        f"{training} If you train today, include the lift so I can check a nap window "
+        "and, when connected, re-plan around your calendar and travel."
     )
 
 

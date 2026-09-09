@@ -1,4 +1,4 @@
-"""SQLite storage: one file, one table.
+"""SQLite storage: one file, one append-only coaching timeline.
 
 Why SQLite: the data is small, structured, and single-writer. A 20-athlete team
 generates a few thousand rows a year. Postgres solves concurrency problems this
@@ -6,11 +6,13 @@ project does not have, at the cost of a server to run and a connection string to
 keep secret. One file that you can copy, diff, and open in any client is worth
 more here than horizontal scale that will never be used.
 
-Why one table: every row is one observation about one athlete at one point in
+Why one timeline table: every entry row is one observation about one athlete at one point in
 time. Sets carry a lift; status updates (phase change, injury) carry none. Both
 are facts on a timeline, so both live on the same timeline. State — "what phase
 is Priya in right now?" — is derived by reading the latest row, never stored
-separately, so it can never drift out of sync with the log.
+separately, so it can never drift out of sync with the log. OAuth credentials,
+saved places and athlete-approved calendar proposals use dedicated tables: they
+are operational integration state, not coaching observations.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Literal
 
 from app.config import settings
+from app.security import SecretCipher
 from app.storage.lifts import normalize_lift
 
 EntryKind = Literal["set", "status"]
@@ -99,6 +102,58 @@ CREATE TABLE IF NOT EXISTS scheduled_deliveries (
     sent_at      TEXT NOT NULL,
     PRIMARY KEY (athlete_id, message_kind, local_date)
 );
+
+CREATE TABLE IF NOT EXISTS oauth_connections (
+    athlete_id        TEXT NOT NULL,
+    provider          TEXT NOT NULL,
+    access_token      TEXT NOT NULL,
+    refresh_token     TEXT,
+    expires_at        TEXT,
+    scopes            TEXT NOT NULL,
+    provider_calendar_id TEXT,
+    updated_at        TEXT NOT NULL,
+    PRIMARY KEY (athlete_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS saved_places (
+    athlete_id TEXT NOT NULL,
+    label      TEXT NOT NULL,
+    location   TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (athlete_id, label)
+);
+
+CREATE TABLE IF NOT EXISTS scheduling_preferences (
+    athlete_id TEXT PRIMARY KEY,
+    preferred_start TEXT NOT NULL DEFAULT '06:00',
+    preferred_end TEXT NOT NULL DEFAULT '21:00',
+    session_minutes INTEGER NOT NULL DEFAULT 90,
+    pre_buffer_minutes INTEGER NOT NULL DEFAULT 15,
+    post_buffer_minutes INTEGER NOT NULL DEFAULT 30,
+    unknown_location_buffer_minutes INTEGER NOT NULL DEFAULT 30,
+    bedtime_buffer_minutes INTEGER NOT NULL DEFAULT 90,
+    travel_mode TEXT NOT NULL DEFAULT 'DRIVE',
+    default_location_label TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schedule_proposals (
+    id TEXT PRIMARY KEY,
+    athlete_id TEXT NOT NULL,
+    local_date TEXT NOT NULL,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT NOT NULL,
+    gym_label TEXT NOT NULL,
+    lift TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'cancelled', 'expired', 'superseded')),
+    reasons TEXT NOT NULL,
+    calendar_event_id TEXT,
+    created_at TEXT NOT NULL,
+    confirmed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedule_proposals_athlete_status
+    ON schedule_proposals (athlete_id, status, created_at);
 """
 
 CHECKIN_COLUMNS = {
@@ -714,3 +769,307 @@ def rpe_logging_ratio(conn: sqlite3.Connection, athlete_id: str, limit: int = 20
 def iter_all(conn: sqlite3.Connection) -> Iterator[Entry]:
     for row in conn.execute("SELECT * FROM entries ORDER BY id"):
         yield _row_to_entry(row)
+
+
+# External OAuth tokens are encrypted before they reach these functions.  Calendar
+# event contents are deliberately not persisted; only athlete-approved workout
+# proposals and opaque provider event IDs are stored.
+
+
+def save_oauth_connection(
+    conn: sqlite3.Connection,
+    *,
+    athlete_id: str,
+    provider: str,
+    access_token: str,
+    refresh_token: str | None,
+    expires_at: str | None,
+    scopes: str,
+) -> None:
+    existing = oauth_connection(conn, athlete_id, provider)
+    retained_refresh = refresh_token or (str(existing["refresh_token"]) if existing else None)
+    conn.execute(
+        """
+        INSERT INTO oauth_connections
+            (athlete_id, provider, access_token, refresh_token, expires_at, scopes, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(athlete_id, provider) DO UPDATE SET
+            access_token = excluded.access_token,
+            refresh_token = excluded.refresh_token,
+            expires_at = excluded.expires_at,
+            scopes = excluded.scopes,
+            updated_at = excluded.updated_at
+        """,
+        (
+            athlete_id,
+            provider,
+            access_token,
+            retained_refresh,
+            expires_at,
+            scopes,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+
+
+def oauth_connection(
+    conn: sqlite3.Connection, athlete_id: str, provider: str = "google_calendar"
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM oauth_connections WHERE athlete_id = ? AND provider = ?",
+        (athlete_id, provider),
+    ).fetchone()
+
+
+def update_oauth_calendar_id(
+    conn: sqlite3.Connection, athlete_id: str, calendar_id: str
+) -> None:
+    conn.execute(
+        """
+        UPDATE oauth_connections SET provider_calendar_id = ?, updated_at = ?
+        WHERE athlete_id = ? AND provider = 'google_calendar'
+        """,
+        (
+            calendar_id,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            athlete_id,
+        ),
+    )
+    conn.commit()
+
+
+def delete_oauth_connection(
+    conn: sqlite3.Connection, athlete_id: str, provider: str = "google_calendar"
+) -> None:
+    conn.execute(
+        "DELETE FROM oauth_connections WHERE athlete_id = ? AND provider = ?",
+        (athlete_id, provider),
+    )
+    conn.commit()
+
+
+def save_place(conn: sqlite3.Connection, athlete_id: str, label: str, location: str) -> None:
+    stored_location = location.strip()
+    if settings.calendar_token_encryption_key:
+        stored_location = "fernet:" + SecretCipher(
+            settings.calendar_token_encryption_key
+        ).encrypt(stored_location)
+    conn.execute(
+        """
+        INSERT INTO saved_places (athlete_id, label, location, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(athlete_id, label) DO UPDATE SET
+            location = excluded.location, updated_at = excluded.updated_at
+        """,
+        (
+            athlete_id,
+            label.strip().lower(),
+            stored_location,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+
+
+def saved_places(conn: sqlite3.Connection, athlete_id: str) -> dict[str, str]:
+    rows = conn.execute(
+        "SELECT label, location FROM saved_places WHERE athlete_id = ? ORDER BY label",
+        (athlete_id,),
+    ).fetchall()
+    result: dict[str, str] = {}
+    for row in rows:
+        value = str(row["location"])
+        if value.startswith("fernet:"):
+            value = SecretCipher(settings.calendar_token_encryption_key).decrypt(
+                value.removeprefix("fernet:")
+            )
+        result[str(row["label"])] = value
+    return result
+
+
+def delete_saved_places(conn: sqlite3.Connection, athlete_id: str) -> None:
+    conn.execute("DELETE FROM saved_places WHERE athlete_id = ?", (athlete_id,))
+    conn.commit()
+
+
+def save_scheduling_preferences(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    **updates: object,
+) -> None:
+    allowed = {
+        "preferred_start",
+        "preferred_end",
+        "session_minutes",
+        "pre_buffer_minutes",
+        "post_buffer_minutes",
+        "unknown_location_buffer_minutes",
+        "bedtime_buffer_minutes",
+        "travel_mode",
+        "default_location_label",
+    }
+    current = scheduling_preferences(conn, athlete_id)
+    values = {
+        "preferred_start": "06:00",
+        "preferred_end": "21:00",
+        "session_minutes": 90,
+        "pre_buffer_minutes": 15,
+        "post_buffer_minutes": 30,
+        "unknown_location_buffer_minutes": 30,
+        "bedtime_buffer_minutes": 90,
+        "travel_mode": "DRIVE",
+        "default_location_label": None,
+        **current,
+        **{key: value for key, value in updates.items() if key in allowed and value is not None},
+    }
+    conn.execute(
+        """
+        INSERT INTO scheduling_preferences
+            (athlete_id, preferred_start, preferred_end, session_minutes,
+             pre_buffer_minutes, post_buffer_minutes, unknown_location_buffer_minutes,
+             bedtime_buffer_minutes, travel_mode, default_location_label, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(athlete_id) DO UPDATE SET
+            preferred_start = excluded.preferred_start,
+            preferred_end = excluded.preferred_end,
+            session_minutes = excluded.session_minutes,
+            pre_buffer_minutes = excluded.pre_buffer_minutes,
+            post_buffer_minutes = excluded.post_buffer_minutes,
+            unknown_location_buffer_minutes = excluded.unknown_location_buffer_minutes,
+            bedtime_buffer_minutes = excluded.bedtime_buffer_minutes,
+            travel_mode = excluded.travel_mode,
+            default_location_label = excluded.default_location_label,
+            updated_at = excluded.updated_at
+        """,
+        (
+            athlete_id,
+            values["preferred_start"],
+            values["preferred_end"],
+            values["session_minutes"],
+            values["pre_buffer_minutes"],
+            values["post_buffer_minutes"],
+            values["unknown_location_buffer_minutes"],
+            values["bedtime_buffer_minutes"],
+            values["travel_mode"],
+            values["default_location_label"],
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+
+
+def scheduling_preferences(conn: sqlite3.Connection, athlete_id: str) -> dict[str, object]:
+    row = conn.execute(
+        "SELECT * FROM scheduling_preferences WHERE athlete_id = ?", (athlete_id,)
+    ).fetchone()
+    if row is None:
+        return {}
+    return {
+        key: row[key]
+        for key in (
+            "preferred_start",
+            "preferred_end",
+            "session_minutes",
+            "pre_buffer_minutes",
+            "post_buffer_minutes",
+            "unknown_location_buffer_minutes",
+            "bedtime_buffer_minutes",
+            "travel_mode",
+            "default_location_label",
+        )
+    }
+
+
+def create_schedule_proposal(
+    conn: sqlite3.Connection,
+    *,
+    proposal_id: str,
+    athlete_id: str,
+    local_date: str,
+    starts_at: str,
+    ends_at: str,
+    gym_label: str,
+    lift: str | None,
+    reasons: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO schedule_proposals
+            (id, athlete_id, local_date, starts_at, ends_at, gym_label, lift,
+             status, reasons, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        """,
+        (
+            proposal_id,
+            athlete_id,
+            local_date,
+            starts_at,
+            ends_at,
+            gym_label,
+            lift,
+            reasons,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+
+
+def schedule_proposal(
+    conn: sqlite3.Connection, athlete_id: str, proposal_id: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM schedule_proposals WHERE athlete_id = ? AND id = ?",
+        (athlete_id, proposal_id.upper()),
+    ).fetchone()
+
+
+def confirmed_schedule_for_date(
+    conn: sqlite3.Connection, athlete_id: str, local_date: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT * FROM schedule_proposals
+        WHERE athlete_id = ? AND local_date = ? AND status = 'confirmed'
+          AND calendar_event_id IS NOT NULL
+        ORDER BY confirmed_at DESC LIMIT 1
+        """,
+        (athlete_id, local_date),
+    ).fetchone()
+
+
+def confirm_schedule_proposal(
+    conn: sqlite3.Connection, athlete_id: str, proposal_id: str, event_id: str
+) -> None:
+    row = schedule_proposal(conn, athlete_id, proposal_id)
+    if row is not None:
+        conn.execute(
+            """
+            UPDATE schedule_proposals SET status = 'superseded'
+            WHERE athlete_id = ? AND local_date = ? AND status = 'confirmed'
+              AND id <> ?
+            """,
+            (athlete_id, row["local_date"], proposal_id.upper()),
+        )
+        conn.execute(
+            """
+            UPDATE schedule_proposals SET status = 'cancelled'
+            WHERE athlete_id = ? AND local_date = ? AND status = 'pending'
+              AND id <> ?
+            """,
+            (athlete_id, row["local_date"], proposal_id.upper()),
+        )
+    conn.execute(
+        """
+        UPDATE schedule_proposals
+        SET status = 'confirmed', calendar_event_id = ?, confirmed_at = ?
+        WHERE athlete_id = ? AND id = ? AND status = 'pending'
+        """,
+        (
+            event_id,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            athlete_id,
+            proposal_id.upper(),
+        ),
+    )
+    conn.commit()

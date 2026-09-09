@@ -163,6 +163,50 @@ class ConfigureProgram:
 
 
 @dataclass(frozen=True)
+class ConfigurePlace:
+    label: str
+    location: str
+
+
+@dataclass(frozen=True)
+class ConfigureCalendarPlanning:
+    preferred_start: str | None = None
+    preferred_end: str | None = None
+    session_minutes: int | None = None
+    pre_buffer_minutes: int | None = None
+    post_buffer_minutes: int | None = None
+    travel_mode: str | None = None
+    default_location_label: str | None = None
+
+
+@dataclass(frozen=True)
+class ConnectCalendar:
+    pass
+
+
+@dataclass(frozen=True)
+class DisconnectCalendar:
+    pass
+
+
+@dataclass(frozen=True)
+class ForgetPlaces:
+    pass
+
+
+@dataclass(frozen=True)
+class AskTrainingSchedule:
+    scheduled_on: str
+    lift: str | None = None
+    gym_label: str = "gym"
+
+
+@dataclass(frozen=True)
+class ConfirmTrainingSchedule:
+    proposal_id: str
+
+
+@dataclass(frozen=True)
 class Clarify:
     question: str
 
@@ -180,6 +224,13 @@ Action = (
     | AskNutritionPlan
     | AskPrescription
     | ConfigureProgram
+    | ConfigurePlace
+    | ConfigureCalendarPlanning
+    | ConnectCalendar
+    | DisconnectCalendar
+    | ForgetPlaces
+    | AskTrainingSchedule
+    | ConfirmTrainingSchedule
     | Clarify
 )
 
@@ -518,6 +569,93 @@ CONFIGURE_PROGRAM = types.FunctionDeclaration(
     ),
 )
 
+CONFIGURE_PLACE = types.FunctionDeclaration(
+    name="configure_place",
+    description=(
+        "Save a place the athlete explicitly names, such as gym, home, or office. "
+        "Store an address or a value prefixed place_id: exactly as supplied; never infer live location."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "label": types.Schema(type=types.Type.STRING),
+            "location": types.Schema(type=types.Type.STRING),
+        },
+        required=["label", "location"],
+    ),
+)
+
+CONFIGURE_CALENDAR_PLANNING = types.FunctionDeclaration(
+    name="configure_calendar_planning",
+    description=(
+        "Record explicit preferences for finding training slots around calendar events and travel."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "preferred_start": types.Schema(type=types.Type.STRING, description="Local HH:MM."),
+            "preferred_end": types.Schema(type=types.Type.STRING, description="Local HH:MM."),
+            "session_minutes": types.Schema(type=types.Type.INTEGER),
+            "pre_buffer_minutes": types.Schema(type=types.Type.INTEGER),
+            "post_buffer_minutes": types.Schema(type=types.Type.INTEGER),
+            "travel_mode": types.Schema(
+                type=types.Type.STRING,
+                enum=["drive", "walk", "bicycle", "transit", "two_wheeler"],
+            ),
+            "default_location_label": types.Schema(
+                type=types.Type.STRING,
+                description="Saved place used before the first and after the last event, e.g. home.",
+            ),
+        },
+    ),
+)
+
+CONNECT_CALENDAR = types.FunctionDeclaration(
+    name="connect_calendar",
+    description="The athlete explicitly asks to connect or link Google Calendar.",
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+)
+
+DISCONNECT_CALENDAR = types.FunctionDeclaration(
+    name="disconnect_calendar",
+    description="The athlete explicitly asks to disconnect Google Calendar and delete stored tokens.",
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+)
+
+FORGET_PLACES = types.FunctionDeclaration(
+    name="forget_places",
+    description="The athlete explicitly asks to delete all saved home, office and gym locations.",
+    parameters=types.Schema(type=types.Type.OBJECT, properties={}),
+)
+
+ASK_TRAINING_SCHEDULE = types.FunctionDeclaration(
+    name="ask_training_schedule",
+    description=(
+        "The athlete asks the system to find calendar-aware times for a workout. "
+        "Do not choose a time yourself; deterministic Python checks sleep, events and travel."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "scheduled_on": types.Schema(type=types.Type.STRING, description="Date as YYYY-MM-DD."),
+            "lift": types.Schema(type=types.Type.STRING),
+            "gym_label": types.Schema(type=types.Type.STRING),
+        },
+    ),
+)
+
+CONFIRM_TRAINING_SCHEDULE = types.FunctionDeclaration(
+    name="confirm_training_schedule",
+    description=(
+        "The athlete explicitly confirms one proposed workout option using its short ID."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={"proposal_id": types.Schema(type=types.Type.STRING)},
+        required=["proposal_id"],
+    ),
+)
+
 CLARIFY = types.FunctionDeclaration(
     name="clarify",
     description=(
@@ -551,6 +689,13 @@ TOOL = types.Tool(
         ASK_NUTRITION_PLAN,
         ASK_PRESCRIPTION,
         CONFIGURE_PROGRAM,
+        CONFIGURE_PLACE,
+        CONFIGURE_CALENDAR_PLANNING,
+        CONNECT_CALENDAR,
+        DISCONNECT_CALENDAR,
+        FORGET_PLACES,
+        ASK_TRAINING_SCHEDULE,
+        CONFIRM_TRAINING_SCHEDULE,
         CLARIFY,
     ]
 )
@@ -568,6 +713,13 @@ TOOL_NAMES = (
     "ask_nutrition_plan",
     "ask_prescription",
     "configure_program",
+    "configure_place",
+    "configure_calendar_planning",
+    "connect_calendar",
+    "disconnect_calendar",
+    "forget_places",
+    "ask_training_schedule",
+    "confirm_training_schedule",
     "clarify",
 )
 
@@ -628,6 +780,18 @@ def _resolve_meet_date(value: Any, today: date) -> str | None:
         raise ValidationError(f"meet_date is in the past: {parsed}")
     if parsed > today + timedelta(days=730):
         raise ValidationError(f"meet_date is implausibly far away: {parsed}")
+    return parsed.isoformat()
+
+
+def _resolve_schedule_date(value: Any, today: date) -> str:
+    if not value:
+        return today.isoformat()
+    try:
+        parsed = date.fromisoformat(str(value).strip())
+    except ValueError:
+        raise ValidationError(f"scheduled_on is not YYYY-MM-DD: {value!r}") from None
+    if parsed < today or parsed > today + timedelta(days=30):
+        raise ValidationError("scheduled_on must be between today and 30 days ahead")
     return parsed.isoformat()
 
 
@@ -890,6 +1054,59 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
         if all(value is None for value in action.__dict__.values()):
             raise ValidationError("configure_program carried no usable field")
         return action
+
+    if name == "configure_place":
+        label = str(args.get("label") or "").strip().lower()[:40]
+        location = str(args.get("location") or "").strip()[:500]
+        if not label or not location:
+            raise ValidationError("configure_place requires a label and location")
+        return ConfigurePlace(label=label, location=location)
+
+    if name == "configure_calendar_planning":
+        mode = str(args.get("travel_mode") or "").strip().upper() or None
+        if mode is not None and mode not in {
+            "DRIVE", "WALK", "BICYCLE", "TRANSIT", "TWO_WHEELER"
+        }:
+            raise ValidationError(f"unknown travel mode: {mode!r}")
+        action = ConfigureCalendarPlanning(
+            preferred_start=_clock(args.get("preferred_start"), "preferred_start"),
+            preferred_end=_clock(args.get("preferred_end"), "preferred_end"),
+            session_minutes=_int(args.get("session_minutes"), "session_minutes", 300),
+            pre_buffer_minutes=_int(args.get("pre_buffer_minutes"), "pre_buffer_minutes", 180),
+            post_buffer_minutes=_int(args.get("post_buffer_minutes"), "post_buffer_minutes", 180),
+            travel_mode=mode,
+            default_location_label=(
+                str(args.get("default_location_label") or "").strip().lower()[:40] or None
+            ),
+        )
+        if all(value is None for value in action.__dict__.values()):
+            raise ValidationError("configure_calendar_planning carried no usable field")
+        if action.preferred_start and action.preferred_end and action.preferred_start >= action.preferred_end:
+            raise ValidationError("preferred training start must be before preferred end")
+        return action
+
+    if name == "connect_calendar":
+        return ConnectCalendar()
+
+    if name == "disconnect_calendar":
+        return DisconnectCalendar()
+
+    if name == "forget_places":
+        return ForgetPlaces()
+
+    if name == "ask_training_schedule":
+        gym_label = str(args.get("gym_label") or "gym").strip().lower()[:40] or "gym"
+        return AskTrainingSchedule(
+            scheduled_on=_resolve_schedule_date(args.get("scheduled_on"), today),
+            lift=normalize_lift(args.get("lift")),
+            gym_label=gym_label,
+        )
+
+    if name == "confirm_training_schedule":
+        proposal_id = str(args.get("proposal_id") or "").strip().upper()
+        if not proposal_id or len(proposal_id) > 20:
+            raise ValidationError("confirm_training_schedule requires a proposal ID")
+        return ConfirmTrainingSchedule(proposal_id)
 
     if name == "clarify":
         question = str(args.get("question") or "").strip()

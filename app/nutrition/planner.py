@@ -106,6 +106,26 @@ def _clock(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def _outside_busy(
+    target: str,
+    busy_windows: tuple[tuple[str, str], ...],
+    *,
+    prefer_earlier: bool,
+) -> str:
+    """Move a food/supplement time out of a busy event without changing the day."""
+    minute = _minute(target)
+    windows = sorted((_minute(start), _minute(end)) for start, end in busy_windows)
+    for _ in range(len(windows) + 1):
+        conflict = next(((start, end) for start, end in windows if start <= minute < end), None)
+        if conflict is None:
+            break
+        start, end = conflict
+        earlier = max(0, start - 15)
+        later = min(23 * 60 + 59, end + 15)
+        minute = earlier if prefer_earlier else later
+    return _clock(minute)
+
+
 def _allowed(food: str, diet_style: str, allergies: tuple[str, ...]) -> bool:
     normalized = food.lower().strip()
     if any(allergen.lower().strip() in normalized for allergen in allergies):
@@ -123,6 +143,8 @@ def build_daily_plan(
     *,
     training_time: str | None,
     supplements: tuple[Supplement, ...] = (),
+    busy_windows: tuple[tuple[str, str], ...] = (),
+    bedtime: str | None = None,
 ) -> NutritionPlan:
     """Build timing and choices without inventing foods, targets, or doses."""
     available = tuple(
@@ -176,7 +198,21 @@ def build_daily_plan(
             meals = training_meals[-1:]
     else:
         meals = baseline_meals[: profile.meals_per_day]
+    meals = [
+        MealSlot(
+            meal.label,
+            _outside_busy(
+                meal.time,
+                busy_windows,
+                prefer_earlier=meal.label == "pre-training meal",
+            ),
+            meal.foods,
+            meal.purpose,
+        )
+        for meal in meals
+    ]
     meals = sorted(meals, key=lambda meal: _minute(meal.time))
+    meal_times = {meal.label: meal.time for meal in meals}
 
     supplement_slots: list[SupplementSlot] = []
     skipped_unapproved = False
@@ -185,13 +221,17 @@ def build_daily_plan(
             skipped_unapproved = True
             continue
         if supplement.timing in {"breakfast", "with_food"}:
-            when = "08:00"
+            when = meal_times.get("breakfast", meals[0].time if meals else "08:00")
         elif supplement.timing == "pre_training" and training_time:
-            when = _clock(_minute(training_time) - 60)
+            when = _outside_busy(
+                _clock(_minute(training_time) - 60), busy_windows, prefer_earlier=True
+            )
         elif supplement.timing == "post_training" and training_time:
-            when = _clock(_minute(training_time) + 60)
+            when = meal_times.get(
+                "post-training meal", _clock(_minute(training_time) + 60)
+            )
         elif supplement.timing == "bedtime":
-            when = "21:30"
+            when = bedtime or "21:30"
         else:
             continue
         supplement_slots.append(
@@ -204,6 +244,8 @@ def build_daily_plan(
         )
 
     notes = ["Meal choices are limited to the athlete's recorded food access and exclusions."]
+    if busy_windows:
+        notes.append("Meal and approved-supplement times were moved outside calendar busy windows.")
     if profile.protein_target_g is not None:
         notes.append(f"Recorded professional/athlete protein target: {profile.protein_target_g:g} g/day.")
     if profile.calorie_target is not None:

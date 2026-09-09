@@ -25,6 +25,16 @@ services:
         value: "true"
       - key: ENABLE_MORNING_SCHEDULER
         value: "true"
+      - key: GOOGLE_CALENDAR_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CALENDAR_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: OAUTH_STATE_SECRET
+        generateValue: true
+      - key: CALENDAR_TOKEN_ENCRYPTION_KEY
+        sync: false
       - key: DATABASE_PATH
         value: /var/data/training_log.db
     disk:

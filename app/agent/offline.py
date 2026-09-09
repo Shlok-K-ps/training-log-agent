@@ -55,6 +55,17 @@ CHECKIN_PATTERNS = {
     "calories": re.compile(r"\b(?:calories|kcal)\s*(\d{3,5})\b", re.I),
 }
 NAP_RE = re.compile(r"\bnap(?:ped)?\s*(?:for\s*)?(\d{1,3})\s*(?:m|min|mins|minutes)\b", re.I)
+CONNECT_CALENDAR_RE = re.compile(r"\b(connect|link)\s+(?:my\s+)?(?:google\s+)?calendar\b", re.I)
+DISCONNECT_CALENDAR_RE = re.compile(r"\b(disconnect|unlink)\s+(?:my\s+)?(?:google\s+)?calendar\b", re.I)
+SCHEDULE_WORKOUT_RE = re.compile(
+    r"\b(schedule|slot|plan)\s+(?:my\s+)?(?:workout|training|session|squat|bench|deadlift)\b",
+    re.I,
+)
+CONFIRM_SCHEDULE_RE = re.compile(r"^\s*(?:confirm|book)\s+([a-f0-9]{4,20})\s*$", re.I)
+PLACE_RE = re.compile(
+    r"^\s*(?:my\s+)?(gym|home|office)(?:\s+location)?\s+is\s+(.{4,500})\s*$", re.I
+)
+FORGET_PLACES_RE = re.compile(r"\b(forget|delete|clear)\s+(?:my\s+)?(?:saved\s+)?(places|locations)\b", re.I)
 
 
 class OfflineClient:
@@ -63,6 +74,24 @@ class OfflineClient:
     def call(self, text: str, system_instruction: str) -> list[tuple[str, dict[str, Any]]]:
         calls: list[tuple[str, dict[str, Any]]] = []
         lowered = text.lower()
+
+        confirmation = CONFIRM_SCHEDULE_RE.match(text)
+        place = PLACE_RE.match(text)
+        if FORGET_PLACES_RE.search(text):
+            calls.append(("forget_places", {}))
+        elif DISCONNECT_CALENDAR_RE.search(text):
+            calls.append(("disconnect_calendar", {}))
+        elif CONNECT_CALENDAR_RE.search(text):
+            calls.append(("connect_calendar", {}))
+        elif confirmation:
+            calls.append(("confirm_training_schedule", {"proposal_id": confirmation.group(1)}))
+        elif place:
+            calls.append(
+                ("configure_place", {"label": place.group(1), "location": place.group(2)})
+            )
+        elif SCHEDULE_WORKOUT_RE.search(text):
+            lift = LIFT_IN_QUERY_RE.search(lowered)
+            calls.append(("ask_training_schedule", {"lift": lift.group(1)} if lift else {}))
 
         for match in SET_RE.finditer(text):
             unit = match.group("unit") or "kg"
