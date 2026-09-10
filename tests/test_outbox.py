@@ -168,7 +168,11 @@ def test_the_legacy_sender_still_exists_but_is_no_longer_wired_in(scheduled):
     """send_due_morning_prompts bypasses the gate. main.py must not call it."""
     from pathlib import Path
 
-    main = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text()
+    # encoding is explicit: app/main.py contains em dashes and curly quotes, and
+    # Windows would otherwise decode it as cp1252 and raise.
+    main = (Path(__file__).resolve().parent.parent / "app" / "main.py").read_text(
+        encoding="utf-8"
+    )
     assert "send_due_morning_prompts" not in main
     assert "send_approved_prompts" in main
     sent = Outbox()
