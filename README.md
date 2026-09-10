@@ -2,27 +2,53 @@
 
 GitHub: <https://github.com/Shlok-K-ps/training-log-agent>
 
-A WhatsApp agent for a 20-athlete powerlifting team. Athletes text their sessions
-in plain English. The agent parses them into structured data, tracks training,
-sleep, readiness, soreness, stress, bodyweight and nutrition, then returns a
-deterministic verdict or next-session plan.
+**A coaching agent for one coach and twenty athletes.**
 
-Athletes can also configure a local morning check-in time. The service sends a
-proactive WhatsApp sleep prompt, proposes a bounded nap window when recovery is
-low, asks for a post-nap readiness update, and recalculates the day's planned
-lift without ever exceeding the original base load.
+A powerlifting coach's real job is not writing programs. It is reading twenty
+WhatsApp messages a day, remembering who is hurt, noticing who has gone quiet,
+and catching the lifter who has been stuck at the same weight for a month. That
+work scales linearly with the roster, and it is the first thing to slip when the
+coach gets busy — which is exactly when an athlete most needs someone to notice.
 
-The same morning flow can build a food-access plan around training. It uses only
-the athlete's recorded diet style, allergies, cooking access and available
-foods. Supplements are scheduled only when the exact regimen and a verified
-batch are allowlisted by the team operator outside athlete messages. The model
-cannot approve or recommend one, invent a dose, or override the
-prohibited-substance safeguard.
+This agent absorbs that work. Athletes text their sessions in plain English from
+the app they already have open. The agent parses them into structured data,
+tracks training, sleep, readiness, soreness, stress, bodyweight and nutrition,
+and returns a deterministic verdict — progressing, stalled, deload — computed
+the same way every time. The coach reviews exceptions instead of an inbox.
 
-Optional Google Calendar and Routes integrations find training slots around
-meetings, travel time, bedtime and same-day sleep/readiness. The athlete chooses
-from WhatsApp options; only `confirm CODE` writes to an app-owned Power Coach
-calendar. The best slot also drives meal and approved-supplement timing.
+## What the coach stops doing by hand
+
+| Done by hand | Done by the agent |
+|---|---|
+| Reading every message and copying numbers into a spreadsheet | The athlete texts; the message is parsed, validated and stored |
+| Remembering who is hurt | An injury flag suppresses every load suggestion until a named person clears it |
+| Spotting a stall buried in weeks of logs | Stall episodes are recomputed on every message |
+| Chasing athletes for sleep and readiness | The agent sends the morning check-in itself, in each athlete's timezone |
+| Finding a slot around someone's timetable | The agent reads their calendar and real travel time and proposes options |
+| Booking the session | `confirm CODE` writes it to an app-owned calendar, idempotently |
+
+Nothing here replaces the coach's judgement. It removes the clerical work that
+stands between the coach and the two or three athletes who actually need
+attention today.
+
+## Who is allowed to decide what
+
+| | Athlete | Agent | Coach |
+|---|---|---|---|
+| Report a session, pain, sleep, food | ✅ | — | — |
+| Parse a message into structured data | — | ✅ | — |
+| Judge progressing / stalled / deload | — | ✅ deterministic | — |
+| Open an injury flag | ✅ | ✅ | ✅ |
+| **Close an injury flag** | ❌ | ❌ | ✅ only |
+| Approve a supplement regimen | ❌ | ❌ | ✅ only |
+| Set a calorie or protein target | reports one | ❌ | reviews it |
+
+The two ❌ rows are enforced in code, not in a prompt. See
+[`app/decision/guardian.py`](app/decision/guardian.py).
+
+---
+
+Athletes still get a direct, useful reply — the coach layer sits behind it:
 
 ```
 athlete                                                        agent
@@ -376,23 +402,39 @@ trustworthy:
   prescribe        built for linear/RPE methods; other methods wait for
                     verified training-max, block, or variation inputs
         │
-  push daily       the agent messages first, instead of waiting
-                    morning sleep check-ins and meal/supplement plans are built
+  push daily       built: morning sleep check-ins, meal and supplement timing,
+                    sent in each athlete's own timezone
         │
   autoregulate     built: same-day readiness may only hold or reduce load
         │
-  injury flags     graded return-to-load protocols, physio in the loop
+  calendar agent   built: reads events/locations, computes travel, proposes
+                    slots, writes only a confirmed option to an app-owned calendar
+        │
+  injury gate      built: the model cannot clear an injury; a named person must
+                    │        graded return-to-load protocols are not built yet
+        │
+  coach console    NOT BUILT — the roster view: who stalled, who is flagged,
+                    who has asked to be cleared, and who has gone quiet
         │
   nutrition        food-access timing built; targets still need athlete/pro approval
-        │
-  calendar agent   built: reads events/locations, computes travel, proposes slots,
-                    writes only a confirmed option to an app-owned calendar
 ```
 
 You cannot autoregulate on data you cannot parse reliably, and you cannot
 prescribe from a history you do not trust. Nutrition, sleep and supplements sit
-last deliberately: highest harm when wrong, hardest to verify, and needing a
+late deliberately: highest harm when wrong, hardest to verify, and needing a
 dietitian or physio in the loop rather than a rule in a Python file.
+
+**The coach console is the next thing built**, and it is the piece that makes
+this a coaching tool rather than twenty separate athlete tools. Today the
+coach-facing surface is one command:
+
+```bash
+python scripts/clear_injury.py --list
+# +919000000000  open 20d since 2026-08-20  (left knee, squatting) · STALE
+```
+
+Everything the console needs is already in the database. What is missing is the
+view over it, and an interface a coach can use without a terminal.
 
 ---
 
@@ -420,6 +462,7 @@ app/
   agent/       Layer 1 — schemas, the Gemini call, an offline stub
   storage/     Layer 2 — SQLite schema, queries, lift-name normalisation
   decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
+               guardian.py — the injury gate; issues the only SafetyClearance
   programming/ Pure Python — five methods, selector, session structure
   channels/    Twilio/WhatsApp transport: identity, signatures, chunking
   integrations/ Google Calendar OAuth/API and Google Routes travel facts
@@ -429,7 +472,8 @@ app/
 chat.py        terminal harness, no phone required
 reference/     OpenPowerlifting sample the validation bounds derive from
 docs/          programming, readiness and nutrition evidence/policy boundaries
-scripts/       check_gemini.py — prove Layer 1 against messy input
+scripts/       clear_injury.py — COACH TOOL: list flagged athletes, close a flag
+               check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         245 tests, no network
+tests/         259 tests, no network
 ```
