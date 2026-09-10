@@ -1,5 +1,18 @@
-# Render blueprint. Connect the repo, add the secrets, point Twilio at
-# https://<service>.onrender.com/webhook/whatsapp
+# Render Blueprint.
+#
+# This file is set up for the FREE plan, which has two limits worth knowing
+# before you rely on it:
+#
+#   1. No persistent disk. The SQLite file lives on a temporary filesystem, so
+#      training history is lost on every deploy and restart. Fine for a demo,
+#      not fine for real athletes. To fix it, move to a paid instance type and
+#      add back the `disk:` block at the bottom of this file.
+#   2. The service sleeps after 15 minutes without traffic and takes about a
+#      minute to wake. The morning scheduler cannot fire while it is asleep, so
+#      proactive check-ins are unreliable until the service is always on.
+#
+# Neither limit affects the coach console, the webhook, or any of the rules —
+# those work exactly as they do locally.
 services:
   - type: web
     name: training-log-agent
@@ -9,10 +22,13 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # --- Layer 1: the parser -------------------------------------------
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+
+      # --- Channel: Twilio WhatsApp ---------------------------------------
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
@@ -23,8 +39,29 @@ services:
         sync: false
       - key: VALIDATE_TWILIO_SIGNATURE
         value: "true"
+
+      # --- Layer 4: the coach console -------------------------------------
+      # Render generates the token. Read it in the Render dashboard, then open
+      # https://<your-service>.onrender.com/coach?token=<that value>
+      - key: COACH_ACCESS_TOKEN
+        generateValue: true
+      - key: COACH_NAME
+        sync: false
+      - key: COACH_APPROVAL_REQUIRED
+        value: "true"
+      - key: COACH_DRAFT_HOUR
+        value: "20"
+      - key: COACH_SILENT_AFTER_DAYS
+        value: "7"
+
+      # --- Proactive sending ----------------------------------------------
+      # Unreliable on the free plan; see note 2 above.
       - key: ENABLE_MORNING_SCHEDULER
         value: "true"
+
+      # --- Optional: calendar and travel planning -------------------------
+      # Leave unset to run without them. Saved locations are refused entirely
+      # unless CALENDAR_TOKEN_ENCRYPTION_KEY is configured.
       - key: GOOGLE_CALENDAR_CLIENT_ID
         sync: false
       - key: GOOGLE_CALENDAR_CLIENT_SECRET
@@ -35,9 +72,17 @@ services:
         generateValue: true
       - key: CALENDAR_TOKEN_ENCRYPTION_KEY
         sync: false
+
+      # --- Layer 2: storage -----------------------------------------------
+      # Temporary on the free plan. On a paid instance, change this to
+      # /var/data/training_log.db and uncomment the disk block below.
       - key: DATABASE_PATH
-        value: /var/data/training_log.db
-    disk:
-      name: training-log-data
-      mountPath: /var/data
-      sizeGB: 1
+        value: /tmp/training_log.db
+
+# Persistent storage requires a paid instance type. Uncomment this and change
+# `plan` above to `starter` when training history needs to survive a restart.
+#
+#    disk:
+#      name: training-log-data
+#      mountPath: /var/data
+#      sizeGB: 1

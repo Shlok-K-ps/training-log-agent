@@ -320,12 +320,23 @@ Text the sandbox number. It replies.
 
 ### 5. Deploy
 
-`render.yaml` documents the intended single-instance service, but it is not a
-free-tier production deployment: the database needs a persistent disk and the
-morning scheduler needs an always-on process. Render offers those together only
-on a paid service. Choose that paid plan or move storage and scheduled jobs to
-managed external services before connecting a production Blueprint. A
-`Dockerfile` is included for other hosts.
+`render.yaml` is set up for Render's **free** plan. Connect the repo as a
+Blueprint, fill in the secrets Render asks for, and the coach console is live at
+`https://<your-service>.onrender.com/coach?token=<COACH_ACCESS_TOKEN>` — Render
+generates that token; read it from the dashboard.
+
+Two free-plan limits, neither of which affects the rules or the console itself:
+
+- **No persistent disk.** Training history lives on a temporary filesystem and
+  is lost on every deploy and restart. Fine for a demo; not fine for real
+  athletes. Move to a paid instance type and uncomment the `disk:` block to fix.
+- **The service sleeps** after 15 minutes without traffic. Proactive morning
+  check-ins cannot fire while it is asleep, so they are unreliable until the
+  service is always on.
+
+Netlify, Vercel and similar static/serverless hosts cannot run this service:
+it is a long-lived Python process with a background scheduler, not a set of
+files plus short-lived functions. A `Dockerfile` is included for other hosts.
 
 ### 6. Connect Google Calendar and travel time
 
