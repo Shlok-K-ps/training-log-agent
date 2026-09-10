@@ -27,6 +27,7 @@ from app.scheduling.morning import MorningPrompt, morning_prompt
 from app.storage import db
 
 MORNING = "morning_checkin"
+COACH_NOTE = "coach_note"
 
 
 def _local_now(conn: sqlite3.Connection, athlete_id: str, now_utc: datetime):
@@ -98,5 +99,33 @@ def send_approved_prompts(
         db.mark_scheduled_delivery(conn, prompt.athlete_id, MORNING, prompt.local_date)
         if row is not None:
             db.mark_draft_sent(conn, prompt.athlete_id, MORNING, prompt.local_date)
+        sent += 1
+    return sent
+
+
+def send_approved_notes(
+    conn: sqlite3.Connection,
+    sender: Callable[[str, str], None],
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    """Send coach-written notes whose date has arrived, in the athlete's timezone.
+
+    A note the coach typed and queued is already reviewed — they wrote it — so it
+    carries status 'approved' from the moment it is created. This only decides
+    *when* it leaves, and refuses to send one dated in the athlete's future.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    sent = 0
+    for row in db.approved_drafts(conn, COACH_NOTE):
+        athlete_id = str(row["athlete_id"])
+        resolved = _local_now(conn, athlete_id, now_utc)
+        local_today = (
+            resolved[0].date().isoformat() if resolved else now_utc.date().isoformat()
+        )
+        if str(row["local_date"]) > local_today:
+            continue
+        sender(athlete_id, str(row["body"]))
+        db.mark_draft_sent(conn, athlete_id, COACH_NOTE, str(row["local_date"]))
         sent += 1
     return sent

@@ -912,6 +912,29 @@ def draft(
     ).fetchone()
 
 
+def approved_drafts(conn: sqlite3.Connection, message_kind: str) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM outbound_drafts WHERE status = 'approved' AND message_kind = ? "
+            "ORDER BY local_date, athlete_id",
+            (message_kind,),
+        )
+    )
+
+
+def register_athlete(conn: sqlite3.Connection, athlete_id: str, name: str, *, on: str) -> None:
+    """Create an athlete before they have texted, so the coach can set the roster up."""
+    athlete_id = athlete_id.strip()
+    name = name.strip()
+    if not athlete_id.startswith("+") or len(athlete_id) < 8:
+        raise ValueError("an athlete id must be a phone number in E.164 form, e.g. +919812340001")
+    if not name:
+        raise ValueError("an athlete needs a name")
+    if athlete_id in list_athletes(conn):
+        raise ValueError("that athlete is already on the roster")
+    insert_entry(conn, Entry(athlete_id=athlete_id, athlete_name=name, kind="status", session_date=on))
+
+
 def pending_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
