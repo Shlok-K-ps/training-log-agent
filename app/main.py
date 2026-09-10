@@ -26,7 +26,10 @@ from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
 from app.coach import auth as coach_auth
+from app.coach.athlete import athlete_detail, suggest_message
+from app.coach.athlete_view import render_athlete
 from app.coach.demo import clear_demo_squad, is_demo, seed_demo_squad
+from app.scheduling.outbox import COACH_NOTE, send_approved_notes
 from app.coach import (
     COOKIE_NAME,
     build_roster,
@@ -101,7 +104,8 @@ def _send_morning_prompts() -> int:
         drafted = draft_upcoming_prompts(conn)
         if drafted:
             log.info("queued %d morning message(s) for coach review", len(drafted))
-        return send_approved_prompts(conn, whatsapp.send_outbound)
+        sent = send_approved_prompts(conn, whatsapp.send_outbound)
+        return sent + send_approved_notes(conn, whatsapp.send_outbound)
     finally:
         conn.close()
 
@@ -277,6 +281,102 @@ def _clear_demo() -> tuple[str, str]:
     finally:
         conn.close()
     return ("ok", f"Removed {removed} demo athletes.")
+
+
+@app.get("/coach/athlete/{athlete_id}", response_class=HTMLResponse)
+async def coach_athlete(athlete_id: str, request: Request, token: str = "") -> Response:
+    """One athlete: what they did, what the rules make of it, what to say back."""
+    effective = token.strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    try:
+        coach_auth.check(effective)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+    html = await run_in_threadpool(_render_athlete, athlete_id, None)
+    if html is None:
+        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
+    return HTMLResponse(html)
+
+
+@app.post("/coach/athlete/{athlete_id}/message", response_class=HTMLResponse)
+async def coach_message_athlete(athlete_id: str, request: Request) -> Response:
+    """Queue a coach-written message. They wrote it, so it needs no second approval."""
+    form = dict(await request.form())
+    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+    message = await run_in_threadpool(
+        _queue_note, athlete_id, str(form.get("body", ""))
+    )
+    html = await run_in_threadpool(_render_athlete, athlete_id, message)
+    if html is None:
+        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
+    return HTMLResponse(html)
+
+
+@app.post("/coach/athletes/register", response_class=HTMLResponse)
+async def coach_register_athlete(request: Request) -> Response:
+    form = dict(await request.form())
+    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+    message = await run_in_threadpool(
+        _register, str(form.get("athlete_id", "")), str(form.get("name", ""))
+    )
+    return HTMLResponse(await run_in_threadpool(_render_console, token, message))
+
+
+def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | None:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        if athlete_id not in db.list_athletes(conn):
+            return None
+        today = date.today()
+        detail = athlete_detail(conn, athlete_id, today=today)
+    finally:
+        conn.close()
+    return render_athlete(
+        detail,
+        coach=settings.coach_name,
+        suggested=suggest_message(detail, coach=settings.coach_name),
+        message=message,
+    )
+
+
+def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
+    body = body.strip()
+    if not body:
+        return ("err", "Nothing to send — the message was empty.")
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        today = date.today().isoformat()
+        db.create_draft(conn, athlete_id, COACH_NOTE, today, body)
+        db.review_draft(
+            conn, athlete_id, COACH_NOTE, today,
+            status="approved", reviewed_by=settings.coach_name, body=body,
+        )
+    except ValueError as exc:
+        return ("err", f"Not queued: {exc}")
+    finally:
+        conn.close()
+    return ("ok", "Queued. It goes out on the next send, in the athlete's timezone.")
+
+
+def _register(athlete_id: str, name: str) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        db.register_athlete(conn, athlete_id, name, on=date.today().isoformat())
+    except ValueError as exc:
+        return ("err", f"Not added: {exc}")
+    finally:
+        conn.close()
+    return ("ok", f"{name.strip()} added. They appear once they text, or right away here.")
 
 
 @app.get("/coach/outbox", response_class=HTMLResponse)

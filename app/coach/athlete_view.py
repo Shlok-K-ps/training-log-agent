@@ -118,8 +118,8 @@ def render_athlete(
     if detail.injured:
         days = f"{detail.injury_days_open}d" if detail.injury_days_open is not None else "open"
         tiles.append(("Injury", days, True))
-    if detail.roster.days_silent:
-        tiles.append(("Silent", f"{detail.roster.days_silent}d", detail.roster.days_silent >= 7))
+    if any(f.kind == "silent" for f in detail.roster.flags):
+        tiles.append(("Silent", f"{detail.roster.days_silent}d", True))
     if detail.roster.weeks_to_meet is not None:
         tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False))
     tile_html = "".join(

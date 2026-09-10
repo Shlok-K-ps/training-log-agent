@@ -176,7 +176,9 @@ def suggest_message(detail: AthleteDetail, *, coach: str) -> str:
     if today_sets:
         what = "; ".join(f"{s.lift} {s.summary}" for s in today_sets[:3])
         lines.append(f"Hi {first_name} — saw your session: {what}.")
-    elif detail.roster.days_silent:
+    elif any(f.kind == "silent" for f in detail.roster.flags):
+        # The roster flag, not the raw day count: an athlete who trains every
+        # third day is not silent, and telling them so reads as nagging.
         lines.append(
             f"Hi {first_name} — nothing logged for {detail.roster.days_silent} days. "
             "How's training going?"

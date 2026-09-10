@@ -16,6 +16,13 @@ from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage,
 # Red 25kg (Action/Deload), Yellow 15kg (Watch/Stall), Blue 20kg (Meet/Nav), Green 10kg (On track)
 # ------------------------------------------------------------------------------
 _BASE_CSS = """
+.who a.name{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
+.who a.name:hover{border-bottom-color:currentColor}
+.register form{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.register .hint{font-size:12.5px;color:var(--faint);margin:9px 0 0}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:3px;
+padding:14px 16px;margin-bottom:22px}
+.demo p{margin:0 0 9px;font-size:14.5px;color:var(--soft)}
 :root {
   --bg: #f4f5f6;
   --surface: #ffffff;
@@ -662,10 +669,25 @@ def _card(entry) -> str:
 
     return (
         f'<div class="card {entry.bucket.value}">'
-        f'<div class="who"><div><span>{escape(entry.display_name)}</span> {badge_markup}</div>'
+        f'<div class="who"><div><a class="name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a> {badge_markup}</div>'
         f'<span class="id">{escape(entry.athlete_id)}</span></div>'
         f"{body}{form}</div>"
     )
+
+
+_REGISTER_FORM = (
+    '<section class="register"><h2>Add an athlete</h2>'
+    '<div class="card">'
+    '<form method="post" action="/coach/athletes/register">'
+    '<input type="text" name="name" required maxlength="60" placeholder="Name">'
+    '<input type="text" name="athlete_id" required maxlength="20" '
+    'placeholder="WhatsApp number, e.g. +919812340001">'
+    '<button type="submit">Add</button>'
+    '</form>'
+    '<p class="hint">The number is their identity - it is how the agent knows who '
+    'is texting. They appear on the roster straight away and fill in as they log.</p>'
+    '</div></section>'
+)
 
 
 def _demo_controls(roster: Roster, has_demo: bool) -> str:
@@ -751,7 +773,7 @@ def render(
         f"<div style='margin-top:8px;'><span class='when'>{roster.reviewed_on.isoformat()}</span></div>"
         "</header>"
         f"<p class='summary'>{summary}</p>"
-        f"{banner}{_demo_controls(roster, has_demo)}{''.join(sections)}"
+        f"{banner}{_demo_controls(roster, has_demo)}{''.join(sections)}{_REGISTER_FORM}"
         "<footer>Every line here is computed by the same rules that answer the "
         "athlete. This page decides nothing on its own.</footer>"
         "</div></body></html>"
