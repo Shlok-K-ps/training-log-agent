@@ -18,6 +18,7 @@ import sqlite3
 
 from app.config import settings
 from app.decision.guardian import InjuryVeto, assess
+from app.decision.readiness import DailyCheckIn, evaluate_readiness
 from app.decision.rules import Verdict, evaluate
 from app.storage import db
 
@@ -59,6 +60,13 @@ class RosterEntry:
     days_silent: int | None = None
     injury_days_open: int | None = None
     weeks_to_meet: int | None = None
+    last_activity: str | None = None
+    phase: str = "maintain"
+    readiness_score: int | None = None
+    readiness_band: str | None = None
+    sleep_hours: float | None = None
+    latest_session: str | None = None
+    training_summary: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -121,12 +129,14 @@ def review_athlete(
     # 3. Training signal, from the same rules the athlete's reply uses.
     phase = db.latest_phase(conn, athlete_id)
     injured, injury_note = db.injury_state(conn, athlete_id)
+    assessments = []
     for lift in db.list_lifts(conn, athlete_id):
         history = db.session_history(conn, athlete_id, lift)
         assessment = evaluate(
             athlete_id, lift, history, phase=phase, injured=injured,
             injury_note=injury_note,
         )
+        assessments.append(assessment)
         if assessment.verdict is Verdict.DELOAD:
             flags.append(Flag("deload", f"{lift} — deload due"))
         elif assessment.verdict is Verdict.STALLED:
@@ -147,6 +157,59 @@ def review_athlete(
     else:
         bucket = Bucket.FINE
 
+    checkin = db.latest_checkin(conn, athlete_id, today.isoformat())
+    readiness_score = None
+    readiness_band = None
+    sleep_hours = None
+    if checkin is not None:
+        sleep_hours = checkin.sleep_hours
+        try:
+            readiness = evaluate_readiness(
+                DailyCheckIn(
+                    checked_on=checkin.session_date,
+                    sleep_hours=checkin.sleep_hours,
+                    sleep_quality=checkin.sleep_quality,
+                    readiness=checkin.readiness,
+                    soreness=checkin.soreness,
+                    stress=checkin.stress,
+                    bodyweight_kg=checkin.bodyweight_kg,
+                    protein_g=checkin.protein_g,
+                    calories=checkin.calories,
+                    nutrition_adherence=checkin.nutrition_adherence,
+                )
+            )
+            readiness_score = readiness.score
+            readiness_band = readiness.band.value
+        except Exception:  # noqa: BLE001 - partial check-ins still belong on the roster
+            pass
+
+    latest_rows = db.recent_entries(conn, athlete_id, limit=1)
+    latest_session = None
+    if latest_rows:
+        latest = latest_rows[0]
+        shape = f"{latest.sets}x{latest.reps} " if latest.sets and latest.reps else ""
+        load = f"@ {latest.weight_kg:g} kg" if latest.weight_kg is not None else ""
+        effort = f" · RPE {latest.rpe:g}" if latest.rpe is not None else ""
+        latest_session = f"{(latest.lift or 'session').title()} {shape}{load}{effort}".strip()
+
+    priority = {
+        Verdict.DELOAD: 0,
+        Verdict.REGRESSED: 1,
+        Verdict.STALLED: 2,
+        Verdict.HOLDING: 3,
+        Verdict.FLAT: 4,
+        Verdict.PROGRESSING: 5,
+        Verdict.BASELINE: 6,
+        Verdict.NO_DATA: 7,
+    }
+    headline = min(assessments, key=lambda a: priority[a.verdict]) if assessments else None
+    training_summary = (
+        f"{headline.lift.title()} · {headline.verdict.value.replace('_', ' ')}"
+        if headline else None
+    )
+    if injured:
+        training_summary = "Programming blocked · injury"
+
     return RosterEntry(
         athlete_id=athlete_id,
         name=db.athlete_name(conn, athlete_id),
@@ -155,6 +218,13 @@ def review_athlete(
         days_silent=days_silent,
         injury_days_open=injury_days,
         weeks_to_meet=weeks,
+        last_activity=last,
+        phase=phase,
+        readiness_score=readiness_score,
+        readiness_band=readiness_band,
+        sleep_hours=sleep_hours,
+        latest_session=latest_session,
+        training_summary=training_summary,
     )
 
 
@@ -173,6 +243,10 @@ class Roster:
     @property
     def needing_attention(self) -> int:
         return sum(1 for e in self.entries if e.bucket is not Bucket.FINE)
+
+    @property
+    def checked_in_today(self) -> int:
+        return sum(1 for e in self.entries if e.readiness_score is not None)
 
 
 @dataclass(frozen=True)

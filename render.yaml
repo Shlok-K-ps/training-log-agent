@@ -47,8 +47,6 @@ services:
         generateValue: true
       - key: COACH_NAME
         sync: false
-      - key: COACH_APPROVAL_REQUIRED
-        value: "true"
       - key: COACH_DRAFT_HOUR
         value: "20"
       - key: COACH_SILENT_AFTER_DAYS

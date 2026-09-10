@@ -77,7 +77,22 @@ def test_authenticated_coach_console_with_cookie():
         assert resp.status_code == 200
         assert "Coach Rao" in resp.text
         assert "Roster" in resp.text
+        assert "Overview" in resp.text
+        assert "Daily agent loop" in resp.text
+        assert "Approval queue" in resp.text
         assert "/coach/logout" in resp.text
+
+
+def test_athlete_directory_is_a_separate_authenticated_workspace():
+    with TestClient(app) as client:
+        assert client.get("/coach/athletes", follow_redirects=False).status_code == 303
+        client.cookies.set(COOKIE_NAME, TOKEN)
+        resp = client.get("/coach/athletes")
+        assert resp.status_code == 200
+        assert "Current status, recent progress and readiness" in resp.text
+        assert 'id="athlete-search"' in resp.text
+        assert 'id="athlete-filter"' in resp.text
+        assert "/coach/outbox" in resp.text
 
 
 def test_authenticated_coach_console_with_query_param_fallback():

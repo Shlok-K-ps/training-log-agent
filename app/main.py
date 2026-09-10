@@ -35,6 +35,7 @@ from app.coach import (
     build_roster,
     pending_reviews,
     render as render_roster,
+    render_athletes,
     render_landing,
     render_login,
     render_outbox,
@@ -227,12 +228,41 @@ def _render_console(token: str, message: tuple[str, str] | None) -> str:
         db.init_db(conn)
         roster = build_roster(conn, today=date.today())
         roster_ids = db.list_athletes(conn)
+        pending_count = len(db.pending_drafts(conn))
     finally:
         conn.close()
     has_demo = any(is_demo(a) for a in roster_ids)
     return render_roster(
         roster, token=token, coach=settings.coach_name, message=message,
-        has_demo=has_demo,
+        has_demo=has_demo, pending_count=pending_count,
+    )
+
+
+@app.get("/coach/athletes", response_class=HTMLResponse)
+async def coach_athletes(request: Request) -> Response:
+    """Searchable squad directory and the entry point to each athlete workspace."""
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    return HTMLResponse(await run_in_threadpool(_render_athlete_directory, None))
+
+
+def _render_athlete_directory(message: tuple[str, str] | None) -> str:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        roster = build_roster(conn, today=date.today())
+        roster_ids = db.list_athletes(conn)
+        pending_count = len(db.pending_drafts(conn))
+    finally:
+        conn.close()
+    return render_athletes(
+        roster, coach=settings.coach_name, message=message,
+        has_demo=any(is_demo(a) for a in roster_ids), pending_count=pending_count,
     )
 
 
@@ -326,7 +356,7 @@ async def coach_register_athlete(request: Request) -> Response:
     message = await run_in_threadpool(
         _register, str(form.get("athlete_id", "")), str(form.get("name", ""))
     )
-    return HTMLResponse(await run_in_threadpool(_render_console, token, message))
+    return HTMLResponse(await run_in_threadpool(_render_athlete_directory, message))
 
 
 def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | None:

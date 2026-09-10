@@ -55,6 +55,9 @@ class AthleteDetail:
     assessments: tuple[Assessment, ...]
     checkin: DailyCheckIn | None
     readiness_note: str | None
+    readiness_score: int | None
+    readiness_band: str | None
+    readiness_reasons: tuple[str, ...]
     injured: bool
     injury_note: str | None
     injury_days_open: int | None
@@ -62,6 +65,11 @@ class AthleteDetail:
     last_activity: str | None
     phase: str
     reviewed_on: date
+    program: dict[str, object]
+    schedule: dict[str, object]
+    nutrition: dict[str, object]
+    supplements: tuple[str, ...]
+    calendar_connected: bool
 
     @property
     def display_name(self) -> str:
@@ -122,6 +130,9 @@ def athlete_detail(
 
     row = db.latest_checkin(conn, athlete_id, today.isoformat())
     checkin = readiness_note = None
+    readiness_score = None
+    readiness_band = None
+    readiness_reasons: tuple[str, ...] = ()
     if row is not None:
         checkin = DailyCheckIn(
             checked_on=row.session_date,
@@ -138,11 +149,24 @@ def athlete_detail(
         try:
             band = evaluate_readiness(checkin)
             readiness_note = f"{band.band.value} · load factor {band.load_factor:g}"
+            readiness_score = band.score
+            readiness_band = band.band.value
+            readiness_reasons = band.reasons
         except Exception:  # noqa: BLE001 - a missing field must not break the page
             readiness_note = None
 
     safety = assess(conn, athlete_id, today=today)
     veto = safety if isinstance(safety, InjuryVeto) else None
+    program = db.latest_program_settings(conn, athlete_id)
+    schedule = db.latest_schedule_settings(conn, athlete_id)
+    nutrition = db.latest_nutrition_settings(conn, athlete_id)
+    supplements = tuple(
+        f"{entry.supplement_name} {entry.supplement_dose:g} {entry.supplement_unit} · "
+        f"{str(entry.supplement_timing).replace('_', ' ')} · approved by {entry.supplement_approved_by}"
+        for entry in db.active_supplements(conn, athlete_id)
+        if entry.supplement_name and entry.supplement_dose is not None
+        and entry.supplement_unit and entry.supplement_timing and entry.supplement_approved_by
+    )
 
     return AthleteDetail(
         athlete_id=athlete_id,
@@ -152,6 +176,9 @@ def athlete_detail(
         assessments=assessments,
         checkin=checkin,
         readiness_note=readiness_note,
+        readiness_score=readiness_score,
+        readiness_band=readiness_band,
+        readiness_reasons=readiness_reasons,
         injured=injured,
         injury_note=injury_note,
         injury_days_open=veto.days_open if veto else None,
@@ -159,6 +186,11 @@ def athlete_detail(
         last_activity=db.last_activity(conn, athlete_id),
         phase=phase,
         reviewed_on=today,
+        program=program,
+        schedule=schedule,
+        nutrition=nutrition,
+        supplements=supplements,
+        calendar_connected=db.oauth_connection(conn, athlete_id) is not None,
     )
 
 

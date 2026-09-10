@@ -371,7 +371,7 @@ the log but do not grant scheduling authority.
 ## Tests
 
 ```bash
-pytest -q          # 245 tests, no network
+pytest -q          # 321 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -424,8 +424,8 @@ trustworthy:
   injury gate      built: the model cannot clear an injury; a named person must
                     │        graded return-to-load protocols are not built yet
         │
-  coach console    built: the roster view — who is blocked on a coach decision,
-                    who stalled, who has gone quiet, who has a meet coming
+  coach console    built: overview, searchable squad directory, athlete history,
+                    readiness/program/nutrition context, and approval queue
         │
   nutrition        food-access timing built; targets still need athlete/pro approval
 ```
@@ -436,8 +436,18 @@ late deliberately: highest harm when wrong, hardest to verify, and needing a
 dietitian or physio in the loop rather than a rule in a Python file.
 
 **The coach console** is what makes this a coaching tool rather than twenty
-separate athlete tools. `GET /coach?token=…` sorts the whole squad by who needs
-a human first, and collapses everyone who doesn't:
+separate athlete tools. Sign in once at `/coach/login`; the authenticated
+workspace then has three persistent sections:
+
+- **Overview** — squad totals, same-day check-ins, pending approvals, and the
+  exceptions that need a coach first.
+- **Athletes** — searchable status/readiness directory. Each athlete opens into
+  training history and charts plus recovery, programming, scheduling, nutrition,
+  supplements, and an evidence-based message draft.
+- **Review queue** — the exact pending message beside the latest session,
+  current training trend, readiness state, and the reason it was surfaced.
+
+The overview still orders decisions before observations:
 
 ```
 Coach Rao — roster                                    2026-09-10
@@ -460,9 +470,10 @@ Silence is the signal no athlete will ever send you, so it is read out of the
 absence of rows rather than the presence of one. Every other line traces to the
 same rule that answers the athlete — the console computes no new verdicts.
 
-It makes exactly one write: closing an injury flag, which records the coach's
-name, the reason and a timestamp. That is the human the Safety Guardian
-requires, given somewhere to stand.
+Coach writes are explicit and attributed: enrolling an athlete, approving or
+holding a message, writing a direct note, and closing an injury flag. Injury
+clearance records the coach's name, reason and timestamp; nothing in the agent
+or athlete channel can perform that write.
 
 Set `COACH_ACCESS_TOKEN` to open it. Unset means closed, never open.
 
@@ -495,7 +506,7 @@ spread across timezones is still reviewed the night before *their* morning.
 
 Unreviewed means unsent. A coach who is asleep, busy or away produces silence,
 not an unsupervised broadcast — the same way an unset token closes the console
-rather than opening it. Set `COACH_APPROVAL_REQUIRED=false` to send unattended.
+rather than opening it. This cannot be disabled by deployment configuration.
 
 Every approval records who made it, when, and whether the wording was changed.
 
@@ -546,5 +557,5 @@ docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       clear_injury.py — COACH TOOL: list flagged athletes, close a flag
                check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         259 tests, no network
+tests/         321 tests, no network
 ```

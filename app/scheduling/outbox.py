@@ -11,8 +11,7 @@ morning, only approved drafts go out.
 
 Unreviewed means unsent. A coach who is asleep, busy or on holiday produces
 silence, not an unsupervised broadcast — the same way an unset token closes the
-console rather than opening it. Set COACH_APPROVAL_REQUIRED=false to return to
-sending unattended.
+console rather than opening it. This is a product invariant, not configuration.
 """
 
 from __future__ import annotations
@@ -88,12 +87,9 @@ def send_approved_prompts(
     for prompt in due_morning_prompts(conn, now_utc=now_utc):
         row = db.draft(conn, prompt.athlete_id, MORNING, prompt.local_date)
 
-        if settings.coach_approval_required:
-            if row is None or row["status"] != "approved":
-                continue          # unreviewed or skipped: silence, not a broadcast
-            body = str(row["body"])
-        else:
-            body = str(row["body"]) if row is not None and row["status"] == "approved" else prompt.body
+        if row is None or row["status"] != "approved":
+            continue          # unreviewed or skipped: silence, not a broadcast
+        body = str(row["body"])
 
         sender(prompt.athlete_id, body)
         db.mark_scheduled_delivery(conn, prompt.athlete_id, MORNING, prompt.local_date)

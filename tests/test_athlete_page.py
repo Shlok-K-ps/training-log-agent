@@ -115,6 +115,11 @@ def test_the_page_carries_the_draft_and_a_way_to_send_it(squad):
     assert f"/coach/athlete/{DEMO_PREFIX}002/message" in html
     assert "<textarea" in html
     assert "<svg" in html
+    assert "Recovery today" in html
+    assert "Programming" in html
+    assert "Schedule & logistics" in html
+    assert "Nutrition & supplements" in html
+    assert "Prepared · requires coach approval" in html
 
 
 # --- registration ----------------------------------------------------------------

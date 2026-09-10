@@ -11,6 +11,7 @@ from app.coach.roster import (
 )
 from app.coach.view import (
     render,
+    render_athletes,
     render_landing,
     render_login,
     render_outbox,
@@ -22,5 +23,5 @@ __all__ = [
     "COOKIE_NAME", "CoachAuthError", "check", "is_configured", "is_valid",
     "Bucket", "Flag", "PendingMessage", "Roster", "RosterEntry",
     "build_roster", "pending_reviews", "review_athlete",
-    "render", "render_landing", "render_login", "render_outbox", "render_privacy", "render_terms",
+    "render", "render_athletes", "render_landing", "render_login", "render_outbox", "render_privacy", "render_terms",
 ]

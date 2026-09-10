@@ -11,8 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.coach import pending_reviews
-from app.config import settings
+from app.coach import pending_reviews, render_outbox
 from app.scheduling.morning import send_due_morning_prompts
 from app.scheduling.outbox import MORNING, draft_upcoming_prompts, send_approved_prompts
 from app.storage import db
@@ -72,16 +71,14 @@ def test_drafting_twice_does_not_overwrite_a_coachs_edit(scheduled):
 # --- the gate ------------------------------------------------------------------
 
 
-def test_an_unreviewed_draft_is_never_sent(scheduled, monkeypatch):
-    monkeypatch.setattr(settings, "coach_approval_required", True)
+def test_an_unreviewed_draft_is_never_sent(scheduled):
     draft_upcoming_prompts(scheduled, now_utc=EVENING)
     sent = Outbox()
     assert send_approved_prompts(scheduled, sent, now_utc=NEXT_MORNING) == 0
     assert sent == [], "silence, not an unsupervised broadcast"
 
 
-def test_a_skipped_draft_is_never_sent(scheduled, monkeypatch):
-    monkeypatch.setattr(settings, "coach_approval_required", True)
+def test_a_skipped_draft_is_never_sent(scheduled):
     draft_upcoming_prompts(scheduled, now_utc=EVENING)
     db.review_draft(scheduled, ATHLETE, MORNING, "2026-09-11",
                     status="skipped", reviewed_by="Coach Rao")
@@ -90,8 +87,7 @@ def test_a_skipped_draft_is_never_sent(scheduled, monkeypatch):
     assert sent == []
 
 
-def test_the_athlete_receives_the_coachs_wording_not_the_agents(scheduled, monkeypatch):
-    monkeypatch.setattr(settings, "coach_approval_required", True)
+def test_the_athlete_receives_the_coachs_wording_not_the_agents(scheduled):
     draft_upcoming_prompts(scheduled, now_utc=EVENING)
     db.review_draft(scheduled, ATHLETE, MORNING, "2026-09-11",
                     status="approved", reviewed_by="Coach Rao",
@@ -102,8 +98,7 @@ def test_the_athlete_receives_the_coachs_wording_not_the_agents(scheduled, monke
     assert db.draft(scheduled, ATHLETE, MORNING, "2026-09-11")["status"] == "sent"
 
 
-def test_an_approved_message_is_sent_once_even_if_the_loop_ticks_again(scheduled, monkeypatch):
-    monkeypatch.setattr(settings, "coach_approval_required", True)
+def test_an_approved_message_is_sent_once_even_if_the_loop_ticks_again(scheduled):
     draft_upcoming_prompts(scheduled, now_utc=EVENING)
     db.review_draft(scheduled, ATHLETE, MORNING, "2026-09-11",
                     status="approved", reviewed_by="Coach Rao")
@@ -111,12 +106,6 @@ def test_an_approved_message_is_sent_once_even_if_the_loop_ticks_again(scheduled
     send_approved_prompts(scheduled, sent, now_utc=NEXT_MORNING)
     send_approved_prompts(scheduled, sent, now_utc=NEXT_MORNING)
     assert len(sent) == 1
-
-
-def test_approval_can_be_turned_off_for_an_unattended_deployment(scheduled, monkeypatch):
-    monkeypatch.setattr(settings, "coach_approval_required", False)
-    sent = Outbox()
-    assert send_approved_prompts(scheduled, sent, now_utc=NEXT_MORNING) == 1
 
 
 def test_a_review_must_record_who_made_it(scheduled):
@@ -150,6 +139,13 @@ def test_the_queue_shows_why_each_message_is_going_out(scheduled):
     assert pending[0].athlete.display_name == "Priya"
     assert any(f.kind == "stalled" for f in pending[0].athlete.flags)
     assert pending[0].edited is False
+
+    html = render_outbox(pending, coach="Coach Rao", today=date(2026, 9, 10))
+    assert "Training trend" in html
+    assert "Latest session" in html
+    assert "Readiness" in html
+    assert "Awaiting approval" in html
+    assert "Squat · stalled" in html
 
 
 def test_reviewed_drafts_leave_the_queue(scheduled):
