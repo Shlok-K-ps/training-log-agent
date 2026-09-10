@@ -1,7 +1,7 @@
 """Empirical constants, derived from real competition results.
 
 Every number in this file traces to `reference/openpowerlifting_top_lifters.csv`
-— the top ~115 lifters of all time by Dots, Raw+Wraps, taken from
+— the top ~300 lifters of all time by Dots, Raw+Wraps, taken from
 openpowerlifting.org. `tests/test_reference.py` recomputes the derivations from
 that file and fails if a constant here stops matching the data.
 
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 LB_TO_KG = 0.45359237
 
-# --- what the top ~115 lifters of all time have actually done -----------------
+# --- what the top ~300 lifters of all time have actually done -----------------
 # Computed from the reference CSV; see tests/test_reference.py.
 
 OBSERVED_MAX_KG: dict[str, float] = {
@@ -63,8 +63,8 @@ def ceiling_for(lift: str | None) -> float:
 
 # --- how the three lifts relate to each other ---------------------------------
 # Elite envelopes, straight from the sample:
-#     bench / squat      0.38 - 0.76   (median 0.58)
-#     deadlift / squat   0.79 - 1.41   (median 1.01)
+#     bench / squat      0.36 - 0.82   (median 0.58)
+#     deadlift / squat   0.48 - 1.41   (median 1.01)
 #
 # Those are tight because elite lifters are, by selection, balanced. A club
 # athlete six months into training is not: someone rehabbing a knee may bench
@@ -74,13 +74,13 @@ def ceiling_for(lift: str | None) -> float:
 # during parsing.
 
 ELITE_RATIO_RANGE: dict[str, tuple[float, float]] = {
-    "bench press": (0.38, 0.76),
-    "deadlift": (0.79, 1.41),
+    "bench press": (0.36, 0.82),
+    "deadlift": (0.48, 1.41),
 }
 
 RATIO_BAND_VS_SQUAT: dict[str, tuple[float, float]] = {
     "bench press": (0.25, 1.10),
-    "deadlift": (0.55, 1.90),
+    "deadlift": (0.40, 1.90),
 }
 
 

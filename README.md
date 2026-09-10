@@ -128,7 +128,7 @@ they had failed, which is the opposite of true.
 
 Validation bounds are derived from real competition results, not invented.
 [`reference/openpowerlifting_top_lifters.csv`](reference/openpowerlifting_top_lifters.csv)
-holds the top ~115 lifters of all time by Dots (Raw+Wraps) from
+holds the top ~300 lifters of all time by Dots (Raw+Wraps) from
 [openpowerlifting.org](https://www.openpowerlifting.org/); the constants live in
 [`app/reference.py`](app/reference.py) and
 [`tests/test_reference.py`](tests/test_reference.py) recomputes every one of them
@@ -140,8 +140,8 @@ evidence.
 | Heaviest squat in the sample | 500.0 kg |
 | Heaviest bench | 292.6 kg |
 | Heaviest deadlift | 492.5 kg |
-| bench ÷ squat, elite range | 0.38 – 0.76 |
-| deadlift ÷ squat, elite range | 0.79 – 1.41 |
+| bench ÷ squat, elite range | 0.36 – 0.82 |
+| deadlift ÷ squat, elite range | 0.48 – 1.41 |
 
 **Why this matters.** The validator's job is not to reject impossible lifts —
 nobody texts their coach a 900 kg bench. Its job is to catch **parse errors**:
@@ -163,7 +163,7 @@ reply asks. Dropping a real session to guard against a possible typo is the wors
 failure: the athlete loses data they cannot recover and stops trusting the log,
 whereas a wrong number they were asked about is fixed in one message.
 
-A test runs all 115 real lifters through the ratio and ceiling checks and asserts
+A test runs all 300 real lifters through the ratio and ceiling checks and asserts
 that not one of them is flagged — the bands are validated against the population
 they were drawn from.
 
