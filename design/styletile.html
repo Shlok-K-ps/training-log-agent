@@ -1,0 +1,1175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Power AI — Coach Desk Style Tile (Design Tokens & Systems)</title>
+  
+  <!-- Fonts: Geist (Sans & Mono) + Newsreader (Editorial Accent) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap" rel="stylesheet">
+  
+  <style>
+    /* ==========================================================================
+       DESIGN TOKENS (Shared Brief Specification)
+       ========================================================================== */
+    :root {
+      /* Background Levels Ladder */
+      --canvas: #07080B;
+      --level-1: #0E1014;
+      --level-2: #15171C;
+      --level-3: #1D2027;
+      
+      /* Typography */
+      --text: #F4F5F7;
+      --text-2: #BCC2CB;
+      --text-3: #7B818C;
+      
+      /* Hairline Borders */
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --highlight-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
+      --highlight-top-raised: inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+      
+      /* Status Colors (Saturated on Dark) */
+      --status-needs-you: #FF6B6B;
+      --status-watch: #F5C451;
+      --status-meet-prep: #6AA8FF;
+      --status-fine: #58D39A;
+      
+      /* Mesh Gradient Variables (Driven by State) */
+      --gradient-color-1: #1D3FA8; /* Plate Blue */
+      --gradient-color-2: #5B2A86; /* Royal Violet */
+      --gradient-color-3: #B8323A; /* Ember / State Tint */
+      --gradient-color-4: #0E1014; /* Dark Anchor */
+      
+      /* Motion Pacing & Curves */
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+      --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+      --duration-press: 120ms;
+      --duration-hover: 240ms;
+      --duration-panel: 480ms;
+      
+      /* Fonts */
+      --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --font-serif: 'Newsreader', Georgia, serif;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--canvas);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      min-height: 100vh;
+      overflow-x: hidden;
+      padding-bottom: 120px;
+    }
+
+    /* Tabular Numerals Enforcement */
+    .tabular, [data-tabular] {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum" 1;
+    }
+
+    /* ==========================================================================
+       BACKGROUND: WEBGL MESH GRADIENT + GRAIN OVERLAY
+       ========================================================================== */
+    #canvas-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 0;
+      overflow: hidden;
+    }
+
+    #gradient-canvas {
+      width: 100%;
+      height: 100%;
+      opacity: 0.65;
+      /* CSS Fallback when WebGL is compiling or unaccelerated */
+      background: radial-gradient(ellipse 60% 50% at 20% 20%, var(--gradient-color-1) 0%, transparent 60%),
+                  radial-gradient(ellipse 70% 60% at 85% 30%, var(--gradient-color-2) 0%, transparent 65%),
+                  radial-gradient(ellipse 80% 70% at 50% 85%, var(--gradient-color-3) 0%, transparent 70%),
+                  var(--gradient-color-4);
+      transition: --gradient-color-3 700ms var(--ease-in-out), background 700ms var(--ease-in-out);
+    }
+
+    .grain-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.04;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    }
+
+    /* ==========================================================================
+       LAYOUT CONTAINER
+       ========================================================================== */
+    .shell {
+      position: relative;
+      z-index: 2;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    .header-block {
+      margin-bottom: 48px;
+    }
+
+    .meta-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-2);
+      margin-bottom: 16px;
+    }
+
+    .meta-tag .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--status-meet-prep);
+      box-shadow: 0 0 8px var(--status-meet-prep);
+    }
+
+    h1.title {
+      font-size: 38px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 12px;
+    }
+
+    p.subtitle {
+      font-size: 16px;
+      color: var(--text-2);
+      max-width: 720px;
+      line-height: 1.6;
+    }
+
+    /* ==========================================================================
+       SECTION CONTAINERS
+       ========================================================================== */
+    .section-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--text-3);
+      margin: 56px 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .section-title::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ==========================================================================
+       LAYER LADDER & APPLE LIQUID GLASS PANELS
+       ========================================================================== */
+    .layers-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .glass-panel {
+      position: relative;
+      border-radius: 18px;
+      padding: 24px;
+      border: 1px solid var(--border);
+      box-shadow: var(--highlight-top);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      transition: border-color var(--duration-hover) var(--ease-out),
+                  transform var(--duration-hover) var(--ease-out);
+    }
+
+    .glass-panel:hover {
+      border-color: var(--border-strong);
+    }
+
+    .layer-level-1 {
+      background: rgba(14, 16, 20, 0.65);
+    }
+
+    .layer-level-2 {
+      background: rgba(21, 23, 28, 0.55);
+    }
+
+    .layer-level-3 {
+      background: rgba(29, 32, 39, 0.60);
+      box-shadow: var(--highlight-top-raised);
+    }
+
+    .layer-badge {
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-3);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .glass-panel h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .glass-panel p {
+      font-size: 13.5px;
+      color: var(--text-2);
+      line-height: 1.55;
+    }
+
+    .spec-code {
+      margin-top: 14px;
+      padding: 10px 12px;
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: #94A3B8;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    /* ==========================================================================
+       BUTTONS & RAYCAST SPOTLIGHT INTERACTION
+       ========================================================================== */
+    .buttons-section {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+    }
+
+    /* Base Pill Button */
+    .btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 44px;
+      padding: 0 24px;
+      border-radius: 9999px;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      text-decoration: none;
+      cursor: pointer;
+      overflow: hidden;
+      border: 1px solid transparent;
+      outline: none;
+      transition: transform var(--duration-press) var(--ease-out),
+                  border-color var(--duration-hover) var(--ease-out),
+                  box-shadow var(--duration-hover) var(--ease-out),
+                  opacity var(--duration-hover) var(--ease-out);
+      user-select: none;
+    }
+
+    /* Active Press */
+    .btn:active, .btn.state-pressed {
+      transform: scale(0.97) !important;
+    }
+
+    /* Focus Ring */
+    .btn:focus-visible, .btn.state-focused {
+      box-shadow: 0 0 0 2px var(--canvas), 0 0 0 4px var(--status-meet-prep) !important;
+    }
+
+    /* Disabled State */
+    .btn:disabled, .btn.state-disabled {
+      opacity: 0.38 !important;
+      cursor: not-allowed !important;
+      pointer-events: none;
+    }
+
+    /* 1. Primary Button (Near-white fill, dark text) */
+    .btn-primary {
+      background: #F4F5F7;
+      color: #07080B;
+      border-color: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+
+    .btn-primary:hover, .btn-primary.state-hover {
+      background: #FFFFFF;
+      box-shadow: 0 4px 18px rgba(255, 255, 255, 0.2);
+    }
+
+    /* 2. Secondary Button (Glass pill) */
+    .btn-secondary {
+      background: rgba(21, 23, 28, 0.65);
+      color: var(--text);
+      border-color: var(--border);
+      box-shadow: var(--highlight-top);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .btn-secondary:hover, .btn-secondary.state-hover {
+      background: rgba(29, 32, 39, 0.75);
+      border-color: var(--border-strong);
+      color: #FFFFFF;
+    }
+
+    /* 3. Danger Button (Red outline) */
+    .btn-danger {
+      background: rgba(255, 107, 107, 0.08);
+      color: var(--status-needs-you);
+      border-color: rgba(255, 107, 107, 0.35);
+    }
+
+    .btn-danger:hover, .btn-danger.state-hover {
+      background: rgba(255, 107, 107, 0.16);
+      border-color: var(--status-needs-you);
+      box-shadow: 0 0 16px rgba(255, 107, 107, 0.25);
+    }
+
+    /* Cursor Spotlight Effect (Follows Mouse via CSS --x and --y) */
+    .spotlight-btn {
+      position: relative;
+    }
+
+    .spotlight-btn::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: radial-gradient(circle at var(--x, 50%) var(--y, 50%), rgba(255, 255, 255, 0.22), transparent 60%);
+      opacity: 0;
+      transition: opacity var(--duration-hover) var(--ease-out);
+      pointer-events: none;
+    }
+
+    .spotlight-btn:hover::before {
+      opacity: 1;
+    }
+
+    /* Roll-up label container */
+    .roll-label {
+      position: relative;
+      display: inline-block;
+      height: 18px;
+      line-height: 18px;
+      overflow: hidden;
+    }
+
+    .roll-text {
+      display: block;
+      transition: transform var(--duration-hover) var(--ease-out);
+    }
+
+    .roll-text-dup {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      width: 100%;
+      display: block;
+      transition: transform var(--duration-hover) var(--ease-out);
+    }
+
+    .spotlight-btn:hover .roll-text,
+    .btn.state-hover .roll-text {
+      transform: translateY(-100%);
+    }
+
+    .spotlight-btn:hover .roll-text-dup,
+    .btn.state-hover .roll-text-dup {
+      transform: translateY(-100%);
+    }
+
+    /* Button State Matrix Card */
+    .state-card {
+      padding: 20px;
+      background: var(--level-1);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+
+    .state-legend {
+      display: grid;
+      grid-template-columns: 90px repeat(3, 1fr);
+      gap: 16px;
+      align-items: center;
+      font-size: 12.5px;
+      color: var(--text-3);
+      margin-bottom: 12px;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    /* ==========================================================================
+       ROSTER BUCKETS WITH OURA-INSPIRED STATE TINTING
+       ========================================================================== */
+    .roster-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .roster-row {
+      display: grid;
+      grid-template-columns: 24px 180px 1fr 110px 90px 140px;
+      gap: 16px;
+      align-items: center;
+      padding: 16px 20px;
+      background: rgba(21, 23, 28, 0.55);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--highlight-top);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      cursor: pointer;
+      transition: all var(--duration-hover) var(--ease-out);
+    }
+
+    .roster-row:hover {
+      background: rgba(29, 32, 39, 0.65);
+      border-color: var(--border-strong);
+      transform: translateX(4px);
+    }
+
+    .roster-row.active-state {
+      border-color: currentColor;
+      background: rgba(29, 32, 39, 0.85);
+      box-shadow: 0 0 24px -6px currentColor, var(--highlight-top-raised);
+    }
+
+    .bucket-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-needs-you { background: var(--status-needs-you); box-shadow: 0 0 8px var(--status-needs-you); }
+    .dot-watch { background: var(--status-watch); box-shadow: 0 0 8px var(--status-watch); }
+    .dot-meet-prep { background: var(--status-meet-prep); box-shadow: 0 0 8px var(--status-meet-prep); }
+    .dot-fine { background: var(--status-fine); box-shadow: 0 0 8px var(--status-fine); }
+
+    .roster-name {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--text);
+    }
+
+    .roster-id {
+      font-size: 12px;
+      color: var(--text-3);
+      font-family: var(--font-mono);
+    }
+
+    .roster-detail {
+      font-size: 13.5px;
+      color: var(--text-2);
+    }
+
+    .roster-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    .badge-needs-you { background: rgba(255, 107, 107, 0.12); color: var(--status-needs-you); border: 1px solid rgba(255, 107, 107, 0.3); }
+    .badge-watch { background: rgba(245, 196, 81, 0.12); color: var(--status-watch); border: 1px solid rgba(245, 196, 81, 0.3); }
+    .badge-meet-prep { background: rgba(106, 168, 255, 0.12); color: var(--status-meet-prep); border: 1px solid rgba(106, 168, 255, 0.3); }
+    .badge-fine { background: rgba(88, 211, 154, 0.12); color: var(--status-fine); border: 1px solid rgba(88, 211, 154, 0.3); }
+
+    .state-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      background: var(--level-1);
+      border: 1px solid var(--border);
+      border-radius: 9999px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-2);
+      margin-bottom: 16px;
+    }
+
+    /* ==========================================================================
+       VERDICT ROW & CHAT PREVIEW (Product Core)
+       ========================================================================== */
+    .verdict-chat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    .verdict-card {
+      padding: 24px;
+      border-radius: 18px;
+      background: rgba(21, 23, 28, 0.55);
+      border: 1px solid var(--border);
+      box-shadow: var(--highlight-top);
+      backdrop-filter: blur(20px);
+    }
+
+    .verdict-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .verdict-title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--status-watch);
+    }
+
+    .verdict-rule-sentence {
+      font-size: 14.5px;
+      color: var(--text-2);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .verdict-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+
+    .verdict-stat-item span {
+      display: block;
+      font-size: 10.5px;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+      color: var(--text-3);
+    }
+
+    .verdict-stat-item strong {
+      font-size: 15px;
+      color: var(--text);
+    }
+
+    /* WhatsApp Glass Chat Preview */
+    .chat-preview-card {
+      padding: 24px;
+      border-radius: 18px;
+      background: rgba(14, 16, 20, 0.65);
+      border: 1px solid var(--border);
+      box-shadow: var(--highlight-top);
+      backdrop-filter: blur(20px);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .chat-bubble {
+      max-width: 86%;
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.5;
+      position: relative;
+    }
+
+    .bubble-athlete {
+      align-self: flex-start;
+      background: rgba(29, 32, 39, 0.85);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-bottom-left-radius: 4px;
+    }
+
+    .bubble-agent {
+      align-self: flex-end;
+      background: rgba(29, 63, 168, 0.22);
+      border: 1px solid rgba(106, 168, 255, 0.25);
+      color: #E2E8F0;
+      border-bottom-right-radius: 4px;
+    }
+
+    .bubble-meta {
+      display: block;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--text-3);
+      margin-top: 6px;
+      text-align: right;
+    }
+
+    /* ==========================================================================
+       TYPE SCALE & EDITORIAL HEADLINE CHOOSER
+       ========================================================================== */
+    .type-scale-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      padding: 24px;
+      background: rgba(21, 23, 28, 0.55);
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      box-shadow: var(--highlight-top);
+    }
+
+    .type-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 100px;
+      gap: 16px;
+      align-items: baseline;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .type-meta {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-3);
+      text-transform: uppercase;
+    }
+
+    /* Headline Comparison Cards */
+    .headline-comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 16px;
+    }
+
+    .headline-card {
+      padding: 28px 24px;
+      border-radius: 16px;
+      background: rgba(21, 23, 28, 0.55);
+      border: 1px solid var(--border);
+      box-shadow: var(--highlight-top);
+      cursor: pointer;
+      transition: all var(--duration-hover) var(--ease-out);
+    }
+
+    .headline-card:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+    }
+
+    .headline-card.active-choice {
+      border-color: var(--status-meet-prep);
+      background: rgba(29, 32, 39, 0.75);
+      box-shadow: 0 0 20px -4px rgba(106, 168, 255, 0.3), var(--highlight-top-raised);
+    }
+
+    .headline-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--status-meet-prep);
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .headline-render {
+      font-size: 32px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      color: var(--text);
+    }
+
+    .serif-accent {
+      font-family: var(--font-serif);
+      font-style: italic;
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      color: #FFFFFF;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 860px) {
+      .layers-grid, .verdict-chat-grid, .headline-comparison {
+        grid-template-columns: 1fr;
+      }
+      .roster-row {
+        grid-template-columns: 24px 140px 1fr;
+      }
+      .roster-row > *:nth-child(4),
+      .roster-row > *:nth-child(5),
+      .roster-row > *:nth-child(6) {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- WebGL Fluid Mesh Gradient Canvas -->
+  <div id="canvas-container">
+    <canvas id="gradient-canvas" data-transition-in></canvas>
+  </div>
+  
+  <!-- SVG Grain Overlay (feTurbulence Noise) -->
+  <div class="grain-overlay"></div>
+
+  <!-- Main Showcase Shell -->
+  <div class="shell">
+    
+    <!-- Header Block -->
+    <div class="header-block">
+      <div class="meta-tag">
+        <span class="dot"></span>
+        <span>Run 1 // Style Tile Verification</span>
+      </div>
+      <h1 class="title">Coach Desk &mdash; Design System</h1>
+      <p class="subtitle">
+        A translation of Unseen Studio's fluid depth into an operational product interface. Built with pure WebGL mesh gradients, Apple Liquid Glass specular highlights, Linear-style data hierarchies, and Raycast tactile controls.
+      </p>
+    </div>
+
+    <!-- ====================================================================
+         1. LAYER LADDER & GLASS SPECULAR HIGHLIGHTS
+         ==================================================================== -->
+    <div class="section-title">01 &middot; Layer Ladder &amp; Apple Liquid Glass Specular Highlights</div>
+    
+    <div class="layers-grid">
+      <!-- Level 1 -->
+      <div class="glass-panel layer-level-1">
+        <span class="layer-badge">Tier 1 &middot; Canvas Base</span>
+        <h3>#0E1014 Base</h3>
+        <p>Anchors the root workspace shell and background surfaces over the WebGL gradient mesh.</p>
+        <div class="spec-code">
+          rgba(14, 16, 20, 0.65)<br>
+          blur(20px) saturate(140%)<br>
+          inset 0 1px 0 rgba(255,255,255,.08)
+        </div>
+      </div>
+
+      <!-- Level 2 -->
+      <div class="glass-panel layer-level-2">
+        <span class="layer-badge">Tier 2 &middot; Primary Panels</span>
+        <h3>#15171C Surface</h3>
+        <p>The standard resting container for cards, roster lists, telemetry charts, and queue inspectors.</p>
+        <div class="spec-code">
+          rgba(21, 23, 28, 0.55)<br>
+          blur(20px) saturate(140%)<br>
+          inset 0 1px 0 rgba(255,255,255,.10)
+        </div>
+      </div>
+
+      <!-- Level 3 -->
+      <div class="glass-panel layer-level-3">
+        <span class="layer-badge">Tier 3 &middot; Active / Overlays</span>
+        <h3>#1D2027 Raised</h3>
+        <p>Elevated modals, contextual sheets, active selection rings, and hovering controls.</p>
+        <div class="spec-code">
+          rgba(29, 32, 39, 0.60)<br>
+          blur(24px) saturate(150%)<br>
+          inset 0 1px 0 rgba(255,255,255,.16)
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         2. TACTILE BUTTONS & RAYCAST SPOTLIGHT INTERACTION
+         ==================================================================== -->
+    <div class="section-title">02 &middot; Buttons: Spotlight Tracking, Label Roll-Up &amp; States</div>
+
+    <div class="buttons-section">
+      <!-- Interactive Sandbox -->
+      <div class="glass-panel layer-level-2">
+        <div style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="font-size:16px;">Interactive Sandbox (Move Cursor &amp; Click)</h3>
+            <p style="font-size:13px; color:var(--text-3);">Features real-time cursor spotlight and dual-line roll-up label transitions.</p>
+          </div>
+          <span class="meta-tag" style="margin:0;">Interactive</span>
+        </div>
+
+        <div class="btn-row" id="spotlight-container">
+          <!-- Primary Pill -->
+          <button class="btn btn-primary spotlight-btn">
+            <span class="roll-label">
+              <span class="roll-text">Approve Session &rarr;</span>
+              <span class="roll-text-dup">Approve Session &rarr;</span>
+            </span>
+          </button>
+
+          <!-- Secondary Glass Pill -->
+          <button class="btn btn-secondary spotlight-btn">
+            <span class="roll-label">
+              <span class="roll-text">Edit Message Draft</span>
+              <span class="roll-text-dup">Edit Message Draft</span>
+            </span>
+          </button>
+
+          <!-- Danger Outline Pill -->
+          <button class="btn btn-danger spotlight-btn">
+            <span class="roll-label">
+              <span class="roll-text">Clear Injury Flag</span>
+              <span class="roll-text-dup">Clear Injury Flag</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- State Matrix Display -->
+      <div class="state-card">
+        <div class="state-legend">
+          <span>State</span>
+          <span>Primary</span>
+          <span>Secondary</span>
+          <span>Danger</span>
+        </div>
+
+        <!-- Default -->
+        <div class="state-legend" style="margin-bottom:10px;">
+          <span style="color:var(--text-2);">Default</span>
+          <button class="btn btn-primary" style="height:36px; padding:0 18px; font-size:13px;">Approve</button>
+          <button class="btn btn-secondary" style="height:36px; padding:0 18px; font-size:13px;">Hold Draft</button>
+          <button class="btn btn-danger" style="height:36px; padding:0 18px; font-size:13px;">Remove</button>
+        </div>
+
+        <!-- Hover -->
+        <div class="state-legend" style="margin-bottom:10px;">
+          <span style="color:var(--text-2);">Hover</span>
+          <button class="btn btn-primary state-hover" style="height:36px; padding:0 18px; font-size:13px;">Approve</button>
+          <button class="btn btn-secondary state-hover" style="height:36px; padding:0 18px; font-size:13px;">Hold Draft</button>
+          <button class="btn btn-danger state-hover" style="height:36px; padding:0 18px; font-size:13px;">Remove</button>
+        </div>
+
+        <!-- Pressed -->
+        <div class="state-legend" style="margin-bottom:10px;">
+          <span style="color:var(--text-2);">Pressed</span>
+          <button class="btn btn-primary state-pressed" style="height:36px; padding:0 18px; font-size:13px;">Approve</button>
+          <button class="btn btn-secondary state-pressed" style="height:36px; padding:0 18px; font-size:13px;">Hold Draft</button>
+          <button class="btn btn-danger state-pressed" style="height:36px; padding:0 18px; font-size:13px;">Remove</button>
+        </div>
+
+        <!-- Focused -->
+        <div class="state-legend" style="margin-bottom:10px;">
+          <span style="color:var(--text-2);">Focused</span>
+          <button class="btn btn-primary state-focused" style="height:36px; padding:0 18px; font-size:13px;">Approve</button>
+          <button class="btn btn-secondary state-focused" style="height:36px; padding:0 18px; font-size:13px;">Hold Draft</button>
+          <button class="btn btn-danger state-focused" style="height:36px; padding:0 18px; font-size:13px;">Remove</button>
+        </div>
+
+        <!-- Disabled -->
+        <div class="state-legend">
+          <span style="color:var(--text-2);">Disabled</span>
+          <button class="btn btn-primary state-disabled" style="height:36px; padding:0 18px; font-size:13px;">Approve</button>
+          <button class="btn btn-secondary state-disabled" style="height:36px; padding:0 18px; font-size:13px;">Hold Draft</button>
+          <button class="btn btn-danger state-disabled" style="height:36px; padding:0 18px; font-size:13px;">Remove</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         3. ROSTER BUCKETS WITH OURA-INSPIRED STATE TINTING
+         ==================================================================== -->
+    <div class="section-title">03 &middot; Roster Rows &amp; Dynamic State-Tinting (Click Any Row)</div>
+    
+    <div class="state-indicator">
+      <span>Current Gradient State Tint:</span>
+      <strong id="active-state-name" style="color:var(--status-needs-you);">Needs You (#FF6B6B)</strong>
+      <span style="color:var(--text-3);">&mdash; Clicking shifts the mesh 3rd color dynamically</span>
+    </div>
+
+    <div class="roster-grid">
+      <!-- 1. Needs you -->
+      <div class="roster-row active-state" data-color="#FF6B6B" data-state="Needs You" style="color:var(--status-needs-you);">
+        <div class="bucket-dot dot-needs-you"></div>
+        <div>
+          <div class="roster-name">Waiting Wanda</div>
+          <div class="roster-id">+919812340001</div>
+        </div>
+        <div class="roster-detail">Injury clearance requested &middot; left knee reported pain 12d ago</div>
+        <div class="roster-badge badge-needs-you">Needs you</div>
+        <div class="tabular" style="font-size:13px; font-weight:600; color:var(--text);">42/100</div>
+        <div class="tabular" style="font-size:12px; color:var(--text-3); text-align:right;">Today 08:30</div>
+      </div>
+
+      <!-- 2. Watch -->
+      <div class="roster-row" data-color="#F5C451" data-state="Watch" style="color:var(--status-watch);">
+        <div class="bucket-dot dot-watch"></div>
+        <div>
+          <div class="roster-name">Marcus Vance</div>
+          <div class="roster-id">+919812340004</div>
+        </div>
+        <div class="roster-detail">Squat &mdash; Stalled at 140 kg across 2 consecutive sessions</div>
+        <div class="roster-badge badge-watch">Watch</div>
+        <div class="tabular" style="font-size:13px; font-weight:600; color:var(--text);">71/100</div>
+        <div class="tabular" style="font-size:12px; color:var(--text-3); text-align:right;">Yesterday</div>
+      </div>
+
+      <!-- 3. Meet prep -->
+      <div class="roster-row" data-color="#6AA8FF" data-state="Meet Prep" style="color:var(--status-meet-prep);">
+        <div class="bucket-dot dot-meet-prep"></div>
+        <div>
+          <div class="roster-name">Elena Rostova</div>
+          <div class="roster-id">+919812340008</div>
+        </div>
+        <div class="roster-detail">National Meet in 4w &middot; Peak taper phase &middot; Top single opener</div>
+        <div class="roster-badge badge-meet-prep">Meet prep</div>
+        <div class="tabular" style="font-size:13px; font-weight:600; color:var(--text);">88/100</div>
+        <div class="tabular" style="font-size:12px; color:var(--text-3); text-align:right;">2d ago</div>
+      </div>
+
+      <!-- 4. Fine -->
+      <div class="roster-row" data-color="#58D39A" data-state="Fine" style="color:var(--status-fine);">
+        <div class="bucket-dot dot-fine"></div>
+        <div>
+          <div class="roster-name">Fine Fred</div>
+          <div class="roster-id">+919812340012</div>
+        </div>
+        <div class="roster-detail">Bench 3x5 at 105 kg progressing smoothly &middot; RPE 7.5 target met</div>
+        <div class="roster-badge badge-fine">Fine</div>
+        <div class="tabular" style="font-size:13px; font-weight:600; color:var(--text);">94/100</div>
+        <div class="tabular" style="font-size:12px; color:var(--text-3); text-align:right;">3d ago</div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         4. VERDICT ROW & WHATSAPP GLASS CHAT PREVIEW
+         ==================================================================== -->
+    <div class="section-title">04 &middot; Product Core: Deterministic Verdict &amp; WhatsApp Draft Bubble</div>
+
+    <div class="verdict-chat-grid">
+      <!-- Verdict Row -->
+      <div class="verdict-card">
+        <div class="verdict-header">
+          <div>
+            <span class="meta-tag" style="margin-bottom:6px;">Rule Evaluation</span>
+            <div class="verdict-title">Squat &mdash; Stalled</div>
+          </div>
+          <span class="roster-badge badge-watch">Roster Flag</span>
+        </div>
+
+        <p class="verdict-rule-sentence">
+          Flat at 140 kg for 2 sessions with RPE &ge; 9. Pure Python rule triggered deload recommendation.
+        </p>
+
+        <div class="verdict-stats tabular">
+          <div class="verdict-stat-item">
+            <span>Last Weight</span>
+            <strong>140.0 kg</strong>
+          </div>
+          <div class="verdict-stat-item">
+            <span>Effort</span>
+            <strong>RPE 9.5</strong>
+          </div>
+          <div class="verdict-stat-item">
+            <span>Action</span>
+            <strong>-5% Next Week</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat Bubble Preview -->
+      <div class="chat-preview-card">
+        <div style="font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-3); margin-bottom:4px;">
+          WhatsApp Draft Preview &middot; Encrypted Session
+        </div>
+
+        <!-- Athlete Inbound -->
+        <div class="chat-bubble bubble-athlete">
+          "squat 3x5 at 140 today, felt way harder than tuesday, rpe 9"
+          <span class="bubble-meta tabular">08:14 &middot; Sent via WhatsApp</span>
+        </div>
+
+        <!-- Agent Inbound / Coach Draft -->
+        <div class="chat-bubble bubble-agent">
+          <strong>Logged: Squat 3x5 @ 140 kg RPE 9</strong><br>
+          <em>Squat &mdash; Stalled</em><br>
+          We've held 140 kg for two consecutive exposures at RPE 9+. Holding here for next week's accumulation to clear systemic fatigue before testing the 145 kg milestone.
+          <span class="bubble-meta tabular">08:14 &middot; Prepared for Coach Rao</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         5. TYPE SCALE & TABULAR NUMERAL DEMONSTRATION
+         ==================================================================== -->
+    <div class="section-title">05 &middot; Geist Typography &amp; Tabular Numeral Alignments</div>
+
+    <div class="type-scale-grid">
+      <div class="type-row">
+        <span class="type-meta">Display 48px</span>
+        <div style="font-size:48px; font-weight:600; letter-spacing:-0.03em; line-height:1.1;">242.5 kg</div>
+        <span class="type-meta tabular">1RM Record</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-meta">Heading 1 32px</span>
+        <div style="font-size:32px; font-weight:600; letter-spacing:-0.025em;">Squad Overview (20 Active)</div>
+        <span class="type-meta tabular">Geist 600</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-meta">Heading 2 24px</span>
+        <div style="font-size:24px; font-weight:600; letter-spacing:-0.02em;">Squat: 3 sets &times; 5 reps @ 140.0 kg</div>
+        <span class="type-meta tabular">Session</span>
+      </div>
+
+      <div class="type-row">
+        <span class="type-meta">Body 15px</span>
+        <div style="font-size:15px; color:var(--text-2);">The coach reads exceptions instead of an inbox. All verdicts computed deterministically.</div>
+        <span class="type-meta tabular">Geist 400</span>
+      </div>
+
+      <div class="type-row" style="border-bottom:none;">
+        <span class="type-meta">Data / Mono 12px</span>
+        <div class="tabular" style="font-family:var(--font-mono); font-size:12px; color:var(--status-meet-prep);">
+          +919812340001 &middot; 2026-09-11T04:18:18+05:30 &middot; LATENCY: 128ms &middot; READINESS: 94.8%
+        </div>
+        <span class="type-meta">Mono Tabular</span>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         6. LANDING HEADLINE COMPARISON: PLAIN VS ITALIC SERIF ACCENT
+         ==================================================================== -->
+    <div class="section-title">06 &middot; Landing Headline Option Chooser (Click to Select)</div>
+
+    <div class="headline-comparison">
+      <!-- Option A: Plain Geist -->
+      <div class="headline-card active-choice" id="choice-a">
+        <span class="headline-tag">Option A &middot; Pure Geist Sans</span>
+        <div class="headline-render">
+          The coach reads exceptions,<br>
+          not an inbox.
+        </div>
+        <p style="margin-top:14px; font-size:13px; color:var(--text-3); line-height:1.5;">
+          Uncompromised, sharp, industrial precision. Keeps the entire visual identity within the Geist typographic family.
+        </p>
+      </div>
+
+      <!-- Option B: Italic Serif Accent -->
+      <div class="headline-card" id="choice-b">
+        <span class="headline-tag" style="color:var(--status-watch);">Option B &middot; Newsreader Italic Serif Accent</span>
+        <div class="headline-render">
+          The coach reads exceptions,<br>
+          <span class="serif-accent">not an inbox.</span>
+        </div>
+        <p style="margin-top:14px; font-size:13px; color:var(--text-3); line-height:1.5;">
+          High-contrast editorial balance. Gives the second clause a literary punch inspired by luxury atelier branding.
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Whatamesh Gradient Library -->
+  <script src="gradient.js"></script>
+  
+  <!-- Interactive Script: Mesh Gradient, Spotlight Tracking & Dynamic State Tinting -->
+  <script>
+    // 1. Initialize WebGL Mesh Gradient
+    let gradientInstance = null;
+    try {
+      if (typeof Gradient !== 'undefined') {
+        gradientInstance = new Gradient();
+        gradientInstance.initGradient('#gradient-canvas');
+      }
+    } catch (e) {
+      console.warn("WebGL initialization note (falling back to silky CSS radial mesh):", e);
+    }
+
+    // 2. Raycast Cursor-Follow Spotlight
+    document.querySelectorAll('.spotlight-btn').forEach(btn => {
+      btn.addEventListener('mousemove', e => {
+        const rect = btn.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        btn.style.setProperty('--x', `${x}px`);
+        btn.style.setProperty('--y', `${y}px`);
+      });
+    });
+
+    // 3. Dynamic State-Tinting Switcher (Oura Inspiration)
+    const stateNameEl = document.getElementById('active-state-name');
+    const canvasEl = document.getElementById('gradient-canvas');
+
+    document.querySelectorAll('.roster-row').forEach(row => {
+      row.addEventListener('click', () => {
+        document.querySelectorAll('.roster-row').forEach(r => r.classList.remove('active-state'));
+        row.classList.add('active-state');
+
+        const newColor = row.dataset.color;
+        const stateName = row.dataset.state;
+
+        // Update CSS variable for the 3rd mesh gradient color
+        document.documentElement.style.setProperty('--gradient-color-3', newColor);
+        canvasEl.style.setProperty('--gradient-color-3', newColor);
+
+        // Update telemetry badge
+        stateNameEl.textContent = `${stateName} (${newColor})`;
+        stateNameEl.style.color = newColor;
+
+        // If WebGL gradient instance has a re-init or color refresh
+        if (gradientInstance && gradientInstance.updateColors) {
+          try { gradientInstance.updateColors(); } catch(err) {}
+        }
+      });
+    });
+
+    // 4. Headline Option Selector
+    const choiceA = document.getElementById('choice-a');
+    const choiceB = document.getElementById('choice-b');
+
+    choiceA.addEventListener('click', () => {
+      choiceA.classList.add('active-choice');
+      choiceB.classList.remove('active-choice');
+    });
+
+    choiceB.addEventListener('click', () => {
+      choiceB.classList.add('active-choice');
+      choiceA.classList.remove('active-choice');
+    });
+  </script>
+</body>
+</html>
