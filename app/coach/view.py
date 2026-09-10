@@ -138,7 +138,6 @@ def coach_frame(
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{escape(title)} — Power AI Coach Desk</title>"
         "<link rel='icon' href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>'>"
-        "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap' media='print' onload=\"this.media='all'\">"
         "<link rel='stylesheet' href='/static/tokens.css'>"
         "<link rel='stylesheet' href='/static/app.css'>"
         f"<style>{extra_style}</style>"
@@ -610,10 +609,6 @@ def render_landing(*, is_logged_in: bool = False) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Power AI — WhatsApp Powerlifting Coach</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap" media="print" onload="this.media='all'">
-  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap"></noscript>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/motion.js" defer></script>
@@ -873,21 +868,24 @@ def render_landing(*, is_logged_in: bool = False) -> str:
       </p>
     </div>
 
-    <!-- Oversized Footer -->
-    <footer class="site-footer">
-      <div class="footer-hero">
-        <div class="footer-kicker">READY FOR SQUAD DEPLOYMENT</div>
-        <h2 class="footer-headline">
-          The squad on WhatsApp.<br>
-          <span class="serif">The coach in control.</span>
-        </h2>
-        <a class="btn btn-primary btn-lg" href="{coach_link}">
-          <span>{coach_text}</span>
-          {arrow_svg}
-        </a>
-      </div>
+    <!-- Squad Deployment CTA Card -->
+    <div class="footer-hero">
+      <div class="footer-kicker">READY FOR SQUAD DEPLOYMENT</div>
+      <h2 class="footer-headline">
+        The squad on WhatsApp.<br>
+        <span class="serif">The coach in control.</span>
+      </h2>
+      <a class="btn btn-primary btn-lg" href="{coach_link}">
+        <span>{coach_text}</span>
+        {arrow_svg}
+      </a>
+    </div>
+  </main>
 
-      <div class="footer-bottom">
+  <!-- Full-Width Seamless Footer -->
+  <footer class="site-footer">
+    <div class="wrapper">
+      <div class="footer-bottom" style="border-top: none; padding-top: 0;">
         <div>Training Log Agent &middot; Built for Powerlifting Teams</div>
         <div>
           <a href="/privacy">Privacy Policy</a> &middot;
@@ -901,8 +899,8 @@ def render_landing(*, is_logged_in: bool = False) -> str:
           <a href="#" class="back-to-top">Back to Top &uarr;</a>
         </div>
       </div>
-    </footer>
-  </main>
+    </div>
+  </footer>
 </body>
 </html>"""
 

@@ -55,16 +55,9 @@ body.no-webgl {
     var(--canvas);
 }
 
-/* Atmospheric Noise Grain Overlay */
+/* Atmospheric Background (grain removed for smooth clean glass depth) */
 .noise-overlay {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.035;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  display: none !important;
 }
 
 /* Page Layout Wrappers */
@@ -634,28 +627,44 @@ body.no-webgl {
 
 /* 11. Engineering Note & Footer */
 .manifesto-panel {
-  background: rgba(14, 16, 20, 0.8);
+  background: rgba(14, 16, 20, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 32px;
-  margin: 60px 0 80px;
+  border-radius: 14px;
+  padding: 28px 32px;
+  margin: 64px 0 40px;
   box-shadow: var(--highlight-top);
 }
 
 .manifesto-panel p {
   color: var(--text-2);
-  font-size: 15px;
-  line-height: 1.6;
-}
-
-.site-footer {
-  border-top: 1px solid var(--border);
-  padding: 80px 0 40px;
-  background: rgba(7, 8, 11, 0.9);
+  font-size: 14.5px;
+  line-height: 1.65;
+  margin: 0;
 }
 
 .footer-hero {
-  margin-bottom: 60px;
+  background: rgba(14, 16, 20, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 56px 48px;
+  margin-bottom: 72px;
+  box-shadow: var(--highlight-top);
+  position: relative;
+  overflow: hidden;
+}
+
+.footer-hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
 }
 
 .footer-kicker {
@@ -664,15 +673,26 @@ body.no-webgl {
   letter-spacing: 0.08em;
   color: var(--status-meet-prep);
   text-transform: uppercase;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .footer-headline {
-  font-size: clamp(32px, 5vw, 54px);
+  font-size: clamp(32px, 4.5vw, 50px);
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.15;
   letter-spacing: -0.02em;
   margin-bottom: 28px;
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 0 32px;
+  background: rgba(7, 8, 11, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  position: relative;
+  z-index: 2;
+  width: 100%;
 }
 
 .footer-bottom {
@@ -1947,6 +1967,24 @@ dialog::backdrop {
    ========================================================================== */
 
 @media (max-width: 768px) {
+  /* Disable WebGL canvas on mobile to eliminate narrow column distortion on phones */
+  .mesh-canvas,
+  #hero-canvas {
+    display: none !important;
+  }
+
+  body {
+    background-color: #07080B !important;
+    background-image:
+      radial-gradient(circle 460px at 15% 10%, rgba(29, 63, 168, 0.35) 0%, transparent 70%),
+      radial-gradient(circle 420px at 85% 30%, rgba(91, 42, 134, 0.30) 0%, transparent 70%),
+      radial-gradient(circle 460px at 10% 60%, rgba(184, 50, 58, 0.25) 0%, transparent 70%),
+      radial-gradient(circle 500px at 80% 85%, rgba(29, 63, 168, 0.28) 0%, transparent 70%) !important;
+    background-attachment: fixed !important;
+    background-repeat: no-repeat !important;
+    background-size: cover !important;
+  }
+
   .dashboard-grid {
     grid-template-columns: 1fr;
   }

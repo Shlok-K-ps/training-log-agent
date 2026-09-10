@@ -78,10 +78,10 @@
   --unseen-blush: #6AA8FF;
   --unseen-sand: #F4F5F7;
 
-  /* Typography: Geist for everything */
-  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-serif: 'Newsreader', Georgia, serif;
+  /* Typography: Apple system fonts found on Mac */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --font-serif: "New York", -apple-system-ui-serif, "Iowan Old Style", "Apple Garamond", Georgia, serif;
 
   /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
