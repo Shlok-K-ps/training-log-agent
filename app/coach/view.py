@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from html import escape
 
-from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, Roster
+from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage, Roster
 
 _STYLE = """
 :root{--bg:#f1f4f5;--card:#fff;--ink:#12171a;--soft:#55616a;--faint:#7f8a91;
@@ -132,5 +132,82 @@ def render(roster: Roster, *, token: str, coach: str, message: tuple[str, str] |
         f"{banner}{''.join(sections)}"
         "<footer>Every line here is computed by the same rules that answer the "
         "athlete. This page decides nothing on its own.</footer>"
+        "</div></body></html>"
+    )
+
+
+_OUTBOX_STYLE = """
+textarea{width:100%;min-height:96px;padding:9px 10px;font:inherit;font-size:14.5px;
+line-height:1.5;border:1px solid var(--line);border-radius:3px;background:var(--bg);
+color:var(--ink);resize:vertical}
+.why{margin:0 0 9px;font-size:14px;color:var(--soft)}
+.why b{color:var(--ink);font-weight:600}
+.when{font-size:12px;color:var(--faint);font-family:ui-monospace,monospace}
+.btns{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+button.skip{background:transparent;color:var(--soft);border-color:var(--line)}
+button.approve{background:var(--ok);border-color:var(--ok)}
+.nav{margin:0 0 20px;font-size:14px}
+.nav a{color:var(--meet)}
+"""
+
+
+def render_outbox(
+    pending: tuple[PendingMessage, ...],
+    *,
+    token: str,
+    coach: str,
+    today,
+    message: tuple[str, str] | None = None,
+) -> str:
+    """Tonight's queue: every message that wants to go out tomorrow morning."""
+    banner = ""
+    if message:
+        kind, text = message
+        banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
+
+    if not pending:
+        body = (
+            '<p class="empty">Nothing is queued. Drafts appear the evening before '
+            "each athlete's morning, in their own timezone.</p>"
+        )
+    else:
+        cards = []
+        for item in pending:
+            a = item.athlete
+            reasons = " · ".join(escape(f.detail) for f in a.flags) or "nothing flagged"
+            cards.append(
+                f'<div class="card {a.bucket.value}">'
+                f'<div class="who"><span>{escape(a.display_name)}</span>'
+                f'<span class="id">{escape(item.athlete_id)}</span></div>'
+                f'<p class="why"><b>Where they are:</b> {reasons}</p>'
+                '<form method="post" action="/coach/outbox/review">'
+                f'<input type="hidden" name="token" value="{escape(token)}">'
+                f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
+                f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
+                f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
+                f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
+                '<div class="btns">'
+                '<button class="approve" type="submit" name="decision" value="approved">'
+                f'Approve for {escape(item.local_date)}</button>'
+                '<button class="skip" type="submit" name="decision" value="skipped">'
+                "Don\u2019t send</button></div></form></div>"
+            )
+        body = (
+            f"<section><h2>Queued for tomorrow <span class='n'>{len(pending)}</span></h2>"
+            + "".join(cards)
+            + "</section>"
+        )
+
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Coach outbox</title>"
+        f"<style>{_STYLE}{_OUTBOX_STYLE}</style></head><body><div class='wrap'>"
+        f"<header><h1>{escape(coach)} — outbox</h1>"
+        f"<span class='when'>{today.isoformat()}</span></header>"
+        f'<p class="nav"><a href="/coach?token={escape(token)}">&larr; roster</a></p>'
+        f"{banner}{body}"
+        "<footer>Nothing here has been sent. Unreviewed messages are not sent at "
+        "all — silence, never an unsupervised broadcast.</footer>"
         "</div></body></html>"
     )

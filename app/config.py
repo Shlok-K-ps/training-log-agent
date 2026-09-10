@@ -47,6 +47,8 @@ class Settings:
     coach_access_token: str = os.getenv("COACH_ACCESS_TOKEN", "")
     coach_name: str = os.getenv("COACH_NAME", "Coach")
     coach_silent_after_days: int = int(os.getenv("COACH_SILENT_AFTER_DAYS", "7"))
+    coach_approval_required: bool = _flag("COACH_APPROVAL_REQUIRED", True)
+    coach_draft_hour: int = int(os.getenv("COACH_DRAFT_HOUR", "20"))
 
     injury_clearance_reviewer: str = os.getenv("INJURY_CLEARANCE_REVIEWER", "")
     injury_stale_after_days: int = int(os.getenv("INJURY_STALE_AFTER_DAYS", "21"))

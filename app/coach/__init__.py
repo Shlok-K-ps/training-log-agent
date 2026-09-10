@@ -5,11 +5,15 @@ through `storage.clear_injury`, which records who did it and why.
 """
 
 from app.coach.auth import CoachAuthError, check, is_configured
-from app.coach.roster import Bucket, Flag, Roster, RosterEntry, build_roster, review_athlete
-from app.coach.view import render
+from app.coach.roster import (
+    Bucket, Flag, PendingMessage, Roster, RosterEntry,
+    build_roster, pending_reviews, review_athlete,
+)
+from app.coach.view import render, render_outbox
 
 __all__ = [
     "CoachAuthError", "check", "is_configured",
-    "Bucket", "Flag", "Roster", "RosterEntry", "build_roster", "review_athlete",
-    "render",
+    "Bucket", "Flag", "PendingMessage", "Roster", "RosterEntry",
+    "build_roster", "pending_reviews", "review_athlete",
+    "render", "render_outbox",
 ]

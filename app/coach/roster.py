@@ -175,6 +175,41 @@ class Roster:
         return sum(1 for e in self.entries if e.bucket is not Bucket.FINE)
 
 
+@dataclass(frozen=True)
+class PendingMessage:
+    """A queued outbound message, shown beside why the agent wants to send it."""
+
+    athlete_id: str
+    message_kind: str
+    local_date: str
+    body: str
+    original_body: str
+    athlete: RosterEntry
+
+    @property
+    def edited(self) -> bool:
+        return self.body.strip() != self.original_body.strip()
+
+
+def pending_reviews(conn: sqlite3.Connection, *, today: date) -> tuple[PendingMessage, ...]:
+    """Everything waiting on the coach tonight, each with the athlete's summary.
+
+    The summary is the point: approving a message is a judgement about that
+    athlete, and the coach should not have to open another screen to make it.
+    """
+    return tuple(
+        PendingMessage(
+            athlete_id=str(row["athlete_id"]),
+            message_kind=str(row["message_kind"]),
+            local_date=str(row["local_date"]),
+            body=str(row["body"]),
+            original_body=str(row["original_body"]),
+            athlete=review_athlete(conn, str(row["athlete_id"]), today=today),
+        )
+        for row in db.pending_drafts(conn)
+    )
+
+
 def build_roster(conn: sqlite3.Connection, *, today: date) -> Roster:
     """The whole squad, sorted by who needs a human first."""
     entries = [

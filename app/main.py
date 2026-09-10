@@ -26,12 +26,17 @@ from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
 from app.coach import auth as coach_auth
-from app.coach import build_roster, render as render_roster
+from app.coach import (
+    build_roster,
+    pending_reviews,
+    render as render_roster,
+    render_outbox,
+)
 from app.config import settings
 from app.integrations.factory import calendar_client, calendar_oauth, state_signer
 from app.integrations.google_calendar import CalendarIntegrationError
 from app.router import handle_message
-from app.scheduling import send_due_morning_prompts
+from app.scheduling import draft_upcoming_prompts, send_approved_prompts
 from app.storage import db
 
 logging.basicConfig(
@@ -83,10 +88,14 @@ async def _morning_scheduler_loop() -> None:
 
 
 def _send_morning_prompts() -> int:
+    """One tick: draft tomorrow's messages, then send the ones already approved."""
     conn = db.connect()
     try:
         db.init_db(conn)
-        return send_due_morning_prompts(conn, whatsapp.send_outbound)
+        drafted = draft_upcoming_prompts(conn)
+        if drafted:
+            log.info("queued %d morning message(s) for coach review", len(drafted))
+        return send_approved_prompts(conn, whatsapp.send_outbound)
     finally:
         conn.close()
 
@@ -159,6 +168,67 @@ def _render_console(token: str, message: tuple[str, str] | None) -> str:
     finally:
         conn.close()
     return render_roster(roster, token=token, coach=settings.coach_name, message=message)
+
+
+@app.get("/coach/outbox", response_class=HTMLResponse)
+async def coach_outbox(token: str = "") -> Response:
+    """Tonight's queue: what wants to go out tomorrow, and why."""
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach outbox</h1><p>{exc}</p>", status_code=403)
+    return HTMLResponse(await run_in_threadpool(_render_outbox, token, None))
+
+
+@app.post("/coach/outbox/review", response_class=HTMLResponse)
+async def coach_review_draft(request: Request) -> Response:
+    form = dict(await request.form())
+    token = str(form.get("token", ""))
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach outbox</h1><p>{exc}</p>", status_code=403)
+
+    message = await run_in_threadpool(
+        _review_draft,
+        str(form.get("athlete_id", "")).strip(),
+        str(form.get("message_kind", "")).strip(),
+        str(form.get("local_date", "")).strip(),
+        str(form.get("decision", "")).strip(),
+        str(form.get("body", "")),
+    )
+    return HTMLResponse(await run_in_threadpool(_render_outbox, token, message))
+
+
+def _review_draft(
+    athlete_id: str, message_kind: str, local_date: str, decision: str, body: str
+) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        db.review_draft(
+            conn, athlete_id, message_kind, local_date,
+            status=decision, reviewed_by=settings.coach_name, body=body,
+        )
+    except ValueError as exc:
+        return ("err", f"Not saved: {exc}")
+    finally:
+        conn.close()
+    verb = "approved for" if decision == "approved" else "held back from"
+    return ("ok", f"Message {verb} {athlete_id} on {local_date}.")
+
+
+def _render_outbox(token: str, message: tuple[str, str] | None) -> str:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        pending = pending_reviews(conn, today=date.today())
+    finally:
+        conn.close()
+    return render_outbox(
+        pending, token=token, coach=settings.coach_name, today=date.today(),
+        message=message,
+    )
 
 
 @app.get("/privacy", response_class=HTMLResponse)

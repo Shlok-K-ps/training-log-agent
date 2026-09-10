@@ -107,6 +107,19 @@ CREATE TABLE IF NOT EXISTS scheduled_deliveries (
     PRIMARY KEY (athlete_id, message_kind, local_date)
 );
 
+CREATE TABLE IF NOT EXISTS outbound_drafts (
+    athlete_id    TEXT NOT NULL,
+    message_kind  TEXT NOT NULL,
+    local_date    TEXT NOT NULL,
+    body          TEXT NOT NULL,
+    original_body TEXT NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('pending','approved','skipped','sent')),
+    reviewed_by   TEXT,
+    reviewed_at   TEXT,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (athlete_id, message_kind, local_date)
+);
+
 CREATE TABLE IF NOT EXISTS oauth_connections (
     athlete_id        TEXT NOT NULL,
     provider          TEXT NOT NULL,
@@ -859,6 +872,102 @@ def last_activity(conn: sqlite3.Connection, athlete_id: str) -> str | None:
         (athlete_id,),
     ).fetchone()
     return None if row is None or row["last"] is None else str(row["last"])
+
+
+# --- outbound drafts: nothing proactive leaves without a coach seeing it ------
+
+
+def create_draft(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    message_kind: str,
+    local_date: str,
+    body: str,
+) -> bool:
+    """Queue a message for review. Idempotent: re-drafting never overwrites an
+    edit or an approval the coach has already made."""
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO outbound_drafts
+            (athlete_id, message_kind, local_date, body, original_body,
+             status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?)
+        """,
+        (
+            athlete_id, message_kind, local_date, body, body,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def draft(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM outbound_drafts "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
+        (athlete_id, message_kind, local_date),
+    ).fetchone()
+
+
+def pending_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM outbound_drafts WHERE status = 'pending' "
+            "ORDER BY local_date, athlete_id"
+        )
+    )
+
+
+def review_draft(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    message_kind: str,
+    local_date: str,
+    *,
+    status: str,
+    reviewed_by: str,
+    body: str | None = None,
+) -> None:
+    """Approve (optionally with the coach's own wording) or skip a draft."""
+    if status not in {"approved", "skipped"}:
+        raise ValueError("a review is either 'approved' or 'skipped'")
+    reviewed_by = (reviewed_by or "").strip()
+    if not reviewed_by:
+        raise ValueError("a review must record who made it")
+    row = draft(conn, athlete_id, message_kind, local_date)
+    if row is None:
+        raise ValueError("no such draft")
+    if status == "approved" and not (body or str(row["body"])).strip():
+        raise ValueError("an approved message cannot be empty")
+    conn.execute(
+        """
+        UPDATE outbound_drafts
+           SET status = ?, body = ?, reviewed_by = ?, reviewed_at = ?
+         WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
+        """,
+        (
+            status,
+            (body if body is not None else str(row["body"])).strip(),
+            reviewed_by,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            athlete_id, message_kind, local_date,
+        ),
+    )
+    conn.commit()
+
+
+def mark_draft_sent(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> None:
+    conn.execute(
+        "UPDATE outbound_drafts SET status = 'sent' "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
+        (athlete_id, message_kind, local_date),
+    )
+    conn.commit()
 
 
 def list_scheduled_athletes(conn: sqlite3.Connection) -> list[str]:

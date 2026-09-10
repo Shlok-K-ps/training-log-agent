@@ -455,6 +455,39 @@ requires, given somewhere to stand.
 
 Set `COACH_ACCESS_TOKEN` to open it. Unset means closed, never open.
 
+### Nothing proactive goes out unreviewed
+
+The agent messages first. That is the useful part and also the risky part — an
+outbound message is the one thing an athlete cannot ignore, and it arrives with
+the coach's authority attached whether or not the coach wrote it.
+
+So the send is split in two. The evening before, the agent drafts tomorrow's
+messages and queues them at `/coach/outbox` with the reason it wants to send
+each one:
+
+```
+Coach Rao — outbox                                     2026-09-10
+QUEUED FOR TOMORROW (1)
+  Priya Kulkarni                                  +919812340001
+  Where they are: squat — stalled
+  ┌────────────────────────────────────────────────────────────┐
+  │ Good morning — recovery check-in. How many hours did you   │
+  │ sleep? … Today's usual training time is 18:30.             │
+  └────────────────────────────────────────────────────────────┘
+  [ Approve for 2026-09-11 ]  [ Don't send ]
+```
+
+The coach edits anything that reads wrong and approves. In the morning, only
+approved drafts are sent — **and the athlete receives the coach's wording, not
+the agent's**. Drafting runs in each athlete's own local evening, so a squad
+spread across timezones is still reviewed the night before *their* morning.
+
+Unreviewed means unsent. A coach who is asleep, busy or away produces silence,
+not an unsupervised broadcast — the same way an unset token closes the console
+rather than opening it. Set `COACH_APPROVAL_REQUIRED=false` to send unattended.
+
+Every approval records who made it, when, and whether the wording was changed.
+
 There is also a terminal equivalent, for a deployment with no web access:
 
 ```bash
@@ -493,7 +526,7 @@ app/
   programming/ Pure Python — five methods, selector, session structure
   channels/    Twilio/WhatsApp transport: identity, signatures, chunking
   integrations/ Google Calendar OAuth/API and Google Routes travel facts
-  scheduling/   deterministic slot search, sleep/travel gates, approval service
+  scheduling/   slot search, sleep/travel gates, and the outbox review gate
   router.py    the seam: parse → store → decide → reply
   main.py      FastAPI service
 chat.py        terminal harness, no phone required
