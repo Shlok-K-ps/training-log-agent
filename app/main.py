@@ -226,17 +226,46 @@ async def coach_clear_injury(request: Request) -> Response:
         return HTMLResponse(render_login(error=str(exc)), status_code=403)
 
     athlete_id = str(form.get("athlete_id", "")).strip()
+    clearance_source = str(form.get("clearance_source", "")).strip()
     reason = str(form.get("reason", "")).strip()
-    message = await run_in_threadpool(_clear_injury, athlete_id, reason)
-    html = await run_in_threadpool(_render_console, token, message)
+    confirmation = str(form.get("independent_confirmation", "")).strip()
+    message = await run_in_threadpool(
+        _clear_injury, athlete_id, clearance_source, reason, confirmation
+    )
+    html = await run_in_threadpool(_render_athlete, athlete_id, message)
+    if html is None:
+        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
     return HTMLResponse(html)
 
 
-def _clear_injury(athlete_id: str, reason: str) -> tuple[str, str]:
+def _clear_injury(
+    athlete_id: str, clearance_source: str, reason: str, confirmation: str
+) -> tuple[str, str]:
     conn = db.connect()
     try:
         db.init_db(conn)
-        db.clear_injury(conn, athlete_id, actor=settings.coach_name, reason=reason)
+        source = clearance_source.strip()
+        basis = reason.strip()
+        athlete_name = (db.athlete_name(conn, athlete_id) or "").strip()
+        self_labels = {
+            "athlete", "self", "me", "the athlete", athlete_id.casefold(),
+            athlete_name.casefold(),
+        }
+        if confirmation != "confirmed":
+            raise ValueError("confirm that clearance came from someone other than the athlete")
+        if not source:
+            raise ValueError("name the coach, physio or clinician who provided clearance")
+        if source.casefold() in self_labels:
+            raise ValueError("the athlete cannot be their own clearance source")
+        if not basis:
+            raise ValueError("record the basis for clearance")
+        audit_reason = (
+            f"Clearance source: {source}. Basis: {basis}. "
+            f"Recorded by coach: {settings.coach_name}."
+        )
+        db.clear_injury(
+            conn, athlete_id, actor=settings.coach_name, reason=audit_reason
+        )
     except ValueError as exc:
         return ("err", f"Not cleared: {exc}")
     finally:
@@ -492,6 +521,28 @@ def _optional_number(raw: str, *, integer: bool = False):
         raise ValueError(f"{value!r} is not a valid number") from exc
 
 
+def _goal_date_from_form(form: dict[str, str]) -> str | None:
+    """Join the cross-browser day/month/year controls into one ISO date."""
+    legacy = form.get("goal_target_date", "").strip()
+    if legacy:
+        try:
+            return date.fromisoformat(legacy).isoformat()
+        except ValueError as exc:
+            raise ValueError("goal date must be a valid date") from exc
+    pieces = tuple(form.get(key, "").strip() for key in (
+        "goal_day", "goal_month", "goal_year"
+    ))
+    if not any(pieces):
+        return None
+    if not all(pieces):
+        raise ValueError("select the goal day, month, and year")
+    try:
+        day, month, year = (int(value) for value in pieces)
+        return date(year, month, day).isoformat()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("goal date must be a valid calendar date") from exc
+
+
 def _register(form: dict[str, str]) -> tuple[str, str]:
     athlete_id = form.get("athlete_id", "")
     name = form.get("name", "")
@@ -512,7 +563,7 @@ def _register(form: dict[str, str]) -> tuple[str, str]:
             injury_note=form.get("injury_note", ""),
             goal_lift=form.get("goal_lift", "").strip() or None,
             goal_target_kg=_optional_number(form.get("goal_target_kg", "")),
-            goal_target_date=form.get("goal_target_date", "").strip() or None,
+            goal_target_date=_goal_date_from_form(form),
             created_by=settings.coach_name,
         )
     except ValueError as exc:

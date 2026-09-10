@@ -49,6 +49,13 @@ def test_an_injured_athlete_shows_the_open_flag(squad):
     assert detail.injured is True
     assert detail.clearance_requested is True
     assert detail.injury_days_open == 23
+    html = render_athlete(
+        detail, coach=COACH, suggested=suggest_message(detail, coach=COACH)
+    )
+    assert 'id="clearance-review"' in html
+    assert 'name="clearance_source"' in html
+    assert 'name="independent_confirmation"' in html
+    assert "Record clearance and reopen programming" in html
 
 
 def test_progress_charts_the_top_set_the_rules_compare(squad):

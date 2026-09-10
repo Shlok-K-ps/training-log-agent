@@ -7,7 +7,8 @@ import pytest
 
 from app.coach import COOKIE_NAME
 from app.config import settings
-from app.main import app
+from app.main import _goal_date_from_form, app
+from app.storage import db
 
 TOKEN = "s3cret-coach-token"
 
@@ -101,6 +102,70 @@ def test_athlete_directory_is_a_separate_authenticated_workspace():
         assert 'name="bench_1rm_kg"' in resp.text
         assert 'name="deadlift_1rm_kg"' in resp.text
         assert 'name="bodyweight_kg"' in resp.text
+        assert 'name="goal_day"' in resp.text
+        assert 'name="goal_month"' in resp.text
+        assert 'name="goal_year"' in resp.text
+
+
+def test_goal_date_controls_build_a_real_calendar_date():
+    assert _goal_date_from_form({
+        "goal_day": "29", "goal_month": "2", "goal_year": "2028",
+    }) == "2028-02-29"
+    with pytest.raises(ValueError, match="valid calendar date"):
+        _goal_date_from_form({
+            "goal_day": "31", "goal_month": "2", "goal_year": "2027",
+        })
+    with pytest.raises(ValueError, match="day, month, and year"):
+        _goal_date_from_form({"goal_day": "12", "goal_month": "", "goal_year": "2027"})
+
+
+def test_clearance_review_rejects_self_clearance_and_records_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "database_path", str(tmp_path / "clearance.db"))
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        db.register_athlete(
+            conn, "+919812340001", "Priya Kulkarni", on="2026-09-10",
+            injury_note="left knee pain",
+        )
+        db.request_injury_clearance(
+            conn, "+919812340001", note="feels better", on="2026-09-11"
+        )
+    finally:
+        conn.close()
+
+    with TestClient(app) as client:
+        client.cookies.set(COOKIE_NAME, TOKEN)
+        self_clearance = client.post("/coach/clear-injury", data={
+            "athlete_id": "+919812340001",
+            "clearance_source": "Priya Kulkarni",
+            "reason": "I feel fine",
+            "independent_confirmation": "confirmed",
+        })
+        assert self_clearance.status_code == 200
+        assert "athlete cannot be their own clearance source" in self_clearance.text
+
+        cleared = client.post("/coach/clear-injury", data={
+            "athlete_id": "+919812340001",
+            "clearance_source": "Dr Mehta, sports physio",
+            "reason": "Pain-free assessment with a staged return-to-load limit",
+            "independent_confirmation": "confirmed",
+        })
+        assert cleared.status_code == 200
+        assert "Injury flag cleared" in cleared.text
+
+    conn = db.connect()
+    try:
+        assert db.injury_state(conn, "+919812340001")[0] is False
+        latest = conn.execute(
+            "SELECT injury_clearance_reason FROM entries WHERE athlete_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            ("+919812340001",),
+        ).fetchone()
+        assert "Dr Mehta" in latest["injury_clearance_reason"]
+        assert "Coach Rao" in latest["injury_clearance_reason"]
+    finally:
+        conn.close()
 
 
 def test_whatsapp_desk_is_a_separate_authenticated_workspace():

@@ -141,15 +141,16 @@ def test_the_page_renders_and_escapes_athlete_supplied_text(conn):
     assert "Coach Rao" in html
 
 
-def test_the_clear_form_appears_only_for_athletes_awaiting_a_decision(conn):
+def test_the_clearance_review_link_appears_only_when_requested(conn):
     _log(conn, "+950", "Waiting Wanda", [140], start="2026-09-09")
     db.insert_entry(conn, db.Entry(athlete_id="+950", kind="status", injured=True,
                                    injury_note="knee", session_date="2026-08-20"))
     _log(conn, "+951", "Fine Fred", [140, 145, 150], start="2026-09-05")
 
     html = render(build_roster(conn, today=date(2026, 9, 12)), token="t", coach="Coach")
-    assert html.count("/coach/clear-injury") == 0, "no clearance requested yet"
+    assert html.count("#clearance-review") == 0, "no clearance requested yet"
 
     db.request_injury_clearance(conn, "+950", note="better", on="2026-09-11")
     html = render(build_roster(conn, today=date(2026, 9, 12)), token="t", coach="Coach")
-    assert html.count("/coach/clear-injury") == 1
+    assert html.count("#clearance-review") == 1
+    assert "Review injury clearance" in html

@@ -6,6 +6,7 @@ Mobile-first layout designed for a coach on a phone at the gym or on a laptop.
 
 from __future__ import annotations
 
+from datetime import date
 from html import escape
 
 from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage, Roster
@@ -857,6 +858,10 @@ button.skip:hover, .btn-secondary:hover {
 .onboarding-grid label { font: 600 10.5px var(--font-mono); color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; }
 .onboarding-grid input, .onboarding-grid select { display: block; width: 100%; margin-top: 5px; border-radius: 10px; }
 .onboarding-wide { grid-column: 1 / -1; }
+.date-fields { display: grid; grid-template-columns: .8fr 1.35fr 1fr; gap: 7px; margin-top: 5px; }
+.date-fields select { margin-top: 0; min-width: 0; padding-left: 10px; padding-right: 8px; }
+.clearance-link { display: inline-flex; align-items: center; gap: 7px; color: var(--plate-red-text); border: 1px solid var(--plate-red-border); background: var(--plate-red-bg); padding: 8px 13px; border-radius: 9999px; text-decoration: none; font-size: 12.5px; font-weight: 700; }
+.clearance-link:hover { border-color: var(--plate-red); color: #fff; }
 
 .demo {
   background: var(--surface);
@@ -1120,12 +1125,8 @@ def _card(entry) -> str:
     form = ""
     if entry.needs_action and entry.injury_days_open is not None:
         form = (
-            '<form method="post" action="/coach/clear-injury">'
-            f'<input type="hidden" name="athlete_id" value="{escape(entry.athlete_id)}">'
-            '<input type="text" name="reason" required maxlength="200" '
-            'placeholder="Who cleared them, and on what basis">'
-            '<button type="submit">Clear injury</button>'
-            '</form>'
+            f'<p><a class="clearance-link" href="/coach/athlete/{escape(entry.athlete_id)}#clearance-review">'
+            'Review injury clearance →</a></p>'
         )
 
     # Semantic badge label to guarantee severity is clear without color alone
@@ -1200,7 +1201,25 @@ def coach_frame(
     )
 
 
-_REGISTER_FORM = """
+def _register_form(today: date) -> str:
+    days = '<option value="">Day</option>' + "".join(
+        f'<option value="{value}">{value:02d}</option>' for value in range(1, 32)
+    )
+    months = (
+        '<option value="">Month</option>' + "".join(
+            f'<option value="{number}">{name}</option>'
+            for number, name in enumerate(
+                ("January", "February", "March", "April", "May", "June",
+                 "July", "August", "September", "October", "November", "December"),
+                start=1,
+            )
+        )
+    )
+    years = '<option value="">Year</option>' + "".join(
+        f'<option value="{value}">{value}</option>'
+        for value in range(today.year, today.year + 11)
+    )
+    return f"""
 <section class="register"><h2>Add an athlete</h2>
 <details class="onboarding" open><summary>Initial coaching profile</summary>
 <form class="onboarding-form" method="post" action="/coach/athletes/register">
@@ -1215,7 +1234,11 @@ _REGISTER_FORM = """
     <label>Experience<select name="experience" required><option value="novice">Novice</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
     <label>Goal lift<select name="goal_lift"><option value="">No numeric goal yet</option><option value="squat">Squat</option><option value="bench press">Bench press</option><option value="deadlift">Deadlift</option></select></label>
     <label>Goal 1RM (kg)<input type="number" name="goal_target_kg" min="1" max="700" step="0.5"></label>
-    <label>Goal / meet date<input type="date" name="goal_target_date"></label>
+    <label>Goal / meet date<span class="date-fields">
+      <select name="goal_day" aria-label="Goal day">{days}</select>
+      <select name="goal_month" aria-label="Goal month">{months}</select>
+      <select name="goal_year" aria-label="Goal year">{years}</select>
+    </span></label>
     <label class="onboarding-wide">Current injury or restriction<input type="text" name="injury_note" maxlength="240" placeholder="Leave blank if none; any entry opens the injury safety gate"></label>
   </div>
   <button type="submit">Create athlete profile</button>
@@ -1295,11 +1318,9 @@ def render(
         action = ""
         if entry.needs_action and entry.injury_days_open is not None:
             action = (
-                '<form method="post" action="/coach/clear-injury" style="grid-column:1/-1">'
-                f'<input type="hidden" name="athlete_id" value="{escape(entry.athlete_id)}">'
-                '<input type="text" name="reason" required maxlength="200" '
-                'placeholder="Who cleared them, and on what basis">'
-                '<button type="submit">Clear injury</button></form>'
+                f'<div style="grid-column:1/-1"><a class="clearance-link" '
+                f'href="/coach/athlete/{escape(entry.athlete_id)}#clearance-review">'
+                'Review injury clearance →</a></div>'
             )
         priority_rows.append(
             '<div class="athlete-line">'
@@ -1403,7 +1424,10 @@ function filterAthletes(){const q=search.value.trim().toLowerCase();const f=filt
 document.querySelectorAll('.athlete-record').forEach(row=>{row.hidden=!row.dataset.search.includes(q)||(f!=='all'&&row.dataset.bucket!==f);});}
 search.addEventListener('input',filterAthletes);filter.addEventListener('change',filterAthletes);
 </script>"""
-    body = f"{banner}{_demo_controls(roster, has_demo)}{tools}{directory}{_REGISTER_FORM}{script}"
+    body = (
+        f"{banner}{_demo_controls(roster, has_demo)}{tools}{directory}"
+        f"{_register_form(roster.reviewed_on)}{script}"
+    )
     return coach_frame(
         body, active="athletes", coach=coach, title="Athletes",
         subtitle="Current status, recent progress and readiness across the full squad.",

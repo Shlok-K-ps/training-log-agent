@@ -328,6 +328,25 @@ _ATHLETE_STYLE = """
 .pivot-option p { font-size: 12.5px; color: var(--ink-soft); margin: 6px 0; }
 .pivot-option form { margin-top: 10px; }
 .goal-signal { padding: 11px 13px; border-radius: 10px; background: var(--plate-blue-bg); border: 1px solid var(--plate-blue-border); font-size: 12.5px; margin-top: 12px; }
+.clearance-panel { border: 1px solid var(--plate-red-border); background: linear-gradient(135deg, var(--plate-red-bg), var(--surface)); border-radius: 16px; padding: 20px; margin-bottom: 22px; }
+.clearance-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 15px; }
+.clearance-head h2 { margin: 0 0 5px; font-size: 19px; }
+.clearance-head p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.clearance-state { flex: 0 0 auto; color: var(--plate-red-text); background: var(--plate-red-bg); border: 1px solid var(--plate-red-border); border-radius: 9999px; padding: 5px 10px; font: 700 10.5px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
+.clearance-boundary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 16px; }
+.clearance-boundary div { border: 1px solid var(--border); background: var(--surface-inset); border-radius: 10px; padding: 11px; }
+.clearance-boundary b { display: block; color: var(--ink); font-size: 12px; margin-bottom: 3px; }
+.clearance-boundary span { color: var(--ink-faint); font-size: 11.5px; line-height: 1.4; }
+.clearance-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid var(--border); padding-top: 16px; }
+.clearance-form label { color: var(--ink-soft); font-size: 12.5px; font-weight: 600; }
+.clearance-form input[type="text"], .clearance-form textarea { display: block; width: 100%; margin-top: 6px; color: var(--ink); background: var(--surface-inset); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; font: inherit; }
+.clearance-form textarea { min-height: 84px; resize: vertical; }
+.clearance-form input:focus, .clearance-form textarea:focus { outline: none; border-color: var(--accent-cyan); box-shadow: 0 0 0 3px rgba(56,189,248,.1); }
+.clearance-confirm { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border-radius: 10px; background: var(--plate-yellow-bg); border: 1px solid var(--plate-yellow-border); color: var(--plate-yellow-text) !important; }
+.clearance-confirm input { margin-top: 3px; }
+.clearance-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.clearance-actions small { color: var(--ink-faint); max-width: 560px; }
+.clearance-actions button { background: var(--plate-red); color: #fff; border: 0; border-radius: 9999px; padding: 10px 17px; font-weight: 700; cursor: pointer; }
 
 @media(max-width:860px){
   .profile-grid { grid-template-columns: 1fr; }
@@ -335,7 +354,9 @@ _ATHLETE_STYLE = """
 }
 
 @media(max-width:540px){
-  .context-grid, .pivot-grid { grid-template-columns: 1fr; }
+  .context-grid, .pivot-grid, .clearance-boundary, .clearance-form { grid-template-columns: 1fr; }
+  .clearance-confirm, .clearance-actions { grid-column: auto; }
+  .clearance-head, .clearance-actions { flex-direction: column; }
 }
 """
 
@@ -367,6 +388,42 @@ def _injury_pivot_panel(detail: AthleteDetail) -> str:
         '<p>The injury gate remains open in every path. These options change training only; '
         'they do not diagnose the injury or clear the athlete.</p>'
         f'{selected_note}<div class="pivot-grid">{"".join(options)}</div></section>'
+    )
+
+
+def _injury_clearance_panel(detail: AthleteDetail) -> str:
+    """A deliberate safety review, shown only after the athlete requests clearance."""
+    if not detail.injured or not detail.clearance_requested:
+        return ""
+    days = (
+        f"Open {detail.injury_days_open} days"
+        if detail.injury_days_open is not None else "Injury gate open"
+    )
+    return (
+        '<section id="clearance-review" class="clearance-panel">'
+        '<div class="clearance-head"><div><h2>Injury clearance review</h2>'
+        '<p>The athlete has asked to resume normal programming. Record the independent '
+        'basis before removing the software safety gate.</p></div>'
+        f'<span class="clearance-state">{escape(days)}</span></div>'
+        '<div class="clearance-boundary">'
+        '<div><b>1 · Verify</b><span>A named coach, physio or clinician—not the athlete—has assessed readiness.</span></div>'
+        '<div><b>2 · Record</b><span>Capture who provided clearance and the concrete basis for it.</span></div>'
+        '<div><b>3 · Reopen</b><span>Only then can normal load suggestions resume.</span></div>'
+        '</div><form class="clearance-form" method="post" action="/coach/clear-injury">'
+        f'<input type="hidden" name="athlete_id" value="{escape(detail.athlete_id)}">'
+        '<label>Named clearance source'
+        '<input type="text" name="clearance_source" required maxlength="100" '
+        'placeholder="e.g. Dr Mehta, sports physio"></label>'
+        '<label>Basis for clearance'
+        '<textarea name="reason" required maxlength="400" '
+        'placeholder="What was assessed, and what return-to-training limits apply?"></textarea></label>'
+        '<label class="clearance-confirm"><input type="checkbox" name="independent_confirmation" '
+        'value="confirmed" required><span>I confirm this clearance came from someone other '
+        'than the athlete and I want to remove the injury safety gate.</span></label>'
+        '<div class="clearance-actions"><small>This records the signed-in coach, source, basis '
+        'and timestamp. It does not represent a diagnosis by Power AI.</small>'
+        '<button type="submit">Record clearance and reopen programming</button></div>'
+        '</form></section>'
     )
 
 
@@ -569,7 +626,7 @@ def render_athlete(
     body = (
         f"{banner}<p class='back'><a href='/coach/athletes'>← All athletes / Roster</a></p>"
         f'<div class="status-strip"><strong><span class="sym">●</span> Current status:</strong> {escape(status)}</div>'
-        f'{_injury_pivot_panel(detail)}'
+        f'{_injury_clearance_panel(detail)}{_injury_pivot_panel(detail)}'
         f'<div class="grid">{tile_html}</div>'
         '<div class="profile-grid"><div>'
         f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
