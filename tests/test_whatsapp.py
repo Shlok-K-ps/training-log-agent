@@ -119,6 +119,12 @@ def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeyp
     assert "slept 5h" in response.text
     assert "Test the WhatsApp workflow" in response.text
 
+    approval = client.get("/coach/whatsapp?tab=approval")
+    assert approval.status_code == 200
+    assert "Needs approval" in approval.text
+    assert "Rohit Sharma" in approval.text
+    assert 'action="/coach/whatsapp/review"' in approval.text
+
 
 def test_twilio_delivery_callback_updates_the_whatsapp_desk_ledger(client):
     from app.config import settings as app_settings

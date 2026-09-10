@@ -103,6 +103,21 @@ def _draft_card(item: PendingMessage) -> str:
         if item.bulk_eligible else
         '<span class="manual-mark">Individual review required</span>'
     )
+    return (
+        f'<div class="card {athlete.bucket.value} message-card"><div class="panel-head"><div>'
+        f'<a class="athlete-name" href="/coach/whatsapp?tab=approval&athlete={quote(item.athlete_id)}">'
+        f'{escape(athlete.display_name)}</a><div class="muted">{escape(item.local_date)} · '
+        f'{escape(item.message_kind.replace("_", " "))}</div></div>{eligibility}</div>'
+        f'<p class="evidence-reason"><b>Evidence:</b> {reasons}</p>'
+        '<form method="post" action="/coach/whatsapp/review">'
+        f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
+        f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
+        f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
+        f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
+        '<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">'
+        '<button class="approve" name="decision" value="approved">Approve</button>'
+        '<button class="skip" name="decision" value="skipped">Hold</button></div></form></div>'
+    )
 
 
 def _scheduled_list(rows) -> str:
@@ -159,21 +174,6 @@ def _simulator(demo_athletes: tuple[tuple[str, str], ...]) -> str:
         '<button type="submit">Simulate message</button>'
         '<p>This writes a real demo conversation and approval draft, but sends no external WhatsApp message.</p>'
         '</form></details>'
-    )
-    return (
-        f'<div class="card {athlete.bucket.value} message-card"><div class="panel-head"><div>'
-        f'<a class="athlete-name" href="/coach/whatsapp?tab=approval&athlete={quote(item.athlete_id)}">'
-        f'{escape(athlete.display_name)}</a><div class="muted">{escape(item.local_date)} · '
-        f'{escape(item.message_kind.replace("_", " "))}</div></div>{eligibility}</div>'
-        f'<p class="evidence-reason"><b>Evidence:</b> {reasons}</p>'
-        '<form method="post" action="/coach/whatsapp/review">'
-        f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
-        f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
-        f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
-        f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
-        '<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap">'
-        '<button class="approve" name="decision" value="approved">Approve</button>'
-        '<button class="skip" name="decision" value="skipped">Hold</button></div></form></div>'
     )
 
 
