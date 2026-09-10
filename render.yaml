@@ -28,7 +28,18 @@ services:
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
 
-      # --- Channel: Twilio WhatsApp ---------------------------------------
+      # --- Channel: Vonage WhatsApp Sandbox -------------------------------
+      # Configure once and the real WhatsApp transport activates automatically.
+      - key: VONAGE_API_KEY
+        sync: false
+      - key: VONAGE_API_SECRET
+        sync: false
+      - key: VONAGE_SANDBOX_NUMBER
+        sync: false
+      - key: VONAGE_WEBHOOK_SECRET
+        generateValue: true
+
+      # --- Legacy fallback: Twilio WhatsApp -------------------------------
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN

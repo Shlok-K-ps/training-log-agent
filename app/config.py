@@ -29,6 +29,14 @@ class Settings:
     twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
     twilio_whatsapp_from: str = os.getenv("TWILIO_WHATSAPP_FROM", "")
 
+    # Vonage's Messages API Sandbox is the default portfolio/demo transport.
+    # No provider switch is exposed in the product: configuring these values
+    # connects WhatsApp automatically, while Twilio remains a legacy fallback.
+    vonage_api_key: str = os.getenv("VONAGE_API_KEY", "")
+    vonage_api_secret: str = os.getenv("VONAGE_API_SECRET", "")
+    vonage_sandbox_number: str = os.getenv("VONAGE_SANDBOX_NUMBER", "")
+    vonage_webhook_secret: str = os.getenv("VONAGE_WEBHOOK_SECRET", "")
+
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "")
     validate_twilio_signature: bool = _flag("VALIDATE_TWILIO_SIGNATURE", True)
     enable_morning_scheduler: bool = _flag("ENABLE_MORNING_SCHEDULER", False)
@@ -79,6 +87,45 @@ class Settings:
             and self.twilio_auth_token
             and self.twilio_whatsapp_from
         )
+
+    def require_vonage(self) -> tuple[str, str, str]:
+        if not (
+            self.vonage_api_key
+            and self.vonage_api_secret
+            and self.vonage_sandbox_number
+        ):
+            raise RuntimeError(
+                "VONAGE_API_KEY, VONAGE_API_SECRET and VONAGE_SANDBOX_NUMBER "
+                "are required"
+            )
+        return (
+            self.vonage_api_key,
+            self.vonage_api_secret,
+            self.vonage_sandbox_number,
+        )
+
+    @property
+    def vonage_configured(self) -> bool:
+        """Whether the free WhatsApp sandbox can send and verify webhooks."""
+        return bool(
+            self.vonage_api_key
+            and self.vonage_api_secret
+            and self.vonage_sandbox_number
+            and self.vonage_webhook_secret
+        )
+
+    @property
+    def whatsapp_configured(self) -> bool:
+        """The active transport is automatic: Vonage first, then legacy Twilio."""
+        return self.vonage_configured or self.twilio_configured
+
+    @property
+    def whatsapp_transport_name(self) -> str:
+        if self.vonage_configured:
+            return "Vonage Sandbox"
+        if self.twilio_configured:
+            return "Twilio"
+        return "Simulator"
 
     @property
     def calendar_configured(self) -> bool:

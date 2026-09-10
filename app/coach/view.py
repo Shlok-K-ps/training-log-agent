@@ -2541,7 +2541,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
         <div class="spec-col">
           <span class="spec-num">01</span>
           <span class="spec-name">INGESTION</span>
-          <span class="spec-detail">WhatsApp Cloud API</span>
+          <span class="spec-detail">Vonage Sandbox</span>
         </div>
         <div class="spec-col">
           <span class="spec-num">02</span>

@@ -191,6 +191,7 @@ def render_whatsapp_desk(
     coach: str,
     today: date,
     transport_ready: bool,
+    transport_name: str = "Simulator",
     message: tuple[str, str] | None = None,
 ) -> str:
     """Render inbox, approval, schedule and delivery states in one daily desk."""
@@ -204,9 +205,9 @@ def render_whatsapp_desk(
     if message:
         banner = f'<div class="msg {escape(message[0])}">{escape(message[1])}</div>'
     transport = (
-        '<div class="msg ok"><strong>Live WhatsApp connected.</strong> Approved messages can be sent through Twilio.</div>'
+        f'<div class="msg ok"><strong>Real WhatsApp connected.</strong> Approved messages are sent through {escape(transport_name)}.</div>'
         if transport_ready else
-        '<div class="msg warn"><strong>Simulator mode.</strong> Twilio is not configured; the approval workflow works, but no real WhatsApp message can be sent.</div>'
+        '<div class="msg warn"><strong>Demo simulator is ready.</strong> Add the Vonage Sandbox credentials to enable real WhatsApp. The full inbox, approval and audit workflow already works here.</div>'
     )
     stats = (
         '<div class="desk-stats">'

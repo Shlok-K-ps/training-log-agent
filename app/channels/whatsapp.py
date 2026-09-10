@@ -1,7 +1,8 @@
 """WhatsApp plumbing: identity, signature checking, and message chunking.
 
 WhatsApp is a transport, not a layer. Everything here is about getting bytes in
-and out of Twilio; no parsing, no rules.
+and out; no parsing, no rules. Vonage is preferred when configured, with the
+original Twilio integration retained as a compatibility fallback.
 """
 
 from __future__ import annotations
@@ -88,7 +89,11 @@ def twiml(messages: list[str]) -> str:
 
 
 def send_outbound(athlete_id: str, body: str) -> str:
-    """Send one proactive WhatsApp message through the configured Twilio sender."""
+    """Send through the automatically configured real WhatsApp transport."""
+    if settings.vonage_configured:
+        from app.channels import vonage
+
+        return vonage.send_outbound(athlete_id, body)
     sid, token, sender = settings.require_twilio()
     recipient = athlete_id if athlete_id.startswith("whatsapp:") else f"whatsapp:{athlete_id}"
     options = {"from_": sender, "to": recipient, "body": body}

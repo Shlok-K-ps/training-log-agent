@@ -70,7 +70,7 @@ athlete                                                        agent
 Three layers, and the split is the whole point.
 
 ```
-   WhatsApp ──▶ Twilio ──▶ POST /webhook/whatsapp
+   WhatsApp ──▶ Vonage Sandbox ──▶ POST /webhook/vonage/inbound
                                    │
    ┌───────────────────────────────┼───────────────────────────────┐
    │                               ▼                               │
@@ -299,7 +299,43 @@ Now the messy half works — "squats felt awful today, ground out the last two a
 one forty" parses, and so does "tweaked my left shoulder on the last set", which
 logs the set *and* raises the injury flag.
 
-### 4. Connect WhatsApp (Twilio sandbox)
+### 4. Connect real WhatsApp for a judge (Vonage Sandbox)
+
+Vonage is integrated directly — there is no provider picker in the product.
+When its four environment values are present, the WhatsApp Desk automatically
+changes from **Demo simulator** to **Real WhatsApp connected**. The simulator
+remains available so the portfolio can always be reviewed without an account.
+
+> **Free demo path, not production:** Vonage documents a 100-message/month fair
+> usage allowance for its Messages API Sandbox. An athlete must message the
+> sandbox first; free-form replies work during WhatsApp's 24-hour customer-care
+> window. The sandbox does not support proactive WhatsApp templates, so it is
+> ideal for a live portfolio demonstration, not reliable morning broadcasts.
+
+1. Create a Vonage account and open **Messaging → Messages Sandbox** at
+   <https://dashboard.nexmo.com/messages/sandbox>. Add WhatsApp and join the
+   displayed sandbox from the phone that will act as the athlete.
+2. In Render, add `VONAGE_API_KEY`, `VONAGE_API_SECRET`, and the displayed
+   WhatsApp number as `VONAGE_SANDBOX_NUMBER` (digits or E.164 both work).
+3. Read Render's generated `VONAGE_WEBHOOK_SECRET`, then set the Vonage sandbox
+   webhooks to:
+
+   - Inbound: `https://training-log-agent.onrender.com/webhook/vonage/inbound?token=<VONAGE_WEBHOOK_SECRET>`
+   - Status: `https://training-log-agent.onrender.com/webhook/vonage/status?token=<VONAGE_WEBHOOK_SECRET>`
+
+4. Redeploy and open
+   <https://training-log-agent.onrender.com/health>. It should show
+   `"whatsapp_integration": true` and `"whatsapp_transport": "Vonage Sandbox"`.
+5. Send `squat 3x5 at 140kg rpe 8` from the joined phone. The phone receives a
+   neutral acknowledgement immediately; the coaching recommendation appears in
+   **WhatsApp Desk → Needs approval**. Approve it and the audited delivery status
+   appears in the Sent tab.
+
+The API credentials remain only in Render. The public inbound and status URLs
+also require the independent webhook secret, so a reviewer cannot impersonate
+an athlete by posting arbitrary JSON.
+
+#### Legacy alternative: Twilio sandbox
 
 > **Resume/demo path, not permanently free production:** Twilio documents the
 > WhatsApp Sandbox as testing-only. A current free trial lasts 30 days and
@@ -382,7 +418,7 @@ the log but do not grant scheduling authority.
 ## Tests
 
 ```bash
-pytest -q          # 341 tests, no network
+pytest -q          # 349 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -395,10 +431,9 @@ the suite never makes a network call.
 ## Security
 
 - The API key lives in `.env`, which is gitignored. Nothing secret is committed.
-- The webhook is a public URL that writes to a database, so every request is
-  checked against Twilio's HMAC signature before it is processed
-  ([`app/channels/whatsapp.py`](app/channels/whatsapp.py)). Unsigned requests get
-  a 403.
+- The webhook is a public URL that writes to a database. Vonage endpoints
+  require an independent high-entropy webhook secret; the legacy Twilio route
+  verifies Twilio's HMAC signature. Unauthenticated requests get a 403.
 - Athlete data is keyed by phone number and never crosses between athletes; the
   isolation is tested.
 - Calendar tokens and saved places are encrypted at rest. Event titles, descriptions, attendees
@@ -533,7 +568,7 @@ safe batch. New readiness data, an injury, a schedule update, an edit, or any
 other newer athlete fact forces individual review. If evidence changes after
 approval but before sending, the approval is invalidated automatically.
 
-To test the workflow without Twilio, load the fictional demo squad from
+To test the workflow without an external WhatsApp account, load the fictional demo squad from
 Overview, open **WhatsApp → Inbox → Test the WhatsApp workflow**, and submit a
 check-in such as `slept 5h, readiness 4, soreness 6, stress 7`. The simulator
 uses the real parser, storage and approval queue but is restricted to reserved
@@ -575,7 +610,7 @@ app/
   decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
                guardian.py — the injury gate; issues the only SafetyClearance
   programming/ Pure Python — five methods, selector, session structure
-  channels/    Twilio/WhatsApp transport: identity, signatures, chunking
+  channels/    Vonage/Twilio WhatsApp adapters: identity, auth, delivery status
   integrations/ Google Calendar OAuth/API and Google Routes travel facts
   scheduling/   slot search, sleep/travel gates, and the outbox review gate
   router.py    the seam: parse → store → decide → reply
@@ -586,5 +621,5 @@ docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       clear_injury.py — COACH TOOL: list flagged athletes, close a flag
                check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         341 tests, no network
+tests/         349 tests, no network
 ```

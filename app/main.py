@@ -1,12 +1,13 @@
-"""FastAPI service: Twilio WhatsApp sandbox in, templated coaching reply out.
+"""FastAPI service: WhatsApp transport in, reviewed coaching messages out.
 
-    Twilio  ->  POST /webhook/whatsapp
+    Vonage  ->  POST /webhook/vonage/inbound
+    Twilio  ->  POST /webhook/whatsapp (legacy fallback)
                   |
                   |-- Layer 1  app.agent      Gemini -> validated tool calls
                   |-- Layer 2  app.storage    SQLite append
                   |-- Layer 3  app.decision   verdict + reply text
                   v
-                TwiML response  ->  Twilio  ->  WhatsApp
+                receipt + coach-approved delivery  ->  WhatsApp
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
-from app.channels import whatsapp
+from app.channels import vonage, whatsapp
 from app.decision.injury_pivot import injury_pivot_options
 from app.coach import auth as coach_auth
 from app.coach.athlete import athlete_detail, suggest_message
@@ -752,7 +753,8 @@ def _render_whatsapp(
         scheduled=scheduled, sent=sent, selected_athlete=selected,
         selected_name=selected_name, tab=tab, coach=settings.coach_name,
         demo_athletes=demo_athletes, today=date.today(), message=message,
-        transport_ready=settings.twilio_configured,
+        transport_ready=settings.whatsapp_configured,
+        transport_name=settings.whatsapp_transport_name,
     )
 
 
@@ -825,8 +827,13 @@ async def health() -> dict[str, object]:
         "status": "ok",
         "model": settings.gemini_model if settings.gemini_api_key else "offline-stub",
         "database": str(settings.db_file),
-        "signature_validation": settings.validate_twilio_signature,
-        "whatsapp_integration": settings.twilio_configured,
+        "signature_validation": (
+            bool(settings.vonage_webhook_secret)
+            if settings.vonage_configured
+            else settings.validate_twilio_signature
+        ),
+        "whatsapp_integration": settings.whatsapp_configured,
+        "whatsapp_transport": settings.whatsapp_transport_name,
         "morning_scheduler": settings.enable_morning_scheduler,
         "calendar_integration": settings.calendar_configured,
     }
@@ -952,3 +959,60 @@ async def whatsapp_status_webhook(request: Request) -> Response:
     finally:
         conn.close()
     return Response(status_code=204)
+
+
+@app.post("/webhook/vonage/inbound")
+async def vonage_whatsapp_webhook(request: Request) -> Response:
+    """Receive a Vonage Sandbox message and send the neutral receipt via REST."""
+    if not vonage.valid_webhook_secret(request.query_params.get("token")):
+        log.warning("rejected request with a bad Vonage webhook secret")
+        return Response(status_code=403, content="invalid webhook secret")
+    try:
+        payload = await request.json()
+    except ValueError:
+        return Response(status_code=400, content="invalid JSON")
+    athlete_id = vonage.athlete_id_from_sender(str(payload.get("from", "")))
+    body = str(payload.get("text", "")).strip()
+    provider_sid = str(payload.get("message_uuid", "")).strip()
+    if not athlete_id or not body or not provider_sid:
+        return Response(status_code=400, content="incomplete WhatsApp message")
+
+    log.info("Vonage message from %s: %r", athlete_id, body[:120])
+    reply = await run_in_threadpool(_process, athlete_id, body, provider_sid)
+    try:
+        outbound_sid = await run_in_threadpool(
+            whatsapp.send_outbound, athlete_id, reply
+        )
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            db.attach_whatsapp_reply_sid(conn, provider_sid, outbound_sid)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - a non-2xx response asks Vonage to retry
+        log.exception("failed to send Vonage acknowledgement to %s", athlete_id)
+        return Response(status_code=502, content="outbound acknowledgement failed")
+    return Response(status_code=200, content="ok")
+
+
+@app.post("/webhook/vonage/status")
+async def vonage_status_webhook(request: Request) -> Response:
+    """Apply Vonage delivery/read/failure callbacks to the shared ledger."""
+    if not vonage.valid_webhook_secret(request.query_params.get("token")):
+        return Response(status_code=403, content="invalid webhook secret")
+    try:
+        payload = await request.json()
+    except ValueError:
+        return Response(status_code=400, content="invalid JSON")
+    sid = str(payload.get("message_uuid", "")).strip()
+    status = vonage.ledger_status(str(payload.get("status", "")))
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    error_code = str(error.get("title") or error.get("detail") or "").strip() or None
+    if sid and status:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            db.update_whatsapp_status(conn, sid, status, error_code=error_code)
+        finally:
+            conn.close()
+    return Response(status_code=200, content="ok")

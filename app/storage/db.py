@@ -1329,6 +1329,35 @@ def whatsapp_reply_to(
     ).fetchone()
 
 
+def attach_whatsapp_reply_sid(
+    conn: sqlite3.Connection, reply_to_sid: str, provider_sid: str
+) -> bool:
+    """Attach a REST-send UUID to the receipt created while handling inbound.
+
+    Vonage receives a webhook and sends the acknowledgement through a separate
+    API request. Linking both IDs keeps retries idempotent and status callbacks
+    attached to the exact conversation event.
+    """
+    if not reply_to_sid or not provider_sid:
+        return False
+    existing = whatsapp_message_by_sid(conn, provider_sid)
+    if existing is not None:
+        return True
+    row = conn.execute(
+        "SELECT id FROM whatsapp_messages WHERE reply_to_sid = ? "
+        "AND direction = 'outbound' ORDER BY id DESC LIMIT 1",
+        (reply_to_sid,),
+    ).fetchone()
+    if row is None:
+        return False
+    conn.execute(
+        "UPDATE whatsapp_messages SET provider_sid = ?, status = 'sent' WHERE id = ?",
+        (provider_sid, int(row["id"])),
+    )
+    conn.commit()
+    return True
+
+
 def whatsapp_conversations(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Latest message per athlete, ordered as a working inbox."""
     return list(
