@@ -4,6 +4,9 @@ version = "0.2.0"
 description = "WhatsApp training-log agent for a powerlifting team: LLM parses, SQLite stores, Python decides."
 requires-python = ">=3.10"
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
