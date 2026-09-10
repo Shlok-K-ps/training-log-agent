@@ -44,6 +44,10 @@ class Settings:
         "TEAM_APPROVED_SUPPLEMENT_REGIMENS", ""
     )
 
+    coach_access_token: str = os.getenv("COACH_ACCESS_TOKEN", "")
+    coach_name: str = os.getenv("COACH_NAME", "Coach")
+    coach_silent_after_days: int = int(os.getenv("COACH_SILENT_AFTER_DAYS", "7"))
+
     injury_clearance_reviewer: str = os.getenv("INJURY_CLEARANCE_REVIEWER", "")
     injury_stale_after_days: int = int(os.getenv("INJURY_STALE_AFTER_DAYS", "21"))
 

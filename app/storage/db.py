@@ -838,6 +838,29 @@ def active_supplements(conn: sqlite3.Connection, athlete_id: str) -> list[Entry]
     return [_row_to_entry(row) for row in rows]
 
 
+def list_athletes(conn: sqlite3.Connection) -> list[str]:
+    """Every athlete who has ever sent anything. The coach's roster."""
+    return [
+        str(row["athlete_id"])
+        for row in conn.execute(
+            "SELECT DISTINCT athlete_id FROM entries ORDER BY athlete_id"
+        )
+    ]
+
+
+def last_activity(conn: sqlite3.Connection, athlete_id: str) -> str | None:
+    """Most recent session_date this athlete recorded anything on.
+
+    Silence is a signal no athlete will ever send you, so it has to be read out
+    of the absence of rows.
+    """
+    row = conn.execute(
+        "SELECT MAX(session_date) AS last FROM entries WHERE athlete_id = ?",
+        (athlete_id,),
+    ).fetchone()
+    return None if row is None or row["last"] is None else str(row["last"])
+
+
 def list_scheduled_athletes(conn: sqlite3.Connection) -> list[str]:
     rows = conn.execute(
         """

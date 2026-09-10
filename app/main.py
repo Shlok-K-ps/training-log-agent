@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date
 from contextlib import asynccontextmanager
 from contextlib import suppress
 from functools import lru_cache
@@ -24,6 +25,8 @@ from starlette.concurrency import run_in_threadpool
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
+from app.coach import auth as coach_auth
+from app.coach import build_roster, render as render_roster
 from app.config import settings
 from app.integrations.factory import calendar_client, calendar_oauth, state_signer
 from app.integrations.google_calendar import CalendarIntegrationError
@@ -106,6 +109,56 @@ async def product_home() -> str:
     events and travel. Calendar changes require confirmation in WhatsApp.</p>
     <p><a href='/privacy'>Privacy</a> · <a href='/terms'>Terms</a></p>
     """
+
+
+@app.get("/coach", response_class=HTMLResponse)
+async def coach_console(token: str = "") -> Response:
+    """The roster. Read-only, and closed unless COACH_ACCESS_TOKEN is set."""
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+    html = await run_in_threadpool(_render_console, token, None)
+    return HTMLResponse(html)
+
+
+@app.post("/coach/clear-injury", response_class=HTMLResponse)
+async def coach_clear_injury(request: Request) -> Response:
+    """The one write the console can make, and it records who made it."""
+    form = dict(await request.form())
+    token = str(form.get("token", ""))
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+
+    athlete_id = str(form.get("athlete_id", "")).strip()
+    reason = str(form.get("reason", "")).strip()
+    message = await run_in_threadpool(_clear_injury, athlete_id, reason)
+    html = await run_in_threadpool(_render_console, token, message)
+    return HTMLResponse(html)
+
+
+def _clear_injury(athlete_id: str, reason: str) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        db.clear_injury(conn, athlete_id, actor=settings.coach_name, reason=reason)
+    except ValueError as exc:
+        return ("err", f"Not cleared: {exc}")
+    finally:
+        conn.close()
+    return ("ok", f"Injury flag cleared for {athlete_id}, recorded against {settings.coach_name}.")
+
+
+def _render_console(token: str, message: tuple[str, str] | None) -> str:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        roster = build_roster(conn, today=date.today())
+    finally:
+        conn.close()
+    return render_roster(roster, token=token, coach=settings.coach_name, message=message)
 
 
 @app.get("/privacy", response_class=HTMLResponse)

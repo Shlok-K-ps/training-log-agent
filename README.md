@@ -413,8 +413,8 @@ trustworthy:
   injury gate      built: the model cannot clear an injury; a named person must
                     │        graded return-to-load protocols are not built yet
         │
-  coach console    NOT BUILT — the roster view: who stalled, who is flagged,
-                    who has asked to be cleared, and who has gone quiet
+  coach console    built: the roster view — who is blocked on a coach decision,
+                    who stalled, who has gone quiet, who has a meet coming
         │
   nutrition        food-access timing built; targets still need athlete/pro approval
 ```
@@ -424,17 +424,43 @@ prescribe from a history you do not trust. Nutrition, sleep and supplements sit
 late deliberately: highest harm when wrong, hardest to verify, and needing a
 dietitian or physio in the loop rather than a rule in a Python file.
 
-**The coach console is the next thing built**, and it is the piece that makes
-this a coaching tool rather than twenty separate athlete tools. Today the
-coach-facing surface is one command:
+**The coach console** is what makes this a coaching tool rather than twenty
+separate athlete tools. `GET /coach?token=…` sorts the whole squad by who needs
+a human first, and collapses everyone who doesn't:
+
+```
+Coach Rao — roster                                    2026-09-10
+5 of 9 athletes need a look today.
+
+NEEDS YOU (1)
+  Priya K.    injury open 23d (left knee, squatting) · has asked to be cleared
+              [ who cleared them, and on what basis ]  (Clear injury)
+WATCH (3)
+  Neha D.     no logs in 11 days
+  Rohit S.    squat — stalled
+  Sameer B.   squat — down on last session
+MEET PREP (1)
+  Ananya R.   meet in 5 weeks
+FINE (4)
+  Arjun M., Dev P., Kavya S., Meera J.
+```
+
+Silence is the signal no athlete will ever send you, so it is read out of the
+absence of rows rather than the presence of one. Every other line traces to the
+same rule that answers the athlete — the console computes no new verdicts.
+
+It makes exactly one write: closing an injury flag, which records the coach's
+name, the reason and a timestamp. That is the human the Safety Guardian
+requires, given somewhere to stand.
+
+Set `COACH_ACCESS_TOKEN` to open it. Unset means closed, never open.
+
+There is also a terminal equivalent, for a deployment with no web access:
 
 ```bash
 python scripts/clear_injury.py --list
 # +919000000000  open 20d since 2026-08-20  (left knee, squatting) · STALE
 ```
-
-Everything the console needs is already in the database. What is missing is the
-view over it, and an interface a coach can use without a terminal.
 
 ---
 
@@ -461,6 +487,7 @@ a branch in `rules.py` and a row in the database.
 app/
   agent/       Layer 1 — schemas, the Gemini call, an offline stub
   storage/     Layer 2 — SQLite schema, queries, lift-name normalisation
+  coach/       Layer 4 — the roster view, coach auth, one audited write
   decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
                guardian.py — the injury gate; issues the only SafetyClearance
   programming/ Pure Python — five methods, selector, session structure
