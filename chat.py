@@ -14,6 +14,11 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, timedelta
+import sys
+
+# Ensure UTF-8 output on Windows consoles so emojis and symbols don't crash
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
