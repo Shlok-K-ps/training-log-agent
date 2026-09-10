@@ -125,6 +125,28 @@ def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeyp
     assert "Rohit Sharma" in approval.text
     assert 'action="/coach/whatsapp/review"' in approval.text
 
+    conn = db.connect(app_settings.database_path)
+    try:
+        draft = next(
+            row for row in db.pending_drafts(conn)
+            if row["athlete_id"] == "+99900000002"
+            and str(row["message_kind"]).startswith("feedback_reply:")
+        )
+    finally:
+        conn.close()
+    reviewed = client.post(
+        "/coach/whatsapp/review",
+        data={
+            "athlete_id": draft["athlete_id"],
+            "message_kind": draft["message_kind"],
+            "local_date": draft["local_date"],
+            "decision": "approved",
+            "body": draft["body"],
+        },
+    )
+    assert reviewed.status_code == 200
+    assert "Message approved for" in reviewed.text
+
 
 def test_twilio_delivery_callback_updates_the_whatsapp_desk_ledger(client):
     from app.config import settings as app_settings
