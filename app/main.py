@@ -27,10 +27,15 @@ from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
 from app.coach import auth as coach_auth
 from app.coach import (
+    COOKIE_NAME,
     build_roster,
     pending_reviews,
     render as render_roster,
+    render_landing,
+    render_login,
     render_outbox,
+    render_privacy,
+    render_terms,
 )
 from app.config import settings
 from app.integrations.factory import calendar_client, calendar_oauth, state_signer
@@ -109,37 +114,88 @@ app = FastAPI(
 
 
 @app.get("/", response_class=HTMLResponse)
-async def product_home() -> str:
-    return """
-    <h1>Power Coach</h1>
-    <p>A WhatsApp powerlifting assistant that plans training from athlete-provided
-    readiness, food access and approved supplement information.</p>
-    <p>Optional Google Calendar access finds feasible workout times around busy
-    events and travel. Calendar changes require confirmation in WhatsApp.</p>
-    <p><a href='/privacy'>Privacy</a> · <a href='/terms'>Terms</a></p>
-    """
+async def product_home(request: Request) -> Response:
+    token = request.query_params.get("token", "").strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    is_logged_in = coach_auth.is_valid(token)
+    return HTMLResponse(render_landing(is_logged_in=is_logged_in))
 
 
-@app.get("/coach", response_class=HTMLResponse)
-async def coach_console(token: str = "") -> Response:
-    """The roster. Read-only, and closed unless COACH_ACCESS_TOKEN is set."""
+@app.get("/coach/login", response_class=HTMLResponse)
+async def coach_login_page(request: Request) -> Response:
+    token = request.query_params.get("token", "").strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    if coach_auth.is_valid(token):
+        return RedirectResponse(url="/coach", status_code=303)
+    return HTMLResponse(render_login())
+
+
+@app.post("/coach/login", response_class=HTMLResponse)
+async def coach_login_submit(request: Request) -> Response:
+    form = dict(await request.form())
+    token = str(form.get("token", "")).strip()
     try:
         coach_auth.check(token)
     except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
-    html = await run_in_threadpool(_render_console, token, None)
-    return HTMLResponse(html)
+        return HTMLResponse(render_login(error=str(exc)), status_code=401)
+
+    response = RedirectResponse(url="/coach", status_code=303)
+    is_secure = request.url.scheme == "https"
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=is_secure,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+        path="/",
+    )
+    return response
+
+
+@app.get("/coach/logout", response_class=HTMLResponse)
+async def coach_logout() -> Response:
+    response = RedirectResponse(url="/coach/login", status_code=303)
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return response
+
+
+@app.get("/coach", response_class=HTMLResponse)
+async def coach_console(request: Request, token: str = "") -> Response:
+    """The roster. Read-only, and closed unless COACH_ACCESS_TOKEN is set."""
+    effective_token = token.strip() if token else request.cookies.get(COOKIE_NAME, "").strip()
+    if not effective_token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(effective_token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+
+    html = await run_in_threadpool(_render_console, effective_token, None)
+    response = HTMLResponse(html)
+    if token and request.cookies.get(COOKIE_NAME) != effective_token:
+        is_secure = request.url.scheme == "https"
+        response.set_cookie(
+            key=COOKIE_NAME,
+            value=effective_token,
+            httponly=True,
+            secure=is_secure,
+            samesite="lax",
+            max_age=60 * 60 * 24 * 30,
+            path="/",
+        )
+    return response
 
 
 @app.post("/coach/clear-injury", response_class=HTMLResponse)
 async def coach_clear_injury(request: Request) -> Response:
     """The one write the console can make, and it records who made it."""
     form = dict(await request.form())
-    token = str(form.get("token", ""))
+    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
     try:
         coach_auth.check(token)
     except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
 
     athlete_id = str(form.get("athlete_id", "")).strip()
     reason = str(form.get("reason", "")).strip()
@@ -171,23 +227,28 @@ def _render_console(token: str, message: tuple[str, str] | None) -> str:
 
 
 @app.get("/coach/outbox", response_class=HTMLResponse)
-async def coach_outbox(token: str = "") -> Response:
+async def coach_outbox(request: Request, token: str = "") -> Response:
     """Tonight's queue: what wants to go out tomorrow, and why."""
+    effective_token = token.strip() if token else request.cookies.get(COOKIE_NAME, "").strip()
+    if not effective_token:
+        return RedirectResponse(url="/coach/login", status_code=303)
     try:
-        coach_auth.check(token)
+        coach_auth.check(effective_token)
     except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach outbox</h1><p>{exc}</p>", status_code=403)
-    return HTMLResponse(await run_in_threadpool(_render_outbox, token, None))
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    return HTMLResponse(await run_in_threadpool(_render_outbox, effective_token, None))
 
 
 @app.post("/coach/outbox/review", response_class=HTMLResponse)
 async def coach_review_draft(request: Request) -> Response:
     form = dict(await request.form())
-    token = str(form.get("token", ""))
+    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
     try:
         coach_auth.check(token)
     except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach outbox</h1><p>{exc}</p>", status_code=403)
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
 
     message = await run_in_threadpool(
         _review_draft,
@@ -233,32 +294,12 @@ def _render_outbox(token: str, message: tuple[str, str] | None) -> str:
 
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy() -> str:
-    return """
-    <h1>Privacy</h1>
-    <p>Calendar connection is optional. The service reads event start/end times and
-    usable locations only to plan travel and training. It does not retain event
-    titles, descriptions, attendees or meeting content.</p>
-    <p>OAuth tokens and saved places are encrypted at rest when the calendar
-    integration is configured. Confirmed workout
-    references are stored until the athlete asks to delete them. Calendar data is
-    not sold and is not sent to the language model.</p>
-    <p>Training, sleep, readiness and nutrition messages may be sent to the
-    configured language-model provider for structured parsing. Coaching decisions
-    are made by deterministic application rules, not by that model.</p>
-    <p>Send “disconnect calendar” in WhatsApp to delete stored calendar tokens. Send
-    “forget my locations” to delete saved home, office and gym places.</p>
-    """
+    return render_privacy()
 
 
 @app.get("/terms", response_class=HTMLResponse)
 async def terms() -> str:
-    return """
-    <h1>Terms</h1>
-    <p>This service is a training-log and planning aid, not medical care. Athletes
-    remain responsible for confirming calendar changes and following advice from
-    their coach, clinician or dietitian. Injury and severe-recovery flags suppress
-    load advice.</p>
-    """
+    return render_terms()
 
 
 @app.get("/health")

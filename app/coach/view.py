@@ -1,8 +1,7 @@
-"""HTML for the coach console.
+"""HTML views for the coach console, landing page, and legal notices.
 
-One page, rendered server-side, no build step and no JavaScript framework. The
-coach opens it on a phone at the gym as often as on a laptop, so it is a single
-readable column that works without any of that.
+Rendered server-side as pure strings with zero build step, no npm, and no JS framework.
+Mobile-first layout designed for a coach on a phone at the gym or on a laptop.
 """
 
 from __future__ import annotations
@@ -11,55 +10,631 @@ from html import escape
 
 from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage, Roster
 
-_STYLE = """
-:root{--bg:#f1f4f5;--card:#fff;--ink:#12171a;--soft:#55616a;--faint:#7f8a91;
---line:#d7dee1;--act:#be3229;--watch:#c29216;--meet:#2a5b9e;--ok:#3a7346}
-@media(prefers-color-scheme:dark){:root{--bg:#111619;--card:#181f23;--ink:#e9eef0;
---soft:#a3b0b7;--faint:#78868d;--line:#2a343a;--act:#e2685c;--watch:#e0b443;
---meet:#6e9bdd;--ok:#66af77}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);
-font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-.wrap{max-width:720px;margin:0 auto;padding:28px 18px 64px}
-header{display:flex;justify-content:space-between;align-items:baseline;
-gap:12px;flex-wrap:wrap;border-bottom:2px solid var(--ink);padding-bottom:12px}
-h1{font-size:19px;margin:0;letter-spacing:-.01em}
-.when{font-size:13px;color:var(--faint);font-variant-numeric:tabular-nums}
-.summary{margin:16px 0 26px;font-size:15px;color:var(--soft)}
-.summary b{color:var(--ink)}
-section{margin-bottom:26px}
-h2{font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--faint);
-margin:0 0 10px;display:flex;gap:8px;align-items:center}
-h2 .n{color:var(--ink)}
-.card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--edge);
-border-radius:3px;padding:13px 15px;margin-bottom:9px}
-.needs_you{--edge:var(--act)}.watch{--edge:var(--watch)}
-.meet_prep{--edge:var(--meet)}.fine{--edge:var(--line)}
-.who{font-weight:600;font-size:16px;display:flex;justify-content:space-between;gap:10px}
-.who .id{font-weight:400;font-size:12px;color:var(--faint);
-font-family:ui-monospace,monospace;white-space:nowrap}
-ul{margin:7px 0 0;padding-left:17px;color:var(--soft);font-size:14.5px}
-li{margin:2px 0}
-li.act{color:var(--act);font-weight:500}
-form{margin:11px 0 0;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
-input[type=text]{flex:1 1 190px;min-width:0;padding:7px 9px;font:inherit;font-size:14px;
-border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--ink)}
-button{padding:7px 13px;font:inherit;font-size:14px;font-weight:600;cursor:pointer;
-border:1px solid var(--act);background:var(--act);color:#fff;border-radius:3px}
-button:focus-visible,input:focus-visible{outline:2px solid var(--meet);outline-offset:2px}
-.fine-list{background:var(--card);border:1px solid var(--line);border-radius:3px;
-padding:12px 15px;color:var(--soft);font-size:14.5px}
-.empty{color:var(--faint);font-size:14.5px;font-style:italic}
-.msg{padding:11px 14px;border-radius:3px;margin-bottom:18px;font-size:14.5px;
-border:1px solid var(--line);background:var(--card)}
-.msg.ok{border-left:4px solid var(--ok)}
-.msg.err{border-left:4px solid var(--act)}
-footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);
-font-size:12.5px;color:var(--faint)}
+
+# ------------------------------------------------------------------------------
+# Base CSS: Powerlifting visual identity (calibrated plates palette, mobile-first)
+# Red 25kg (Action/Deload), Yellow 15kg (Watch/Stall), Blue 20kg (Meet/Nav), Green 10kg (On track)
+# ------------------------------------------------------------------------------
+_BASE_CSS = """
+:root {
+  --bg: #f4f5f6;
+  --surface: #ffffff;
+  --surface-raised: #fbfcfc;
+  --surface-inset: #eef1f3;
+  --ink: #111827;
+  --ink-soft: #4b5563;
+  --ink-faint: #6b7280;
+  --border: #d1d5db;
+  --border-strong: #9ca3af;
+  
+  /* Competition Calibrated Plates */
+  --plate-red: #dc2626;
+  --plate-red-bg: #fef2f2;
+  --plate-red-border: #fca5a5;
+  --plate-red-text: #991b1b;
+
+  --plate-yellow: #d97706;
+  --plate-yellow-bg: #fffbeb;
+  --plate-yellow-border: #fcd34d;
+  --plate-yellow-text: #92400e;
+
+  --plate-blue: #2563eb;
+  --plate-blue-bg: #eff6ff;
+  --plate-blue-border: #93c5fd;
+  --plate-blue-text: #1e40af;
+
+  --plate-green: #16a34a;
+  --plate-green-bg: #f0fdf4;
+  --plate-green-border: #86efac;
+  --plate-green-text: #166534;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-raised: #1c2128;
+    --surface-inset: #090d12;
+    --ink: #f3f4f6;
+    --ink-soft: #9ca3af;
+    --ink-faint: #6b7280;
+    --border: #30363d;
+    --border-strong: #484f58;
+
+    --plate-red: #ef4444;
+    --plate-red-bg: #291215;
+    --plate-red-border: #7f1d1d;
+    --plate-red-text: #fca5a5;
+
+    --plate-yellow: #f59e0b;
+    --plate-yellow-bg: #26190b;
+    --plate-yellow-border: #78350f;
+    --plate-yellow-text: #fde68a;
+
+    --plate-blue: #3b82f6;
+    --plate-blue-bg: #111d33;
+    --plate-blue-border: #1e3a8a;
+    --plate-blue-text: #93c5fd;
+
+    --plate-green: #22c55e;
+    --plate-green-bg: #0f2415;
+    --plate-green-border: #14532d;
+    --plate-green-text: #86efac;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.wrap-wide {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 28px 20px 80px;
+}
+
+/* Nav & Header */
+header {
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+}
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.brand-badge {
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--ink);
+  color: var(--bg);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+}
+.header-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13.5px;
+}
+.header-nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+}
+.header-nav a:hover {
+  color: var(--ink);
+  background: var(--surface-inset);
+}
+.header-nav a.active {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+.header-nav a.danger {
+  color: var(--plate-red);
+}
+.when {
+  font-size: 13px;
+  color: var(--ink-faint);
+  font-family: ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Typography & Badges */
+h1 {
+  font-size: 20px;
+  margin: 0;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+}
+h2 {
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+h2 .n {
+  color: var(--ink);
+  font-family: ui-monospace, monospace;
+}
+.summary {
+  margin: 14px 0 22px;
+  font-size: 15px;
+  color: var(--ink-soft);
+}
+.summary b { color: var(--ink); }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  border: 1px solid transparent;
+}
+.badge-red {
+  background: var(--plate-red-bg);
+  border-color: var(--plate-red-border);
+  color: var(--plate-red-text);
+}
+.badge-yellow {
+  background: var(--plate-yellow-bg);
+  border-color: var(--plate-yellow-border);
+  color: var(--plate-yellow-text);
+}
+.badge-blue {
+  background: var(--plate-blue-bg);
+  border-color: var(--plate-blue-border);
+  color: var(--plate-blue-text);
+}
+.badge-green {
+  background: var(--plate-green-bg);
+  border-color: var(--plate-green-border);
+  color: var(--plate-green-text);
+}
+
+/* Cards & Sections */
+section { margin-bottom: 26px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 5px solid var(--edge, var(--border));
+  border-radius: 4px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.card.needs_you { --edge: var(--plate-red); }
+.card.watch { --edge: var(--plate-yellow); }
+.card.meet_prep { --edge: var(--plate-blue); }
+.card.fine { --edge: var(--border); }
+
+.who {
+  font-weight: 600;
+  font-size: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.who .id {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-family: ui-monospace, monospace;
+  background: var(--surface-inset);
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+li { margin: 3px 0; }
+li.act {
+  color: var(--plate-red);
+  font-weight: 600;
+}
+
+/* Forms & Interactive controls */
+form {
+  margin: 12px 0 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+input[type=text], input[type=password], textarea {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 8px 11px;
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--ink);
+  transition: border-color 0.15s ease;
+}
+textarea {
+  width: 100%;
+  min-height: 96px;
+  line-height: 1.5;
+  resize: vertical;
+}
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--plate-blue);
+  box-shadow: 0 0 0 2px var(--plate-blue-bg);
+}
+button {
+  padding: 8px 15px;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 3px;
+  border: 1px solid var(--plate-red);
+  background: var(--plate-red);
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: opacity 0.15s ease;
+}
+button:hover { opacity: 0.92; }
+button.btn-primary {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+}
+button.approve {
+  background: var(--plate-green);
+  border-color: var(--plate-green);
+  color: #ffffff;
+}
+button.skip {
+  background: transparent;
+  color: var(--ink-soft);
+  border-color: var(--border);
+}
+button.skip:hover {
+  background: var(--surface-inset);
+  color: var(--ink);
+}
+
+.fine-list {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px 16px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.empty {
+  color: var(--ink-faint);
+  font-size: 14px;
+  font-style: italic;
+  margin: 6px 0;
+}
+
+/* Alerts and banners */
+.msg {
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.msg.ok {
+  border-left: 4px solid var(--plate-green);
+  background: var(--plate-green-bg);
+  color: var(--plate-green-text);
+  border-color: var(--plate-green-border);
+}
+.msg.err {
+  border-left: 4px solid var(--plate-red);
+  background: var(--plate-red-bg);
+  color: var(--plate-red-text);
+  border-color: var(--plate-red-border);
+}
+
+footer {
+  margin-top: 36px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  line-height: 1.6;
+}
+footer a {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+footer a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* WhatsApp Mockup Component */
+.chat-container {
+  background: #0b141a;
+  border-radius: 8px;
+  padding: 18px 14px;
+  color: #e9edef;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border);
+  margin: 20px 0;
+}
+.chat-header {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8696a0;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #222d34;
+  padding-bottom: 8px;
+}
+.chat-bubble {
+  max-width: 88%;
+  padding: 9px 12px;
+  border-radius: 7.5px;
+  margin-bottom: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  position: relative;
+  word-break: break-word;
+}
+.chat-athlete {
+  background: #005c4b;
+  color: #e9edef;
+  margin-left: auto;
+  border-top-right-radius: 0;
+}
+.chat-agent {
+  background: #202c33;
+  color: #d1d7db;
+  margin-right: auto;
+  border-top-left-radius: 0;
+}
+.chat-meta {
+  display: block;
+  font-size: 11px;
+  color: #8696a0;
+  margin-top: 4px;
+  text-align: right;
+  font-family: ui-monospace, monospace;
+}
+.chat-agent .chat-verdict {
+  color: #f59e0b;
+  font-weight: 700;
+  display: block;
+  margin: 4px 0 2px;
+}
+
+/* Table styles */
+.table-wrap {
+  overflow-x: auto;
+  margin: 18px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  text-align: left;
+  background: var(--surface);
+}
+th {
+  background: var(--surface-inset);
+  color: var(--ink);
+  font-weight: 600;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-soft);
+}
+tr:last-child td { border-bottom: none; }
+td strong { color: var(--ink); }
+
+/* Landing specifics */
+.hero {
+  margin: 24px 0 32px;
+}
+.hero h1 {
+  font-size: 30px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+  font-weight: 800;
+}
+.hero p.lead {
+  font-size: 17px;
+  color: var(--ink-soft);
+  margin: 0 0 20px;
+  line-height: 1.55;
+}
+.cta-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.btn-cta {
+  padding: 10px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  background: var(--ink);
+  color: var(--bg);
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-cta:hover {
+  opacity: 0.9;
+}
+.btn-secondary {
+  padding: 10px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-decoration: none;
+}
+.btn-secondary:hover {
+  background: var(--surface-inset);
+}
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 18px 16px;
+}
+.feature-card h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.feature-card p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+.note-box {
+  background: var(--surface-inset);
+  border-left: 3px solid var(--ink);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  border-radius: 0 4px 4px 0;
+  margin: 20px 0;
+}
+
+/* Login card */
+.login-box {
+  max-width: 420px;
+  margin: 40px auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 28px 24px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+.login-box h1 {
+  font-size: 21px;
+  margin-bottom: 6px;
+}
+.login-box p {
+  color: var(--ink-soft);
+  font-size: 14px;
+  margin: 0 0 20px;
+}
+.login-box form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login-box input[type=password], .login-box input[type=text] {
+  width: 100%;
+}
+.login-box button {
+  width: 100%;
+  padding: 10px;
+  font-size: 14.5px;
+}
+.back-link {
+  display: inline-block;
+  margin-top: 18px;
+  font-size: 13.5px;
+  color: var(--plate-blue);
+  text-decoration: none;
+}
+.back-link:hover { text-decoration: underline; }
 """
 
 
+# ------------------------------------------------------------------------------
+# Roster View & Outbox Card Helpers
+# ------------------------------------------------------------------------------
 def _card(entry, token: str) -> str:
+    """Render an individual athlete card."""
     items = "".join(
         f'<li class="{"act" if f.action else ""}">{escape(f.detail)}</li>'
         for f in entry.flags
@@ -73,19 +648,35 @@ def _card(entry, token: str) -> str:
             f'<input type="hidden" name="athlete_id" value="{escape(entry.athlete_id)}">'
             '<input type="text" name="reason" required maxlength="200" '
             'placeholder="Who cleared them, and on what basis">'
-            "<button type=\"submit\">Clear injury</button>"
-            "</form>"
+            '<button type="submit">Clear injury</button>'
+            '</form>'
         )
+
+    # Semantic badge label to guarantee severity is clear without color alone
+    badge_markup = ""
+    if entry.bucket is Bucket.NEEDS_YOU:
+        badge_markup = '<span class="badge badge-red">[!] Needs Action</span>'
+    elif entry.bucket is Bucket.WATCH:
+        badge_markup = '<span class="badge badge-yellow">[!] Watch</span>'
+    elif entry.bucket is Bucket.MEET_PREP:
+        badge_markup = '<span class="badge badge-blue">[#] Meet Prep</span>'
+
     return (
         f'<div class="card {entry.bucket.value}">'
-        f'<div class="who"><span>{escape(entry.display_name)}</span>'
+        f'<div class="who"><div><span>{escape(entry.display_name)}</span> {badge_markup}</div>'
         f'<span class="id">{escape(entry.athlete_id)}</span></div>'
         f"{body}{form}</div>"
     )
 
 
-def render(roster: Roster, *, token: str, coach: str, message: tuple[str, str] | None = None) -> str:
-    """Full page. `message` is an optional (kind, text) banner from a POST."""
+def render(
+    roster: Roster,
+    *,
+    token: str,
+    coach: str,
+    message: tuple[str, str] | None = None,
+) -> str:
+    """Render the full coach roster console."""
     banner = ""
     if message:
         kind, text = message
@@ -121,34 +712,28 @@ def render(roster: Roster, *, token: str, coach: str, message: tuple[str, str] |
         else f"All <b>{roster.total}</b> athletes are on track."
     )
 
+    token_param = f"?token={escape(token)}" if token else ""
+
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Coach console</title>"
-        f"<style>{_STYLE}</style></head><body><div class='wrap'>"
-        f"<header><h1>{escape(coach)} — roster</h1>"
-        f"<span class='when'>{roster.reviewed_on.isoformat()}</span></header>"
+        "<title>Coach Console — Roster</title>"
+        f"<style>{_BASE_CSS}</style></head><body><div class='wrap'>"
+        "<header><div class='header-top'>"
+        f"<div class='brand'><span class='brand-badge'>COACH</span> {escape(coach)}</div>"
+        f"<nav class='header-nav'>"
+        f"<a class='active' href='/coach{token_param}'>Roster</a>"
+        f"<a href='/coach/outbox{token_param}'>Outbox</a>"
+        f"<a class='danger' href='/coach/logout'>Sign Out</a>"
+        f"</nav></div>"
+        f"<div style='margin-top:8px;'><span class='when'>{roster.reviewed_on.isoformat()}</span></div>"
+        "</header>"
         f"<p class='summary'>{summary}</p>"
         f"{banner}{''.join(sections)}"
         "<footer>Every line here is computed by the same rules that answer the "
         "athlete. This page decides nothing on its own.</footer>"
         "</div></body></html>"
     )
-
-
-_OUTBOX_STYLE = """
-textarea{width:100%;min-height:96px;padding:9px 10px;font:inherit;font-size:14.5px;
-line-height:1.5;border:1px solid var(--line);border-radius:3px;background:var(--bg);
-color:var(--ink);resize:vertical}
-.why{margin:0 0 9px;font-size:14px;color:var(--soft)}
-.why b{color:var(--ink);font-weight:600}
-.when{font-size:12px;color:var(--faint);font-family:ui-monospace,monospace}
-.btns{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
-button.skip{background:transparent;color:var(--soft);border-color:var(--line)}
-button.approve{background:var(--ok);border-color:var(--ok)}
-.nav{margin:0 0 20px;font-size:14px}
-.nav a{color:var(--meet)}
-"""
 
 
 def render_outbox(
@@ -159,7 +744,7 @@ def render_outbox(
     today,
     message: tuple[str, str] | None = None,
 ) -> str:
-    """Tonight's queue: every message that wants to go out tomorrow morning."""
+    """Render the outbox review queue."""
     banner = ""
     if message:
         kind, text = message
@@ -179,14 +764,15 @@ def render_outbox(
                 f'<div class="card {a.bucket.value}">'
                 f'<div class="who"><span>{escape(a.display_name)}</span>'
                 f'<span class="id">{escape(item.athlete_id)}</span></div>'
-                f'<p class="why"><b>Where they are:</b> {reasons}</p>'
+                f'<p style="margin:6px 0 10px;font-size:13.5px;color:var(--ink-soft);">'
+                f'<b>Where they are:</b> {reasons}</p>'
                 '<form method="post" action="/coach/outbox/review">'
                 f'<input type="hidden" name="token" value="{escape(token)}">'
                 f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
                 f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
                 f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
                 f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
-                '<div class="btns">'
+                '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
                 '<button class="approve" type="submit" name="decision" value="approved">'
                 f'Approve for {escape(item.local_date)}</button>'
                 '<button class="skip" type="submit" name="decision" value="skipped">'
@@ -198,16 +784,303 @@ def render_outbox(
             + "</section>"
         )
 
+    token_param = f"?token={escape(token)}" if token else ""
+
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Coach outbox</title>"
-        f"<style>{_STYLE}{_OUTBOX_STYLE}</style></head><body><div class='wrap'>"
-        f"<header><h1>{escape(coach)} — outbox</h1>"
-        f"<span class='when'>{today.isoformat()}</span></header>"
-        f'<p class="nav"><a href="/coach?token={escape(token)}">&larr; roster</a></p>'
+        "<title>Coach Console — Outbox</title>"
+        f"<style>{_BASE_CSS}</style></head><body><div class='wrap'>"
+        "<header><div class='header-top'>"
+        f"<div class='brand'><span class='brand-badge'>COACH</span> {escape(coach)}</div>"
+        f"<nav class='header-nav'>"
+        f"<a href='/coach{token_param}'>&larr; Roster</a>"
+        f"<a class='active' href='/coach/outbox{token_param}'>Outbox</a>"
+        f"<a class='danger' href='/coach/logout'>Sign Out</a>"
+        f"</nav></div>"
+        f"<div style='margin-top:8px;'><span class='when'>{today.isoformat()}</span></div>"
+        "</header>"
         f"{banner}{body}"
         "<footer>Nothing here has been sent. Unreviewed messages are not sent at "
         "all — silence, never an unsupervised broadcast.</footer>"
         "</div></body></html>"
     )
+
+
+# ------------------------------------------------------------------------------
+# Login Page
+# ------------------------------------------------------------------------------
+def render_login(error: str | None = None, message: str | None = None) -> str:
+    """Render the coach sign-in page."""
+    error_markup = f'<div class="msg err">{escape(error)}</div>' if error else ""
+    msg_markup = f'<div class="msg ok">{escape(message)}</div>' if message else ""
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coach Access — Training Log Agent</title>
+  <style>{_BASE_CSS}</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="login-box">
+      <div class="brand" style="margin-bottom:12px;">
+        <span class="brand-badge">AUTH</span> Power Coach Console
+      </div>
+      <h1>Coach Sign In</h1>
+      <p>Enter the coach access token configured for this team. Signing in sets an HTTP-only secure cookie so credentials don't leak into URLs or screenshots.</p>
+      {error_markup}
+      {msg_markup}
+      <form method="post" action="/coach/login">
+        <label style="font-size:13px;font-weight:600;color:var(--ink-soft);" for="token">ACCESS TOKEN</label>
+        <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste token here">
+        <button type="submit" class="btn-primary">Authenticate</button>
+      </form>
+      <div style="margin-top:20px;text-align:center;">
+        <a class="back-link" href="/">&larr; Back to Overview</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+# ------------------------------------------------------------------------------
+# Landing Page (GET /)
+# ------------------------------------------------------------------------------
+def render_landing(*, is_logged_in: bool = False) -> str:
+    """Render the public landing page explaining the system to coaches."""
+    coach_link = "/coach" if is_logged_in else "/coach/login"
+    coach_text = "Open Console" if is_logged_in else "Coach Sign In"
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training Log Agent — WhatsApp Powerlifting Coach</title>
+  <style>{_BASE_CSS}</style>
+</head>
+<body>
+  <div class="wrap-wide">
+    <header>
+      <div class="header-top">
+        <a class="brand" href="/">
+          <span class="brand-badge">AGENT</span> Training Log Agent
+        </a>
+        <nav class="header-nav">
+          <a href="#architecture">Architecture</a>
+          <a href="#boundaries">Decisions</a>
+          <a href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">GitHub</a>
+          <a class="active" href="{coach_link}">{coach_text} &rarr;</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="hero">
+      <h1>The coach reads exceptions,<br>not twenty WhatsApp texts a day.</h1>
+      <p class="lead">
+        A powerlifting coach's real bottleneck isn't writing programs — it's copying workout numbers from messages, remembering who's hurt, spotting lifters who stalled a month ago, and noticing when an athlete goes silent.
+      </p>
+      <div class="cta-row">
+        <a class="btn-cta" href="{coach_link}">{coach_text} &rarr;</a>
+        <a class="btn-secondary" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">Read Source on GitHub</a>
+      </div>
+    </div>
+
+    <!-- Realistic WhatsApp Exchange -->
+    <div class="chat-container">
+      <div class="chat-header">
+        <span>WhatsApp Conversation</span>
+        <span>Deterministic Reply</span>
+      </div>
+      <div class="chat-bubble chat-athlete">
+        squat 3x5 at 140 today, felt way harder than tuesday, rpe 9
+        <span class="chat-meta">17:42 ✓✓</span>
+      </div>
+      <div class="chat-bubble chat-agent">
+        ✅ Logged: Squat 3x5 @ 140 kg RPE 9<br>
+        <span class="chat-verdict">Squat — Stalled</span>
+        Flat at 140 kg for 2 sessions with RPE climbing — same bar, more effort.
+        <span class="chat-meta">17:42</span>
+      </div>
+    </div>
+
+    <div class="note-box">
+      <strong>Transparent Note:</strong> This is a student-built engineering project for a 20-athlete powerlifting squad, not a venture-backed commercial SaaS. Zero trackers, zero analytics cookies, and no runtime framework beyond Python and SQLite.
+    </div>
+
+    <!-- The 3-Layer Split -->
+    <section id="architecture">
+      <h2>The Core Separation <span class="n">3 LAYERS</span></h2>
+      <p style="color:var(--ink-soft);margin-top:0;">
+        Messy input needs a language model; coaching advice real humans lift under must be provable, repeatable, and deterministic. The split is the whole design:
+      </p>
+      <div class="grid-3">
+        <div class="feature-card">
+          <span class="badge badge-blue">LAYER 1 &middot; PARSE</span>
+          <h3 style="margin-top:8px;">Gemini Flash</h3>
+          <p>Extracts unstructured English into 20 typed function schemas. Ceilings and ratios are range-checked. <em>The model cannot write reply text.</em></p>
+        </div>
+        <div class="feature-card">
+          <span class="badge badge-yellow">LAYER 2 &middot; STORE</span>
+          <h3 style="margin-top:8px;">Single SQLite Timeline</h3>
+          <p>Every message is an immutable observation. Phone numbers serve as tenant identity. Calendar tokens and locations are encrypted at rest.</p>
+        </div>
+        <div class="feature-card">
+          <span class="badge badge-red">LAYER 3 &middot; DECIDE</span>
+          <h3 style="margin-top:8px;">Pure Python Rules</h3>
+          <p>Zero model. Zero API calls. Zero randomness. Evaluates session deltas, RPE slides, deloads, and sleep recovery deterministically.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Authority Table -->
+    <section id="boundaries">
+      <h2>Authority Boundaries <span class="n">WHO DECIDES WHAT</span></h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>Athlete</th>
+              <th>Agent</th>
+              <th>Coach</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Report session, pain, sleep, food</td>
+              <td><strong>&check; Allowed</strong></td>
+              <td>&mdash;</td>
+              <td>&mdash;</td>
+            </tr>
+            <tr>
+              <td>Parse message into structured data</td>
+              <td>&mdash;</td>
+              <td><strong>&check; Allowed</strong></td>
+              <td>&mdash;</td>
+            </tr>
+            <tr>
+              <td>Judge progressing / stalled / deload</td>
+              <td>&mdash;</td>
+              <td><strong>&check; Deterministic</strong></td>
+              <td>&mdash;</td>
+            </tr>
+            <tr>
+              <td>Open an injury flag</td>
+              <td>&check; Allowed</td>
+              <td>&check; Allowed</td>
+              <td>&check; Allowed</td>
+            </tr>
+            <tr>
+              <td><strong>Close an injury flag</strong></td>
+              <td><span style="color:var(--plate-red);">&cross; Enforced in code</span></td>
+              <td><span style="color:var(--plate-red);">&cross; Enforced in code</span></td>
+              <td><strong>&check; Coach Only</strong></td>
+            </tr>
+            <tr>
+              <td>Approve supplement regimen</td>
+              <td>&cross;</td>
+              <td>&cross;</td>
+              <td><strong>&check; Coach Only</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Meet data grounding -->
+    <section>
+      <h2>Grounded in Meet Data <span class="n">TOP 300 ALL-TIME</span></h2>
+      <p style="color:var(--ink-soft);">
+        Validation bounds and plausibility checks are derived directly from OpenPowerlifting competition results (top 300 lifters by Dots, Raw+Wraps). Recomputed in continuous integration so code cannot drift from empirical evidence.
+      </p>
+    </section>
+
+    <footer>
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>Training Log Agent &middot; Built for Powerlifting Teams</div>
+        <div>
+          <a href="/privacy">Privacy Policy</a> &middot; 
+          <a href="/terms">Terms of Service</a> &middot; 
+          <a href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>"""
+
+
+# ------------------------------------------------------------------------------
+# Privacy and Terms Pages
+# ------------------------------------------------------------------------------
+def render_privacy() -> str:
+    """Render the styled privacy policy."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — Training Log Agent</title>
+  <style>{_BASE_CSS}</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="header-top">
+        <a class="brand" href="/"><span class="brand-badge">LEGAL</span> Privacy Policy</a>
+        <nav class="header-nav"><a href="/">&larr; Home</a></nav>
+      </div>
+    </header>
+
+    <section>
+      <h1>Privacy Policy</h1>
+      <p>Calendar connection is optional. The service reads event start/end times and usable locations only to plan travel and training. It does not retain event titles, descriptions, attendees or meeting content.</p>
+      <p>OAuth tokens and saved places are encrypted at rest with Fernet cryptography when the calendar integration is configured. Confirmed workout references are stored until the athlete asks to delete them. Calendar data is never sold and is never sent to the language model.</p>
+      <p>Training, sleep, readiness and nutrition messages may be sent to the configured language-model provider for structured parsing. Coaching decisions are made by deterministic application rules in pure Python, not by that model.</p>
+      <p>Athletes can send <em>“disconnect calendar”</em> in WhatsApp to delete stored calendar tokens, or <em>“forget my locations”</em> to erase saved home, office and gym places.</p>
+    </section>
+
+    <footer>
+      <a href="/">&larr; Return to Home</a> &middot; <a href="/terms">Terms of Service</a>
+    </footer>
+  </div>
+</body>
+</html>"""
+
+
+def render_terms() -> str:
+    """Render the styled terms of service."""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terms of Service — Training Log Agent</title>
+  <style>{_BASE_CSS}</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="header-top">
+        <a class="brand" href="/"><span class="brand-badge">LEGAL</span> Terms of Service</a>
+        <nav class="header-nav"><a href="/">&larr; Home</a></nav>
+      </div>
+    </header>
+
+    <section>
+      <h1>Terms of Service</h1>
+      <p>This service is a training-log and planning aid, not medical care or clinical diagnostic software. Athletes remain responsible for confirming calendar changes and following medical advice from their coach, clinician, or registered dietitian.</p>
+      <p>Injury flags immediately suppress all load progression advice. The agent never prescribes load to an injured athlete; clearance requires explicit authorization by a named human coach or medical practitioner.</p>
+    </section>
+
+    <footer>
+      <a href="/">&larr; Return to Home</a> &middot; <a href="/privacy">Privacy Policy</a>
+    </footer>
+  </div>
+</body>
+</html>"""

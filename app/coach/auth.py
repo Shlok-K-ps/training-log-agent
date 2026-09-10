@@ -20,8 +20,18 @@ class CoachAuthError(RuntimeError):
     pass
 
 
+COOKIE_NAME = "coach_token"
+
+
 def is_configured() -> bool:
     return bool(settings.coach_access_token.strip())
+
+
+def is_valid(token: str | None) -> bool:
+    """Return True if token matches the configured coach token in constant time."""
+    if not is_configured() or not token:
+        return False
+    return hmac.compare_digest(token.strip(), settings.coach_access_token.strip())
 
 
 def check(token: str | None) -> None:
