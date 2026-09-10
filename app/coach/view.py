@@ -1,3 +1,4 @@
+
 """HTML views for the coach console, landing page, and legal notices.
 
 Rendered server-side as pure strings with zero build step, no npm, and no JS framework.
@@ -10,6 +11,20 @@ from datetime import date
 from html import escape
 
 from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage, Roster
+
+
+def _vt_athlete(athlete_id: str | None) -> str:
+    if not athlete_id:
+        return ""
+    digits = "".join(c for c in athlete_id if c.isdigit())
+    return f"athlete-{digits}" if digits else ""
+
+
+def _vt_draft(athlete_id: str | None) -> str:
+    if not athlete_id:
+        return ""
+    digits = "".join(c for c in athlete_id if c.isdigit())
+    return f"draft-{digits}" if digits else ""
 
 
 # ------------------------------------------------------------------------------
@@ -113,12 +128,17 @@ def coach_frame(
     today,
     pending_count: int = 0,
     extra_style: str = "",
+    athlete_id: str | None = None,
 ) -> str:
     """The application shell: navigation stays put while the work changes."""
+    vt_name = _vt_athlete(athlete_id) if athlete_id else "page-title"
+    h1_style = f"style='view-transition-name: {vt_name};'" if vt_name else ""
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{escape(title)} — Power AI Coach Desk</title>"
+        "<link rel='icon' href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>'>"
+        "<link rel='stylesheet' href='https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap' media='print' onload=\"this.media='all'\">"
         "<link rel='stylesheet' href='/static/tokens.css'>"
         "<link rel='stylesheet' href='/static/app.css'>"
         f"<style>{extra_style}</style>"
@@ -129,14 +149,13 @@ def coach_frame(
         "<div class='app-shell'>"
         f"{_coach_nav(active=active, coach=coach, pending_count=pending_count)}"
         "<main class='workspace'><div class='workspace-head'><div>"
-        f"<div class='workspace-eyebrow'>Power AI &middot; Coach Workspace</div><h1>{escape(title)}</h1>"
+        f"<div class='workspace-eyebrow'>Power AI &middot; Coach Workspace</div><h1 {h1_style}>{escape(title)}</h1>"
         f"<p class='workspace-sub'>{escape(subtitle)}</p></div>"
         f"<span class='workspace-date'>{escape(str(today))}</span></div>"
         f"{body}<footer>Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
         "record and deterministic coaching rules. The coach remains the approval gate."
         "</footer></main></div></body></html>"
     )
-
 
 def _register_form(today: date) -> str:
     days = '<option value="">Day</option>' + "".join(
@@ -251,10 +270,10 @@ def render(
 
     counts_sentence = (
         f'<div class="counts-sentence">'
-        f'<span class="dot-count act">● {needs_you_count} need attention</span> · '
-        f'<span class="dot-count watch">● {watch_count} on watch</span> · '
-        f'<span class="dot-count meet">● {meet_prep_count} in meet prep</span> · '
-        f'<span class="dot-count fine">● {fine_count} on track</span>'
+        f'<span class="dot-count act">● <span data-counter data-target="{needs_you_count}">{needs_you_count}</span> need attention</span> · '
+        f'<span class="dot-count watch">● <span data-counter data-target="{watch_count}">{watch_count}</span> on watch</span> · '
+        f'<span class="dot-count meet">● <span data-counter data-target="{meet_prep_count}">{meet_prep_count}</span> in meet prep</span> · '
+        f'<span class="dot-count fine">● <span data-counter data-target="{fine_count}">{fine_count}</span> on track</span>'
         f'</div>'
     )
 
@@ -286,7 +305,7 @@ def render(
             f'</div>'
             f'<div class="obt-body">'
             f'<div class="obt-info">'
-            f'<h2 class="obt-name"><a href="/coach/athlete/{escape(most_urgent.athlete_id)}">{escape(most_urgent.display_name)}</a></h2>'
+            f'<h2 class="obt-name"><a style="view-transition-name: { _vt_athlete(most_urgent.athlete_id) };" href="/coach/athlete/{escape(most_urgent.athlete_id)}">{escape(most_urgent.display_name)}</a></h2>'
             f'<div class="obt-meta">{escape(most_urgent.athlete_id)} &middot; Latest: {escape(most_urgent.latest_session or "No recent session")}</div>'
             f'<p class="obt-reason">{escape(signal)}</p>'
             f'</div>'
@@ -311,7 +330,7 @@ def render(
             )
         return (
             '<div class="athlete-line">'
-            f'<div><a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+            f'<div><a class="athlete-name" style="view-transition-name: { _vt_athlete(entry.athlete_id) };" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
             f'<div class="muted">{escape(entry.latest_session or "No session logged")}</div></div>'
             f'<div class="signal">{escape(signal)}</div>{readiness}{action}</div>'
         )
@@ -384,7 +403,7 @@ def render(
         '<div>'
         '<div class="panel"><div class="panel-head"><h2>Approval queue</h2>'
         '<a href="/coach/whatsapp?tab=approval">Open queue &rarr;</a></div>'
-        f'<p style="font-size:32px;font-weight:800;letter-spacing:-0.02em;margin:2px 0">{pending_count}</p>'
+        f'<p style="font-size:32px;font-weight:800;letter-spacing:-0.02em;margin:2px 0"><span data-counter data-target="{pending_count}">{pending_count}</span></p>'
         '<p class="section-note">Prepared messages waiting for a human decision.</p></div>'
         f'{workflow}{_tutorial()}{squad_panel}'
         '</div>'
@@ -423,7 +442,7 @@ def render_athletes(
         rows.append(
             f'<div class="directory-row athlete-record" data-bucket="{entry.bucket.value}" '
             f'data-search="{escape(haystack)}">'
-            f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+            f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" style="view-transition-name: { _vt_athlete(entry.athlete_id) };" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
             f'<div class="muted">{escape(entry.athlete_id)}</div></div>'
             f'<div><strong style="font-size:13px">{escape(entry.training_summary or "No training baseline")}</strong>'
             f'<div class="muted">{escape(status)}</div></div>{readiness}'
@@ -469,7 +488,7 @@ def _outbox_card(item: PendingMessage) -> str:
         if a.readiness_score is not None else "No same-day check-in"
     )
     return (
-        f'<div class="card {a.bucket.value} message-card">'
+        f'<div class="card {a.bucket.value} message-card" style="view-transition-name: { _vt_draft(item.athlete_id) };">'
         '<div class="panel-head"><div>'
         f'<a class="athlete-name" href="/coach/athlete/{escape(item.athlete_id)}">'
         f'{escape(a.display_name)}</a>'
@@ -590,6 +609,11 @@ def render_landing(*, is_logged_in: bool = False) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Power AI — WhatsApp Powerlifting Coach</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap"></noscript>
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/motion.js" defer></script>
@@ -622,7 +646,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
     </div>
   </header>
 
-  <div class="wrapper">
+  <main class="wrapper">
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-tag tag-mono">[ POWER AI // PROTOCOL 01 · WHATSAPP POWERLIFTING INTELLIGENCE ]</div>
@@ -878,7 +902,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
         </div>
       </div>
     </footer>
-  </div>
+  </main>
 </body>
 </html>"""
 

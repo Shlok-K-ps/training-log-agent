@@ -33,6 +33,9 @@ function normalizeColor(e){return[(e>>16&255)/255,(e>>8&255)/255,(255&e)/255]}["
 
     try {
       gradientInstance = new Gradient();
+      if (window.innerWidth <= 768 || prefersReduced) {
+        gradientInstance.isStatic = true;
+      }
       gradientInstance.initGradient('#hero-canvas');
 
       if (prefersReduced && gradientInstance.conf) {
@@ -68,6 +71,35 @@ function normalizeColor(e){return[(e>>16&255)/255,(e>>8&255)/255,(255&e)/255]}["
       }, { threshold: 0.05 });
       observer.observe(canvas);
     }
+  }
+
+
+  function initCounters() {
+    if (prefersReduced) return;
+    const counters = document.querySelectorAll('[data-counter]');
+    counters.forEach(el => {
+      const target = parseInt(el.getAttribute('data-target') || el.textContent, 10);
+      if (isNaN(target)) return;
+      if (target === 0) {
+        el.textContent = '0';
+        return;
+      }
+      let startTime = null;
+      const duration = 650;
+      const step = (timestamp) => {
+        if (!startTime) startTime = timestamp;
+        const progress = Math.min((timestamp - startTime) / duration, 1);
+        const ease = 1 - Math.pow(1 - progress, 3);
+        const current = Math.floor(ease * target);
+        el.textContent = current;
+        if (progress < 1) {
+          requestAnimationFrame(step);
+        } else {
+          el.textContent = target;
+        }
+      };
+      requestAnimationFrame(step);
+    });
   }
 
   function initSpotlight() {
@@ -155,16 +187,26 @@ function normalizeColor(e){return[(e>>16&255)/255,(e>>8&255)/255,(255&e)/255]}["
     el.textContent = now.toUTCString().split(' ')[4] + ' UTC';
   }
 
+  function scheduleMesh() {
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(() => initMesh(), { timeout: 800 });
+    } else {
+      setTimeout(initMesh, 150);
+    }
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
-      initMesh();
       initSpotlight();
+      initCounters();
+      scheduleMesh();
       setInterval(updateClock, 1000);
       updateClock();
     });
   } else {
-    initMesh();
     initSpotlight();
+    initCounters();
+    scheduleMesh();
     setInterval(updateClock, 1000);
     updateClock();
   }

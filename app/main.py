@@ -138,9 +138,13 @@ def _send_morning_prompts() -> int:
 app = FastAPI(
     title="Power AI — Powerlifting Training-Log Agent",
     version="0.2.0",
-    description="Power AI: WhatsApp coaching agent with deterministic readiness, nutrition and calendar planning.",
+    description="WhatsApp powerlifting coach: structured logging, deterministic verdicts, coach desk review.",
     lifespan=lifespan,
 )
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    return Response(status_code=204)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

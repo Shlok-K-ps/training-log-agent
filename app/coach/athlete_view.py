@@ -658,4 +658,5 @@ def render_athlete(
         body, active="athletes", coach=coach, title=detail.display_name,
         subtitle=f"{detail.athlete_id} · complete training, recovery and plan history",
         today=detail.reviewed_on.isoformat(), extra_style=tint_style,
+        athlete_id=detail.athlete_id,
     )

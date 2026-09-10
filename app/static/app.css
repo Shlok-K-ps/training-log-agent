@@ -2019,3 +2019,139 @@ dialog::backdrop {
     width: 100%;
   }
 }
+
+
+/* ==========================================================================
+   21. View Transitions & Shared Elements (Run 4)
+   ========================================================================== */
+
+@view-transition {
+  navigation: auto;
+}
+
+/* Shared element names */
+.side-nav {
+  view-transition-name: main-nav;
+}
+
+.bottom-bar {
+  view-transition-name: bottom-nav;
+}
+
+/* View transition animations */
+::view-transition-group(*) {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+::view-transition-old(page-title),
+::view-transition-new(page-title),
+::view-transition-old(athlete-*),
+::view-transition-new(athlete-*) {
+  animation-duration: 300ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+::view-transition-old(draft-*),
+::view-transition-new(draft-*) {
+  animation-duration: 280ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ==========================================================================
+   22. Reveals & Motion Stagger (Run 4)
+   ========================================================================== */
+
+/* Landing hero lines stagger 60ms apart */
+@keyframes hero-line-fade {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.hero-tag {
+  animation: hero-line-fade 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 0ms;
+}
+
+.hero-h1 {
+  animation: hero-line-fade 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 60ms;
+}
+
+.hero-lead {
+  animation: hero-line-fade 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 120ms;
+}
+
+.cta-row {
+  animation: hero-line-fade 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 180ms;
+}
+
+.specs-strip {
+  animation: hero-line-fade 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 240ms;
+}
+
+/* Coach Desk rows settle once on first paint (stagger capped at 8 rows, nothing on scroll) */
+@keyframes row-settle {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.athlete-line,
+.directory-row,
+.message-card {
+  animation: row-settle 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.athlete-line:nth-child(1), .directory-row:nth-child(1), .message-card:nth-child(1) { animation-delay: 30ms; }
+.athlete-line:nth-child(2), .directory-row:nth-child(2), .message-card:nth-child(2) { animation-delay: 60ms; }
+.athlete-line:nth-child(3), .directory-row:nth-child(3), .message-card:nth-child(3) { animation-delay: 90ms; }
+.athlete-line:nth-child(4), .directory-row:nth-child(4), .message-card:nth-child(4) { animation-delay: 120ms; }
+.athlete-line:nth-child(5), .directory-row:nth-child(5), .message-card:nth-child(5) { animation-delay: 150ms; }
+.athlete-line:nth-child(6), .directory-row:nth-child(6), .message-card:nth-child(6) { animation-delay: 180ms; }
+.athlete-line:nth-child(7), .directory-row:nth-child(7), .message-card:nth-child(7) { animation-delay: 210ms; }
+.athlete-line:nth-child(8), .directory-row:nth-child(8), .message-card:nth-child(8) { animation-delay: 240ms; }
+.athlete-line:nth-child(n+9), .directory-row:nth-child(n+9), .message-card:nth-child(n+9) {
+  animation: none;
+  opacity: 1;
+}
+
+/* Reduced Motion Override */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+  .mesh-canvas,
+  .mesh-band {
+    animation: none !important;
+  }
+}
