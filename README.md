@@ -301,6 +301,12 @@ logs the set *and* raises the injury flag.
 
 ### 4. Connect WhatsApp (Twilio sandbox)
 
+> **Resume/demo path, not permanently free production:** Twilio documents the
+> WhatsApp Sandbox as testing-only. A current free trial lasts 30 days and
+> includes 100 WhatsApp messages; trial recipients and outbound templates are
+> restricted. After that, Twilio charges per message. Keep the built-in web
+> simulator as the zero-cost permanent demo.
+
 1. Sign up at <https://console.twilio.com> (free trial, no WhatsApp Business
    verification needed for the sandbox).
 2. **Messaging → Try it out → Send a WhatsApp message.** Join the sandbox by
@@ -314,10 +320,11 @@ logs the set *and* raises the injury flag.
    `https://<your-host>/webhook/whatsapp`, method `POST`.
    Outgoing API messages automatically request delivery updates at
    `https://<your-host>/webhook/whatsapp/status` when `PUBLIC_BASE_URL` is set.
-5. Copy `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and your public URL into
-   `.env`. Set `PUBLIC_BASE_URL` to exactly the URL you pasted into Twilio —
-   behind a proxy the app sees a different host than the one Twilio signed, and
-   the signature check will fail on a mismatch.
+5. Copy `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, the sandbox sender shown by
+   Twilio as `TWILIO_WHATSAPP_FROM`, and your public URL into `.env` locally or
+   the Render environment settings. Set `PUBLIC_BASE_URL` to exactly the URL
+   you pasted into Twilio — behind a proxy the app sees a different host than
+   the one Twilio signed, and the signature check will fail on a mismatch.
 
 Text the sandbox number. It acknowledges the log immediately; the coaching
 response appears in the coach's WhatsApp Desk for approval.
