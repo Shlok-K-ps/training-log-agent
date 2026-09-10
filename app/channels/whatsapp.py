@@ -87,8 +87,14 @@ def twiml(messages: list[str]) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>'
 
 
-def send_outbound(athlete_id: str, body: str) -> None:
+def send_outbound(athlete_id: str, body: str) -> str:
     """Send one proactive WhatsApp message through the configured Twilio sender."""
     sid, token, sender = settings.require_twilio()
     recipient = athlete_id if athlete_id.startswith("whatsapp:") else f"whatsapp:{athlete_id}"
-    Client(sid, token).messages.create(from_=sender, to=recipient, body=body)
+    options = {"from_": sender, "to": recipient, "body": body}
+    if settings.public_base_url:
+        options["status_callback"] = (
+            settings.public_base_url.rstrip("/") + "/webhook/whatsapp/status"
+        )
+    message = Client(sid, token).messages.create(**options)
+    return str(message.sid)

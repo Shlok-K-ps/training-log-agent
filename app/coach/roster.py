@@ -259,6 +259,7 @@ class PendingMessage:
     body: str
     original_body: str
     athlete: RosterEntry
+    bulk_eligible: bool = False
 
     @property
     def edited(self) -> bool:
@@ -279,6 +280,7 @@ def pending_reviews(conn: sqlite3.Connection, *, today: date) -> tuple[PendingMe
             body=str(row["body"]),
             original_body=str(row["original_body"]),
             athlete=review_athlete(conn, str(row["athlete_id"]), today=today),
+            bulk_eligible=db.draft_is_bulk_eligible(conn, row),
         )
         for row in db.pending_drafts(conn)
     )

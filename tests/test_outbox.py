@@ -13,7 +13,13 @@ import pytest
 
 from app.coach import pending_reviews, render_outbox
 from app.scheduling.morning import send_due_morning_prompts
-from app.scheduling.outbox import MORNING, draft_upcoming_prompts, send_approved_prompts
+from app.scheduling.outbox import (
+    FEEDBACK_REPLY,
+    MORNING,
+    draft_upcoming_prompts,
+    send_approved_feedback,
+    send_approved_prompts,
+)
 from app.storage import db
 
 ATHLETE = "+911"
@@ -108,6 +114,25 @@ def test_an_approved_message_is_sent_once_even_if_the_loop_ticks_again(scheduled
     assert len(sent) == 1
 
 
+def test_new_evidence_after_approval_returns_the_message_to_review(scheduled):
+    draft_upcoming_prompts(scheduled, now_utc=EVENING)
+    db.review_draft(
+        scheduled, ATHLETE, MORNING, "2026-09-11",
+        status="approved", reviewed_by="Coach Rao",
+    )
+    db.insert_entry(
+        scheduled,
+        db.Entry(
+            athlete_id=ATHLETE, kind="status", injured=True,
+            injury_note="new knee pain", session_date="2026-09-11",
+        ),
+    )
+    sent = Outbox()
+    assert send_approved_prompts(scheduled, sent, now_utc=NEXT_MORNING) == 0
+    assert sent == []
+    assert db.draft(scheduled, ATHLETE, MORNING, "2026-09-11")["status"] == "pending"
+
+
 def test_a_review_must_record_who_made_it(scheduled):
     draft_upcoming_prompts(scheduled, now_utc=EVENING)
     with pytest.raises(ValueError, match="who made it"):
@@ -120,6 +145,19 @@ def test_an_empty_message_cannot_be_approved(scheduled):
     with pytest.raises(ValueError, match="cannot be empty"):
         db.review_draft(scheduled, ATHLETE, MORNING, "2026-09-11",
                         status="approved", reviewed_by="Coach Rao", body="   ")
+
+
+def test_approved_feedback_reply_sends_but_pending_reply_does_not(scheduled):
+    kind = FEEDBACK_REPLY + "SM123"
+    db.create_draft(scheduled, ATHLETE, kind, "2026-09-10", "Reduce squat to 130 kg.")
+    sent = Outbox()
+    assert send_approved_feedback(scheduled, sent) == 0
+    db.review_draft(
+        scheduled, ATHLETE, kind, "2026-09-10",
+        status="approved", reviewed_by="Coach Rao",
+    )
+    assert send_approved_feedback(scheduled, sent) == 1
+    assert sent == [(ATHLETE, "Reduce squat to 130 kg.")]
 
 
 # --- the review screen ---------------------------------------------------------

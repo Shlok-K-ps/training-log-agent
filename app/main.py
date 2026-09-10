@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import secrets
 from datetime import date
 from contextlib import asynccontextmanager
 from contextlib import suppress
@@ -25,11 +27,20 @@ from starlette.concurrency import run_in_threadpool
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
+from app.decision.injury_pivot import injury_pivot_options
 from app.coach import auth as coach_auth
 from app.coach.athlete import athlete_detail, suggest_message
 from app.coach.athlete_view import render_athlete
+from app.coach.analytics_view import render_analytics
+from app.coach.progress import squad_goal_paces
+from app.coach.whatsapp_view import render_whatsapp_desk
 from app.coach.demo import clear_demo_squad, is_demo, seed_demo_squad
-from app.scheduling.outbox import COACH_NOTE, send_approved_notes
+from app.scheduling.outbox import (
+    COACH_NOTE,
+    FEEDBACK_REPLY,
+    send_approved_feedback,
+    send_approved_notes,
+)
 from app.coach import (
     COOKIE_NAME,
     build_roster,
@@ -53,6 +64,9 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 )
 log = logging.getLogger("power-agent")
+
+FEEDBACK_ACK = "Got it — I’ve logged your update and sent it to your coach for review."
+INJURY_ACK = "Your injury update is logged. Training guidance is paused and your coach has been notified."
 
 
 @lru_cache(maxsize=1)
@@ -105,8 +119,16 @@ def _send_morning_prompts() -> int:
         drafted = draft_upcoming_prompts(conn)
         if drafted:
             log.info("queued %d morning message(s) for coach review", len(drafted))
-        sent = send_approved_prompts(conn, whatsapp.send_outbound)
-        return sent + send_approved_notes(conn, whatsapp.send_outbound)
+        def recorded_sender(athlete_id: str, body: str) -> None:
+            provider_sid = whatsapp.send_outbound(athlete_id, body)
+            db.record_whatsapp_message(
+                conn, athlete_id=athlete_id, direction="outbound", body=body,
+                status="queued", provider_sid=provider_sid, message_kind="scheduled",
+            )
+
+        sent = send_approved_prompts(conn, recorded_sender)
+        sent += send_approved_notes(conn, recorded_sender)
+        return sent + send_approved_feedback(conn, recorded_sender)
     finally:
         conn.close()
 
@@ -345,6 +367,69 @@ async def coach_message_athlete(athlete_id: str, request: Request) -> Response:
     return HTMLResponse(html)
 
 
+@app.post("/coach/athlete/{athlete_id}/injury-plan", response_class=HTMLResponse)
+async def coach_approve_injury_plan(athlete_id: str, request: Request) -> Response:
+    """Select one bounded training pivot without clearing the injury flag."""
+    form = dict(await request.form())
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    result = await run_in_threadpool(
+        _approve_injury_plan,
+        athlete_id,
+        str(form.get("injury_entry_id", "")).strip(),
+        str(form.get("option_code", "")).strip(),
+    )
+    html = await run_in_threadpool(_render_athlete, athlete_id, result)
+    return HTMLResponse(html or "<h1>Not found</h1>", status_code=200 if html else 404)
+
+
+def _approve_injury_plan(
+    athlete_id: str, injury_entry_id_raw: str, option_code: str
+) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        current_id = db.open_injury_entry_id(conn, athlete_id)
+        try:
+            supplied_id = int(injury_entry_id_raw)
+        except ValueError:
+            return ("err", "The injury version was invalid; refresh and review again.")
+        if current_id != supplied_id:
+            return ("err", "The injury changed; refresh and review the current options.")
+        _, note = db.injury_state(conn, athlete_id)
+        option = next(
+            (candidate for candidate in injury_pivot_options(note) if candidate.code == option_code),
+            None,
+        )
+        if option is None:
+            return ("err", "That training pivot is not available.")
+        db.record_injury_plan_decision(
+            conn, athlete_id=athlete_id, injury_entry_id=supplied_id,
+            option_code=option.code, plan_text=option.plan,
+            approved_by=settings.coach_name,
+        )
+        message_kind = FEEDBACK_REPLY + f"injury:{supplied_id}"
+        body = (
+            f"Training update from {settings.coach_name}: {option.plan} "
+            "This changes training only; your injury flag remains open until independent clearance is recorded."
+        )
+        db.create_draft(conn, athlete_id, message_kind, date.today().isoformat(), body)
+        db.review_draft(
+            conn, athlete_id, message_kind, date.today().isoformat(),
+            status="approved", reviewed_by=settings.coach_name, body=body,
+        )
+    except ValueError as exc:
+        return ("err", f"Plan not approved: {exc}")
+    finally:
+        conn.close()
+    return ("ok", f"Approved “{option.title}”. It is queued for WhatsApp delivery.")
+
+
 @app.post("/coach/athletes/register", response_class=HTMLResponse)
 async def coach_register_athlete(request: Request) -> Response:
     form = dict(await request.form())
@@ -354,7 +439,7 @@ async def coach_register_athlete(request: Request) -> Response:
     except coach_auth.CoachAuthError as exc:
         return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
     message = await run_in_threadpool(
-        _register, str(form.get("athlete_id", "")), str(form.get("name", ""))
+        _register, {str(key): str(value) for key, value in form.items()}
     )
     return HTMLResponse(await run_in_threadpool(_render_athlete_directory, message))
 
@@ -397,11 +482,39 @@ def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
     return ("ok", "Queued. It goes out on the next send, in the athlete's timezone.")
 
 
-def _register(athlete_id: str, name: str) -> tuple[str, str]:
+def _optional_number(raw: str, *, integer: bool = False):
+    value = (raw or "").strip()
+    if not value:
+        return None
+    try:
+        return int(value) if integer else float(value)
+    except ValueError as exc:
+        raise ValueError(f"{value!r} is not a valid number") from exc
+
+
+def _register(form: dict[str, str]) -> tuple[str, str]:
+    athlete_id = form.get("athlete_id", "")
+    name = form.get("name", "")
     conn = db.connect()
     try:
         db.init_db(conn)
-        db.register_athlete(conn, athlete_id, name, on=date.today().isoformat())
+        db.register_athlete(
+            conn,
+            athlete_id,
+            name,
+            on=date.today().isoformat(),
+            bodyweight_kg=_optional_number(form.get("bodyweight_kg", "")),
+            squat_1rm_kg=_optional_number(form.get("squat_1rm_kg", "")),
+            bench_1rm_kg=_optional_number(form.get("bench_1rm_kg", "")),
+            deadlift_1rm_kg=_optional_number(form.get("deadlift_1rm_kg", "")),
+            training_days=_optional_number(form.get("training_days", ""), integer=True),
+            experience=form.get("experience", "").strip() or None,
+            injury_note=form.get("injury_note", ""),
+            goal_lift=form.get("goal_lift", "").strip() or None,
+            goal_target_kg=_optional_number(form.get("goal_target_kg", "")),
+            goal_target_date=form.get("goal_target_date", "").strip() or None,
+            created_by=settings.coach_name,
+        )
     except ValueError as exc:
         return ("err", f"Not added: {exc}")
     finally:
@@ -420,6 +533,175 @@ async def coach_outbox(request: Request, token: str = "") -> Response:
     except coach_auth.CoachAuthError as exc:
         return HTMLResponse(render_login(error=str(exc)), status_code=403)
     return HTMLResponse(await run_in_threadpool(_render_outbox, effective_token, None))
+
+
+@app.get("/coach/whatsapp", response_class=HTMLResponse)
+async def coach_whatsapp(request: Request, tab: str = "inbox", athlete: str = "") -> Response:
+    """The daily message desk: feedback, approval, schedule and delivery."""
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    valid_tab = tab if tab in {"inbox", "approval", "scheduled", "sent"} else "inbox"
+    return HTMLResponse(
+        await run_in_threadpool(_render_whatsapp, valid_tab, athlete.strip(), None)
+    )
+
+
+@app.get("/coach/analytics", response_class=HTMLResponse)
+async def coach_analytics(request: Request) -> Response:
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    return HTMLResponse(await run_in_threadpool(_render_analytics))
+
+
+def _render_analytics() -> str:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        paces = squad_goal_paces(conn, today=date.today())
+        pending_count = len(db.pending_drafts(conn))
+    finally:
+        conn.close()
+    return render_analytics(
+        paces, coach=settings.coach_name, today=date.today(),
+        pending_count=pending_count,
+    )
+
+
+@app.post("/coach/whatsapp/review", response_class=HTMLResponse)
+async def coach_whatsapp_review(request: Request) -> Response:
+    form = dict(await request.form())
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    result = await run_in_threadpool(
+        _review_draft,
+        str(form.get("athlete_id", "")).strip(),
+        str(form.get("message_kind", "")).strip(),
+        str(form.get("local_date", "")).strip(),
+        str(form.get("decision", "")).strip(),
+        str(form.get("body", "")),
+    )
+    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "approval", "", result))
+
+
+@app.post("/coach/whatsapp/bulk-approve", response_class=HTMLResponse)
+async def coach_whatsapp_bulk_approve(request: Request) -> Response:
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    result = await run_in_threadpool(_bulk_approve_unchanged)
+    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "approval", "", result))
+
+
+@app.post("/coach/whatsapp/reviewed", response_class=HTMLResponse)
+async def coach_whatsapp_mark_reviewed(request: Request) -> Response:
+    form = dict(await request.form())
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    athlete_id = str(form.get("athlete_id", "")).strip()
+    result = await run_in_threadpool(_mark_feedback_reviewed, athlete_id)
+    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "inbox", athlete_id, result))
+
+
+@app.post("/coach/whatsapp/simulate", response_class=HTMLResponse)
+async def coach_whatsapp_simulate(request: Request) -> Response:
+    form = dict(await request.form())
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    if not token:
+        return RedirectResponse(url="/coach/login", status_code=303)
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    athlete_id = str(form.get("athlete_id", "")).strip()
+    body = str(form.get("body", "")).strip()
+    if not is_demo(athlete_id) or not body:
+        result = ("err", "Simulations require a demo athlete and a message.")
+    else:
+        await run_in_threadpool(
+            _process, athlete_id, body, "SIM" + secrets.token_hex(12)
+        )
+        result = ("ok", "Simulated athlete message received and processed.")
+    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "inbox", athlete_id, result))
+
+
+def _bulk_approve_unchanged() -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        count = db.bulk_approve_unchanged(conn, reviewed_by=settings.coach_name)
+    except ValueError as exc:
+        return ("err", f"Nothing approved: {exc}")
+    finally:
+        conn.close()
+    return ("ok", f"Approved {count} unchanged morning message(s).")
+
+
+def _mark_feedback_reviewed(athlete_id: str) -> tuple[str, str]:
+    if not athlete_id:
+        return ("err", "No athlete was selected.")
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        db.mark_whatsapp_conversation_reviewed(conn, athlete_id)
+    finally:
+        conn.close()
+    return ("ok", "Feedback marked as reviewed.")
+
+
+def _render_whatsapp(
+    tab: str, athlete_id: str, message: tuple[str, str] | None
+) -> str:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        pending = pending_reviews(conn, today=date.today())
+        conversations = db.whatsapp_conversations(conn)
+        selected = athlete_id or (
+            str(conversations[0]["athlete_id"]) if conversations else ""
+        )
+        messages = db.whatsapp_messages(conn, selected, limit=100) if selected else []
+        selected_name = db.athlete_name(conn, selected) or selected
+        demo_athletes = tuple(
+            (candidate, db.athlete_name(conn, candidate) or candidate)
+            for candidate in db.list_athletes(conn) if is_demo(candidate)
+        )
+        scheduled = db.approved_drafts(conn, "morning_checkin") + db.approved_drafts(conn, COACH_NOTE)
+        sent = [
+            row for row in db.whatsapp_messages(conn, limit=300)
+            if row["direction"] == "outbound"
+        ]
+    finally:
+        conn.close()
+    return render_whatsapp_desk(
+        conversations=conversations, messages=messages, pending=pending,
+        scheduled=scheduled, sent=sent, selected_athlete=selected,
+        selected_name=selected_name, tab=tab, coach=settings.coach_name,
+        demo_athletes=demo_athletes, today=date.today(), message=message,
+    )
 
 
 @app.post("/coach/outbox/review", response_class=HTMLResponse)
@@ -546,6 +828,7 @@ async def whatsapp_webhook(request: Request) -> Response:
 
     athlete_id = whatsapp.athlete_id_from_sender(str(form.get("From", "")))
     body = str(form.get("Body", ""))
+    provider_sid = str(form.get("MessageSid", "")).strip()
     if not athlete_id:
         return Response(
             content=whatsapp.twiml(["Couldn't identify the sender."]),
@@ -553,20 +836,66 @@ async def whatsapp_webhook(request: Request) -> Response:
         )
 
     log.info("message from %s: %r", athlete_id, body[:120])
-    reply = await run_in_threadpool(_process, athlete_id, body)
+    reply = await run_in_threadpool(_process, athlete_id, body, provider_sid)
     return Response(
         content=whatsapp.twiml(whatsapp.chunk(reply)), media_type="application/xml"
     )
 
 
-def _process(athlete_id: str, body: str) -> str:
+def _process(athlete_id: str, body: str, provider_sid: str = "") -> str:
     """Blocking work — one SQLite connection per request keeps threads honest."""
     conn = db.connect()
     try:
         db.init_db(conn)
-        return handle_message(conn, athlete_id, body, get_model_client())
+        if provider_sid and db.whatsapp_message_by_sid(conn, provider_sid) is not None:
+            previous = db.whatsapp_reply_to(conn, provider_sid)
+            return str(previous["body"]) if previous is not None else "Message received."
+        db.record_whatsapp_message(
+            conn, athlete_id=athlete_id, direction="inbound", body=body,
+            status="received", provider_sid=provider_sid or None,
+            message_kind="athlete_feedback",
+        )
+        reply = handle_message(conn, athlete_id, body, get_model_client())
+        identity = provider_sid or hashlib.sha256(
+            f"{athlete_id}|{date.today().isoformat()}|{body}".encode("utf-8")
+        ).hexdigest()[:20]
+        db.create_draft(
+            conn, athlete_id, FEEDBACK_REPLY + identity,
+            date.today().isoformat(), reply,
+        )
+        injured, _ = db.injury_state(conn, athlete_id)
+        acknowledgement = INJURY_ACK if injured else FEEDBACK_ACK
+        db.record_whatsapp_message(
+            conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
+            status="queued", message_kind="receipt",
+            reply_to_sid=provider_sid or None,
+        )
+        return acknowledgement
     except Exception:  # noqa: BLE001
         log.exception("failed to handle message from %s", athlete_id)
         return "Something broke on my end. Your message wasn't logged — send it again."
     finally:
         conn.close()
+
+
+@app.post("/webhook/whatsapp/status")
+async def whatsapp_status_webhook(request: Request) -> Response:
+    """Apply Twilio delivery callbacks to the message ledger."""
+    form = dict(await request.form())
+    url = whatsapp.webhook_url(str(request.url))
+    signature = request.headers.get("X-Twilio-Signature")
+    if not whatsapp.is_valid_signature(url, {k: str(v) for k, v in form.items()}, signature):
+        return Response(status_code=403, content="invalid signature")
+    sid = str(form.get("MessageSid", "")).strip()
+    status = str(form.get("MessageStatus", "")).strip().lower()
+    status = {"accepted": "queued", "sending": "queued", "undelivered": "failed"}.get(
+        status, status
+    )
+    error_code = str(form.get("ErrorCode", "")).strip() or None
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        db.update_whatsapp_status(conn, sid, status, error_code=error_code)
+    finally:
+        conn.close()
+    return Response(status_code=204)

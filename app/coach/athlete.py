@@ -18,10 +18,13 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from app.coach.roster import RosterEntry, review_athlete
+from app.coach.progress import GoalPace, goal_pace
 from app.decision.guardian import InjuryVeto, assess
+from app.decision.injury_pivot import InjuryPivot, injury_pivot_options
 from app.decision.readiness import DailyCheckIn, evaluate_readiness
 from app.decision.rules import Assessment, Verdict, evaluate
 from app.storage import db
+from app.programming import Experience, METHODOLOGIES, ProgrammingProfile, choose_methodology
 
 # How far back "recently" reaches on the detail page.
 WINDOW_DAYS = 28
@@ -70,6 +73,14 @@ class AthleteDetail:
     nutrition: dict[str, object]
     supplements: tuple[str, ...]
     calendar_connected: bool
+    profile: dict[str, object]
+    goal_pace: GoalPace | None
+    injury_entry_id: int | None
+    injury_pivots: tuple[InjuryPivot, ...]
+    injury_plan_decision: dict[str, object] | None
+    suggested_method: str | None
+    suggested_method_reason: str | None
+    suggested_method_inputs: tuple[str, ...]
 
     @property
     def display_name(self) -> str:
@@ -167,6 +178,30 @@ def athlete_detail(
         if entry.supplement_name and entry.supplement_dose is not None
         and entry.supplement_unit and entry.supplement_timing and entry.supplement_approved_by
     )
+    profile_row = db.latest_athlete_profile(conn, athlete_id)
+    profile = dict(profile_row) if profile_row is not None else {}
+    injury_entry_id = db.open_injury_entry_id(conn, athlete_id) if injured else None
+    decision_row = db.latest_injury_plan_decision(conn, athlete_id) if injured else None
+    suggested_method = suggested_method_reason = None
+    suggested_method_inputs: tuple[str, ...] = ()
+    raw_experience = str(program.get("experience") or profile.get("experience") or "")
+    raw_days = program.get("days_per_week") or profile.get("training_days")
+    if raw_experience in {item.value for item in Experience} and raw_days:
+        rpe_ratio = (
+            sum(1 for session in sessions if session.rpe is not None) / len(sessions)
+            if sessions else 0.0
+        )
+        choice = choose_methodology(
+            ProgrammingProfile(
+                experience=Experience(raw_experience), days_per_week=int(raw_days),
+                weeks_to_meet=review_athlete(conn, athlete_id, today=today).weeks_to_meet,
+                rpe_logging_ratio=rpe_ratio, injured=injured,
+            )
+        )
+        if choice.methodology is not None:
+            suggested_method = METHODOLOGIES[choice.methodology].label
+        suggested_method_reason = choice.reasons[0] if choice.reasons else None
+        suggested_method_inputs = choice.required_inputs
 
     return AthleteDetail(
         athlete_id=athlete_id,
@@ -191,6 +226,14 @@ def athlete_detail(
         nutrition=nutrition,
         supplements=supplements,
         calendar_connected=db.oauth_connection(conn, athlete_id) is not None,
+        profile=profile,
+        goal_pace=goal_pace(conn, athlete_id, today=today),
+        injury_entry_id=injury_entry_id,
+        injury_pivots=injury_pivot_options(injury_note) if injured else (),
+        injury_plan_decision=dict(decision_row) if decision_row is not None else None,
+        suggested_method=suggested_method,
+        suggested_method_reason=suggested_method_reason,
+        suggested_method_inputs=suggested_method_inputs,
     )
 
 

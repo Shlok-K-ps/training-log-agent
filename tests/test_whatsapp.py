@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from twilio.request_validator import RequestValidator
 
 from app.channels import whatsapp
+from app.storage import db
 
 
 def test_the_phone_number_is_the_athlete_id():
@@ -76,14 +77,71 @@ def test_health_reports_which_parser_is_live(client):
     assert body["model"] == "offline-stub"
 
 
-def test_the_webhook_logs_a_set_and_replies_with_twiml(client):
+def test_the_webhook_logs_a_set_and_queues_coaching_for_review(client):
     response = client.post(
         "/webhook/whatsapp",
         data={"From": "whatsapp:+919000000001", "Body": "squat 3x5 at 140kg rpe 8"},
     )
     assert response.status_code == 200
     assert "<Response>" in response.text
-    assert "Logged" in response.text
+    assert "sent it to your coach for review" in response.text
+
+    from app.config import settings as app_settings
+    conn = db.connect(app_settings.database_path)
+    try:
+        db.init_db(conn)
+        assert len(db.session_history(conn, "+919000000001", "squat")) == 1
+        pending = db.pending_drafts(conn)
+        assert len(pending) == 1
+        assert str(pending[0]["message_kind"]).startswith("feedback_reply:")
+        assert "Logged" in pending[0]["body"]
+    finally:
+        conn.close()
+
+
+def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeypatch):
+    from app.coach import COOKIE_NAME
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "coach_access_token", "coach-test-token")
+    client.cookies.set(COOKIE_NAME, "coach-test-token")
+    assert client.post("/coach/demo/seed").status_code == 200
+    response = client.post(
+        "/coach/whatsapp/simulate",
+        data={
+            "athlete_id": "+99900000002",
+            "body": "slept 5h, readiness 4, soreness 6, stress 7",
+        },
+    )
+    assert response.status_code == 200
+    assert "Simulated athlete message received" in response.text
+    assert "slept 5h" in response.text
+    assert "Test the WhatsApp workflow" in response.text
+
+
+def test_twilio_delivery_callback_updates_the_whatsapp_desk_ledger(client):
+    from app.config import settings as app_settings
+
+    conn = db.connect(app_settings.database_path)
+    try:
+        db.init_db(conn)
+        db.record_whatsapp_message(
+            conn, athlete_id="+919000000001", direction="outbound",
+            body="Approved plan", status="queued", provider_sid="SM-CALLBACK",
+        )
+    finally:
+        conn.close()
+    response = client.post(
+        "/webhook/whatsapp/status",
+        data={"MessageSid": "SM-CALLBACK", "MessageStatus": "delivered"},
+    )
+    assert response.status_code == 204
+    conn = db.connect(app_settings.database_path)
+    try:
+        db.init_db(conn)
+        assert db.whatsapp_message_by_sid(conn, "SM-CALLBACK")["status"] == "delivered"
+    finally:
+        conn.close()
 
 
 def test_an_unsigned_request_is_rejected_when_validation_is_on(tmp_path, monkeypatch):
@@ -124,4 +182,4 @@ def test_a_correctly_signed_request_is_accepted(tmp_path, monkeypatch):
             "/webhook/whatsapp", data=form, headers={"X-Twilio-Signature": signature}
         )
     assert response.status_code == 200
-    assert "Logged" in response.text
+    assert "sent it to your coach for review" in response.text

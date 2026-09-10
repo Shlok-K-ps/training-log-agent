@@ -116,9 +116,73 @@ CREATE TABLE IF NOT EXISTS outbound_drafts (
     status        TEXT NOT NULL CHECK (status IN ('pending','approved','skipped','sent')),
     reviewed_by   TEXT,
     reviewed_at   TEXT,
+    evidence_version INTEGER NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     PRIMARY KEY (athlete_id, message_kind, local_date)
 );
+
+CREATE TABLE IF NOT EXISTS whatsapp_messages (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id     TEXT NOT NULL,
+    provider_sid   TEXT UNIQUE,
+    direction      TEXT NOT NULL CHECK (direction IN ('inbound','outbound')),
+    body           TEXT NOT NULL,
+    message_kind   TEXT NOT NULL DEFAULT 'general',
+    status         TEXT NOT NULL CHECK (status IN
+                       ('received','queued','sent','delivered','read','failed')),
+    occurred_at    TEXT NOT NULL,
+    scheduled_for  TEXT,
+    reply_to_sid   TEXT,
+    error_code     TEXT,
+    created_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_athlete_time
+    ON whatsapp_messages (athlete_id, occurred_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_status
+    ON whatsapp_messages (status, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS whatsapp_conversation_state (
+    athlete_id            TEXT PRIMARY KEY,
+    work_state            TEXT NOT NULL DEFAULT 'needs_coach'
+                          CHECK (work_state IN ('needs_coach','awaiting_athlete','resolved')),
+    last_read_message_id  INTEGER NOT NULL DEFAULT 0,
+    updated_at            TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS athlete_profile_revisions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id      TEXT NOT NULL,
+    bodyweight_kg   REAL,
+    squat_1rm_kg    REAL,
+    bench_1rm_kg    REAL,
+    deadlift_1rm_kg REAL,
+    training_days   INTEGER,
+    experience      TEXT,
+    goal_lift       TEXT,
+    goal_target_kg  REAL,
+    goal_start_date TEXT,
+    goal_target_date TEXT,
+    created_by      TEXT NOT NULL,
+    created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_athlete_profile_revision
+    ON athlete_profile_revisions (athlete_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS injury_plan_decisions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id      TEXT NOT NULL,
+    injury_entry_id INTEGER NOT NULL,
+    option_code     TEXT NOT NULL,
+    plan_text       TEXT NOT NULL,
+    approved_by     TEXT NOT NULL,
+    approved_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_injury_plan_athlete
+    ON injury_plan_decisions (athlete_id, injury_entry_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS oauth_connections (
     athlete_id        TEXT NOT NULL,
@@ -232,6 +296,14 @@ SUPPLEMENT_COLUMNS = {
     "supplement_batch_tested": "INTEGER",
     "supplement_active": "INTEGER",
     "supplement_taken": "INTEGER",
+}
+
+OUTBOUND_DRAFT_COLUMNS = {
+    "evidence_version": "INTEGER NOT NULL DEFAULT 0",
+}
+
+ATHLETE_PROFILE_COLUMNS = {
+    "goal_start_date": "TEXT",
 }
 
 
@@ -384,6 +456,20 @@ def init_db(conn: sqlite3.Connection) -> None:
     ).items():
         if name not in existing:
             conn.execute(f"ALTER TABLE entries ADD COLUMN {name} {column_type}")
+    draft_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(outbound_drafts)")
+    }
+    for name, column_type in OUTBOUND_DRAFT_COLUMNS.items():
+        if name not in draft_columns:
+            conn.execute(f"ALTER TABLE outbound_drafts ADD COLUMN {name} {column_type}")
+    profile_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(athlete_profile_revisions)")
+    }
+    for name, column_type in ATHLETE_PROFILE_COLUMNS.items():
+        if name not in profile_columns:
+            conn.execute(
+                f"ALTER TABLE athlete_profile_revisions ADD COLUMN {name} {column_type}"
+            )
     conn.commit()
 
 
@@ -637,6 +723,62 @@ def injury_opened_on(conn: sqlite3.Connection, athlete_id: str) -> str | None:
     return None if row is None else str(row["session_date"])
 
 
+def open_injury_entry_id(conn: sqlite3.Connection, athlete_id: str) -> int | None:
+    """Newest report in the currently open injury episode."""
+    row = conn.execute(
+        """
+        SELECT id FROM entries
+        WHERE athlete_id = ? AND injured = 1
+          AND id > COALESCE((
+              SELECT MAX(id) FROM entries
+              WHERE athlete_id = ? AND injured = 0 AND injury_cleared_by IS NOT NULL
+          ), 0)
+        ORDER BY id DESC LIMIT 1
+        """,
+        (athlete_id, athlete_id),
+    ).fetchone()
+    return None if row is None else int(row["id"])
+
+
+def record_injury_plan_decision(
+    conn: sqlite3.Connection,
+    *,
+    athlete_id: str,
+    injury_entry_id: int,
+    option_code: str,
+    plan_text: str,
+    approved_by: str,
+) -> int:
+    approved_by = (approved_by or "").strip()
+    if not approved_by:
+        raise ValueError("an injury plan must record the approving coach")
+    if open_injury_entry_id(conn, athlete_id) != injury_entry_id:
+        raise ValueError("the injury changed; review the current options again")
+    cur = conn.execute(
+        """
+        INSERT INTO injury_plan_decisions
+            (athlete_id, injury_entry_id, option_code, plan_text, approved_by, approved_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            athlete_id, injury_entry_id, option_code, plan_text.strip(), approved_by,
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def latest_injury_plan_decision(
+    conn: sqlite3.Connection, athlete_id: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM injury_plan_decisions WHERE athlete_id = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (athlete_id,),
+    ).fetchone()
+
+
 def clearance_requested_on(conn: sqlite3.Connection, athlete_id: str) -> str | None:
     """Most recent date the athlete asked to be cleared, within this episode."""
     row = conn.execute(
@@ -886,15 +1028,17 @@ def create_draft(
 ) -> bool:
     """Queue a message for review. Idempotent: re-drafting never overwrites an
     edit or an approval the coach has already made."""
+    evidence_version = latest_evidence_version(conn, athlete_id)
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO outbound_drafts
             (athlete_id, message_kind, local_date, body, original_body,
-             status, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?)
+             status, evidence_version, created_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
         """,
         (
             athlete_id, message_kind, local_date, body, body,
+            evidence_version,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
         ),
     )
@@ -922,7 +1066,24 @@ def approved_drafts(conn: sqlite3.Connection, message_kind: str) -> list[sqlite3
     )
 
 
-def register_athlete(conn: sqlite3.Connection, athlete_id: str, name: str, *, on: str) -> None:
+def register_athlete(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    name: str,
+    *,
+    on: str,
+    bodyweight_kg: float | None = None,
+    squat_1rm_kg: float | None = None,
+    bench_1rm_kg: float | None = None,
+    deadlift_1rm_kg: float | None = None,
+    training_days: int | None = None,
+    experience: str | None = None,
+    injury_note: str | None = None,
+    goal_lift: str | None = None,
+    goal_target_kg: float | None = None,
+    goal_target_date: str | None = None,
+    created_by: str = "Coach",
+) -> None:
     """Create an athlete before they have texted, so the coach can set the roster up."""
     athlete_id = athlete_id.strip()
     name = name.strip()
@@ -932,7 +1093,76 @@ def register_athlete(conn: sqlite3.Connection, athlete_id: str, name: str, *, on
         raise ValueError("an athlete needs a name")
     if athlete_id in list_athletes(conn):
         raise ValueError("that athlete is already on the roster")
-    insert_entry(conn, Entry(athlete_id=athlete_id, athlete_name=name, kind="status", session_date=on))
+    numeric = {
+        "bodyweight": (bodyweight_kg, 30, 400),
+        "squat 1RM": (squat_1rm_kg, 1, 600),
+        "bench 1RM": (bench_1rm_kg, 1, 400),
+        "deadlift 1RM": (deadlift_1rm_kg, 1, 600),
+        "goal target": (goal_target_kg, 1, 700),
+    }
+    for label, (value, low, high) in numeric.items():
+        if value is not None and not low <= float(value) <= high:
+            raise ValueError(f"{label} must be between {low} and {high} kg")
+    if training_days is not None and not 1 <= int(training_days) <= 7:
+        raise ValueError("training frequency must be between 1 and 7 days")
+    if experience and experience not in {"novice", "intermediate", "advanced"}:
+        raise ValueError("experience must be novice, intermediate, or advanced")
+    goal_lift = normalize_lift(goal_lift)
+    if goal_lift and goal_lift not in {"squat", "bench press", "deadlift"}:
+        raise ValueError("goal lift must be squat, bench press, or deadlift")
+    goal_parts = (goal_lift, goal_target_kg, goal_target_date)
+    if any(part not in (None, "") for part in goal_parts) and not all(
+        part not in (None, "") for part in goal_parts
+    ):
+        raise ValueError("a goal needs a lift, target weight, and target date")
+    if goal_target_date:
+        try:
+            date.fromisoformat(goal_target_date)
+        except ValueError as exc:
+            raise ValueError("goal date must be a valid date") from exc
+
+    note = (injury_note or "").strip() or None
+    insert_entry(
+        conn,
+        Entry(
+            athlete_id=athlete_id,
+            athlete_name=name,
+            kind="status",
+            injured=True if note else None,
+            injury_note=note,
+            bodyweight_kg=bodyweight_kg,
+            experience=experience,
+            days_per_week=training_days,
+            meet_date=goal_target_date,
+            session_date=on,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO athlete_profile_revisions
+            (athlete_id, bodyweight_kg, squat_1rm_kg, bench_1rm_kg,
+             deadlift_1rm_kg, training_days, experience, goal_lift,
+             goal_target_kg, goal_start_date, goal_target_date, created_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            athlete_id, bodyweight_kg, squat_1rm_kg, bench_1rm_kg,
+            deadlift_1rm_kg, training_days, experience, goal_lift,
+            goal_target_kg, on, goal_target_date, (created_by or "Coach").strip(),
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+
+
+def latest_athlete_profile(
+    conn: sqlite3.Connection, athlete_id: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM athlete_profile_revisions WHERE athlete_id = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (athlete_id,),
+    ).fetchone()
 
 
 def pending_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -942,6 +1172,238 @@ def pending_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             "ORDER BY local_date, athlete_id"
         )
     )
+
+
+def approved_drafts_with_prefix(
+    conn: sqlite3.Connection, message_kind_prefix: str
+) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM outbound_drafts WHERE status = 'approved' "
+            "AND message_kind LIKE ? ORDER BY local_date, athlete_id",
+            (message_kind_prefix + "%",),
+        )
+    )
+
+
+def latest_evidence_version(conn: sqlite3.Connection, athlete_id: str) -> int:
+    """Monotonic version of the facts used to prepare an athlete's draft."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) AS version FROM entries WHERE athlete_id = ?",
+        (athlete_id,),
+    ).fetchone()
+    return int(row["version"] if row is not None else 0)
+
+
+def draft_is_bulk_eligible(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
+    """Only untouched morning prompts over unchanged evidence may be bulk approved."""
+    return (
+        str(row["status"]) == "pending"
+        and str(row["message_kind"]) == "morning_checkin"
+        and str(row["body"]).strip() == str(row["original_body"]).strip()
+        and int(row["evidence_version"] or 0)
+        == latest_evidence_version(conn, str(row["athlete_id"]))
+    )
+
+
+def bulk_approve_unchanged(conn: sqlite3.Connection, *, reviewed_by: str) -> int:
+    """Approve only low-risk, untouched drafts whose supporting facts did not move."""
+    reviewed_by = (reviewed_by or "").strip()
+    if not reviewed_by:
+        raise ValueError("a review must record who made it")
+    eligible = [row for row in pending_drafts(conn) if draft_is_bulk_eligible(conn, row)]
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for row in eligible:
+        conn.execute(
+            """
+            UPDATE outbound_drafts
+               SET status = 'approved', reviewed_by = ?, reviewed_at = ?
+             WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
+               AND status = 'pending'
+            """,
+            (
+                reviewed_by,
+                now,
+                str(row["athlete_id"]),
+                str(row["message_kind"]),
+                str(row["local_date"]),
+            ),
+        )
+    conn.commit()
+    return len(eligible)
+
+
+# --- WhatsApp conversation ledger -------------------------------------------
+
+
+def record_whatsapp_message(
+    conn: sqlite3.Connection,
+    *,
+    athlete_id: str,
+    direction: str,
+    body: str,
+    status: str,
+    provider_sid: str | None = None,
+    message_kind: str = "general",
+    occurred_at: str | None = None,
+    scheduled_for: str | None = None,
+    reply_to_sid: str | None = None,
+) -> int:
+    """Append a transport event once; Twilio retries are idempotent by MessageSid."""
+    if direction not in {"inbound", "outbound"}:
+        raise ValueError("message direction must be inbound or outbound")
+    if status not in {"received", "queued", "sent", "delivered", "read", "failed"}:
+        raise ValueError("unsupported WhatsApp message status")
+    body = (body or "").strip()
+    if not body:
+        raise ValueError("a WhatsApp message cannot be empty")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if provider_sid:
+        existing = conn.execute(
+            "SELECT id FROM whatsapp_messages WHERE provider_sid = ?", (provider_sid,)
+        ).fetchone()
+        if existing is not None:
+            return int(existing["id"])
+    cur = conn.execute(
+        """
+        INSERT INTO whatsapp_messages
+            (athlete_id, provider_sid, direction, body, message_kind, status,
+             occurred_at, scheduled_for, reply_to_sid, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            athlete_id, provider_sid or None, direction, body, message_kind, status,
+            occurred_at or now, scheduled_for, reply_to_sid, now,
+        ),
+    )
+    if direction == "inbound":
+        conn.execute(
+            """
+            INSERT INTO whatsapp_conversation_state
+                (athlete_id, work_state, last_read_message_id, updated_at)
+            VALUES (?, 'needs_coach', 0, ?)
+            ON CONFLICT(athlete_id) DO UPDATE SET
+                work_state = 'needs_coach', updated_at = excluded.updated_at
+            """,
+            (athlete_id, now),
+        )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def whatsapp_messages(
+    conn: sqlite3.Connection, athlete_id: str | None = None, *, limit: int = 200
+) -> list[sqlite3.Row]:
+    limit = max(1, min(int(limit), 500))
+    if athlete_id:
+        return list(
+            conn.execute(
+                "SELECT * FROM whatsapp_messages WHERE athlete_id = ? "
+                "ORDER BY occurred_at DESC, id DESC LIMIT ?",
+                (athlete_id, limit),
+            )
+        )
+    return list(
+        conn.execute(
+            "SELECT * FROM whatsapp_messages ORDER BY occurred_at DESC, id DESC LIMIT ?",
+            (limit,),
+        )
+    )
+
+
+def whatsapp_message_by_sid(
+    conn: sqlite3.Connection, provider_sid: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM whatsapp_messages WHERE provider_sid = ?", (provider_sid,)
+    ).fetchone()
+
+
+def whatsapp_reply_to(
+    conn: sqlite3.Connection, provider_sid: str
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM whatsapp_messages WHERE reply_to_sid = ? "
+        "AND direction = 'outbound' ORDER BY id DESC LIMIT 1",
+        (provider_sid,),
+    ).fetchone()
+
+
+def whatsapp_conversations(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Latest message per athlete, ordered as a working inbox."""
+    return list(
+        conn.execute(
+            """
+            SELECT m.*,
+                   COALESCE(
+                     (SELECT e.athlete_name FROM entries e
+                       WHERE e.athlete_id = m.athlete_id AND e.athlete_name IS NOT NULL
+                       ORDER BY e.id DESC LIMIT 1),
+                     m.athlete_id
+                   ) AS athlete_name,
+                   COALESCE(s.work_state, 'resolved') AS work_state,
+                   (SELECT COUNT(*) FROM whatsapp_messages unread
+                     WHERE unread.athlete_id = m.athlete_id
+                       AND unread.direction = 'inbound'
+                       AND unread.id > COALESCE(s.last_read_message_id, 0)) AS unread_count
+              FROM whatsapp_messages m
+            JOIN (
+                SELECT athlete_id, MAX(id) AS latest_id
+                FROM whatsapp_messages GROUP BY athlete_id
+            ) latest ON latest.latest_id = m.id
+            LEFT JOIN whatsapp_conversation_state s ON s.athlete_id = m.athlete_id
+            ORDER BY CASE WHEN (SELECT COUNT(*) FROM whatsapp_messages unread
+                                  WHERE unread.athlete_id = m.athlete_id
+                                    AND unread.direction = 'inbound'
+                                    AND unread.id > COALESCE(s.last_read_message_id, 0)) > 0
+                          THEN 0 ELSE 1 END,
+                     m.occurred_at DESC, m.id DESC
+            """
+        )
+    )
+
+
+def mark_whatsapp_conversation_reviewed(
+    conn: sqlite3.Connection, athlete_id: str
+) -> int:
+    """A coach explicitly clears the unread feedback marker for one athlete."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) AS latest FROM whatsapp_messages "
+        "WHERE athlete_id = ? AND direction = 'inbound'",
+        (athlete_id,),
+    ).fetchone()
+    latest = int(row["latest"] if row is not None else 0)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn.execute(
+        """
+        INSERT INTO whatsapp_conversation_state
+            (athlete_id, work_state, last_read_message_id, updated_at)
+        VALUES (?, 'resolved', ?, ?)
+        ON CONFLICT(athlete_id) DO UPDATE SET
+            work_state = 'resolved', last_read_message_id = excluded.last_read_message_id,
+            updated_at = excluded.updated_at
+        """,
+        (athlete_id, latest, now),
+    )
+    conn.commit()
+    return latest
+
+
+def update_whatsapp_status(
+    conn: sqlite3.Connection,
+    provider_sid: str,
+    status: str,
+    *,
+    error_code: str | None = None,
+) -> bool:
+    if status not in {"queued", "sent", "delivered", "read", "failed"}:
+        return False
+    cur = conn.execute(
+        "UPDATE whatsapp_messages SET status = ?, error_code = ? WHERE provider_sid = ?",
+        (status, error_code or None, provider_sid),
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def review_draft(
@@ -968,7 +1430,8 @@ def review_draft(
     conn.execute(
         """
         UPDATE outbound_drafts
-           SET status = ?, body = ?, reviewed_by = ?, reviewed_at = ?
+           SET status = ?, body = ?, reviewed_by = ?, reviewed_at = ?,
+               evidence_version = ?
          WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
         """,
         (
@@ -976,10 +1439,32 @@ def review_draft(
             (body if body is not None else str(row["body"])).strip(),
             reviewed_by,
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            latest_evidence_version(conn, athlete_id),
             athlete_id, message_kind, local_date,
         ),
     )
     conn.commit()
+
+
+def invalidate_draft_if_evidence_changed(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> bool:
+    """Return an approved agent draft to review when newer athlete facts arrive."""
+    row = draft(conn, athlete_id, message_kind, local_date)
+    if row is None or str(row["status"]) != "approved":
+        return False
+    if int(row["evidence_version"] or 0) == latest_evidence_version(conn, athlete_id):
+        return False
+    conn.execute(
+        """
+        UPDATE outbound_drafts
+           SET status = 'pending', reviewed_by = NULL, reviewed_at = NULL
+         WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
+        """,
+        (athlete_id, message_kind, local_date),
+    )
+    conn.commit()
+    return True
 
 
 def mark_draft_sent(

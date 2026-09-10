@@ -811,7 +811,8 @@ button.skip:hover, .btn-secondary:hover {
   align-items: center;
 }
 
-.register input[type="text"] {
+.register input[type="text"], .register input[type="number"],
+.register input[type="date"], .register select {
   background: var(--surface-inset);
   border: 1px solid var(--border);
   border-radius: 9999px;
@@ -820,7 +821,7 @@ button.skip:hover, .btn-secondary:hover {
   font-size: 13.5px;
 }
 
-.register input[type="text"]:focus {
+.register input:focus, .register select:focus {
   outline: none;
   border-color: var(--accent-cyan);
 }
@@ -840,6 +841,22 @@ button.skip:hover, .btn-secondary:hover {
   color: var(--ink-faint);
   margin: 10px 0 0;
 }
+
+.onboarding {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  margin-top: 12px;
+}
+.onboarding summary { cursor: pointer; padding: 16px 18px; font-weight: 600; list-style: none; }
+.onboarding summary::-webkit-details-marker { display: none; }
+.onboarding summary:after { content: '+'; float: right; color: var(--accent-cyan); }
+.onboarding[open] summary:after { content: '−'; }
+.onboarding .onboarding-form { display: block; padding: 0 18px 18px; margin: 0; }
+.onboarding-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.onboarding-grid label { font: 600 10.5px var(--font-mono); color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; }
+.onboarding-grid input, .onboarding-grid select { display: block; width: 100%; margin-top: 5px; border-radius: 10px; }
+.onboarding-wide { grid-column: 1 / -1; }
 
 .demo {
   background: var(--surface);
@@ -1076,7 +1093,9 @@ footer {
   .directory-row { grid-template-columns: 1fr auto; }
   .directory-row > *:nth-child(2) { grid-column: 1 / -1; }
   .directory-head { display: none; }
-  .evidence-grid { grid-template-columns: 1fr; }
+  .message-evidence, .evidence-grid { grid-template-columns: 1fr; }
+  .onboarding-grid { grid-template-columns: 1fr; }
+  .onboarding-wide { grid-column: auto; }
 }
 """
 
@@ -1131,13 +1150,14 @@ def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
     links = (
         ("overview", "/coach", "Overview", "✦"),
         ("athletes", "/coach/athletes", "Athletes / Roster", "●"),
-        ("review", "/coach/outbox", "Review queue / Outbox", "◈"),
+        ("whatsapp", "/coach/whatsapp", "WhatsApp Desk", "◈"),
+        ("analytics", "/coach/analytics", "Goal Analytics", "◇"),
     )
     nav = []
     for key, href, label, sym in links:
         count = (
             f'<span class="nav-count">{pending_count}</span>'
-            if key == "review" and pending_count else ""
+            if key == "whatsapp" and pending_count else ""
         )
         nav.append(
             f'<a class="{"active" if key == active else ""}" href="{href}">'
@@ -1180,32 +1200,32 @@ def coach_frame(
     )
 
 
-_REGISTER_FORM = (
-    '<section class="register"><h2>Add an athlete</h2>'
-    '<div class="card">'
-    '<form method="post" action="/coach/athletes/register">'
-    '<input type="text" name="name" required maxlength="60" placeholder="Name">'
-    '<input type="text" name="athlete_id" required maxlength="20" '
-    'placeholder="WhatsApp number, e.g. +919812340001">'
-    '<button type="submit">Add</button>'
-    '</form>'
-    '<p class="hint">The number is their identity - it is how the agent knows who '
-    'is texting. They appear on the roster straight away and fill in as they log.</p>'
-    '</div></section>'
-)
+_REGISTER_FORM = """
+<section class="register"><h2>Add an athlete</h2>
+<details class="onboarding" open><summary>Initial coaching profile</summary>
+<form class="onboarding-form" method="post" action="/coach/athletes/register">
+  <div class="onboarding-grid">
+    <label>Name<input type="text" name="name" required maxlength="60" placeholder="Athlete name"></label>
+    <label>WhatsApp number<input type="text" name="athlete_id" required maxlength="20" placeholder="+919812340001"></label>
+    <label>Bodyweight (kg)<input type="number" name="bodyweight_kg" min="30" max="400" step="0.1" required></label>
+    <label>Squat 1RM (kg)<input type="number" name="squat_1rm_kg" min="1" max="600" step="0.5" required></label>
+    <label>Bench 1RM (kg)<input type="number" name="bench_1rm_kg" min="1" max="400" step="0.5" required></label>
+    <label>Deadlift 1RM (kg)<input type="number" name="deadlift_1rm_kg" min="1" max="600" step="0.5" required></label>
+    <label>Training days / week<input type="number" name="training_days" min="1" max="7" required></label>
+    <label>Experience<select name="experience" required><option value="novice">Novice</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
+    <label>Goal lift<select name="goal_lift"><option value="">No numeric goal yet</option><option value="squat">Squat</option><option value="bench press">Bench press</option><option value="deadlift">Deadlift</option></select></label>
+    <label>Goal 1RM (kg)<input type="number" name="goal_target_kg" min="1" max="700" step="0.5"></label>
+    <label>Goal / meet date<input type="date" name="goal_target_date"></label>
+    <label class="onboarding-wide">Current injury or restriction<input type="text" name="injury_note" maxlength="240" placeholder="Leave blank if none; any entry opens the injury safety gate"></label>
+  </div>
+  <button type="submit">Create athlete profile</button>
+  <p class="hint">These are coach-entered starting facts. They create the baseline for programme selection and goal pacing; they do not clear or diagnose injuries.</p>
+</form></details></section>
+"""
 
 
 def _demo_controls(roster: Roster, has_demo: bool) -> str:
-    """Offer the demo squad on an empty console, and a way to remove it after."""
-    if roster.total == 0:
-        return (
-            '<div class="demo">'
-            "<p>Nothing has been logged yet. On a live team this fills up as "
-            "athletes text their sessions.</p>"
-            '<form method="post" action="/coach/demo/seed">'
-            '<button type="submit">Load a demo squad</button></form>'
-            "</div>"
-        )
+    """Keep demo controls available from Overview, even with a real roster."""
     if has_demo:
         return (
             '<div class="demo">'
@@ -1214,7 +1234,38 @@ def _demo_controls(roster: Roster, has_demo: bool) -> str:
             '<button class="skip" type="submit">Remove demo athletes</button></form>'
             "</div>"
         )
-    return ""
+    message = (
+        "Nothing has been logged yet. Load a mixed fictional squad to explore every screen."
+        if roster.total == 0 else
+        "Add a mixed fictional squad alongside the roster to preview check-ins, injuries, goals and WhatsApp states."
+    )
+    return (
+        '<div class="demo"><p>' + escape(message) + '</p>'
+        '<form method="post" action="/coach/demo/seed">'
+        '<button type="submit">Load a demo squad</button></form></div>'
+    )
+
+
+def _tutorial() -> str:
+    return """
+<div class="panel">
+  <div class="panel-head"><h2>New here?</h2></div>
+  <p class="section-note">Take a two-minute tour of the coach approval loop.</p>
+  <button class="skip" type="button" onclick="document.getElementById('tutorial').showModal()">Open tutorial</button>
+</div>
+<dialog id="tutorial" style="max-width:620px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);padding:22px">
+  <h1>How to use Coach Desk</h1>
+  <ol>
+    <li><strong>Add athletes:</strong> record bodyweight, 1RMs, training frequency, current injuries and a dated goal.</li>
+    <li><strong>Read Overview:</strong> start with exceptions rather than checking every athlete manually.</li>
+    <li><strong>Open WhatsApp:</strong> review new feedback, inspect the prepared change, and approve or hold the exact message.</li>
+    <li><strong>Handle injuries:</strong> choose a bounded training pivot; the injury gate stays open until independent clearance.</li>
+    <li><strong>Check Analytics:</strong> use ahead/on-track/lagging as a prompt to review—not an automatic programme change.</li>
+  </ol>
+  <p>For a safe walkthrough, load the demo squad and use “Test the WhatsApp workflow” inside WhatsApp.</p>
+  <form method="dialog"><button type="submit">Got it</button></form>
+</dialog>
+"""
 
 
 def render(
@@ -1288,11 +1339,11 @@ def render(
         '<a href="/coach/athletes">View all athletes →</a></div>'
         f'{priority_body}</div></div><div>'
         '<div class="panel"><div class="panel-head"><h2>Approval queue</h2>'
-        '<a href="/coach/outbox">Open queue →</a></div>'
+        '<a href="/coach/whatsapp?tab=approval">Open queue →</a></div>'
         f'<p style="font-size:30px;font-weight:800;margin:2px 0">{pending_count}</p>'
         '<p class="section-note">Prepared messages waiting for a human decision.</p></div>'
-        f'{workflow}{squad_panel}</div></div>'
-        + (_demo_controls(roster, has_demo) if roster.total == 0 else "")
+        f'{workflow}{_tutorial()}{squad_panel}</div></div>'
+        + _demo_controls(roster, has_demo)
     )
     return coach_frame(
         body, active="overview", coach=coach, title="Overview",
@@ -2682,6 +2733,30 @@ def render_landing(*, is_logged_in: bool = False) -> str:
           </div>
         </div>
       </article>
+    </section>
+
+    <!-- Agentic product difference -->
+    <section id="agentic" class="unseen-section">
+      <div class="section-meta">
+        <span class="section-idx">02</span>
+        <span class="section-label">WHY THIS IS AN AGENT, NOT A CHAT WINDOW</span>
+      </div>
+      <h2 class="section-title">Conversation answers once. <span class="unseen-serif">This system keeps working.</span></h2>
+      <p class="section-lead">
+        A normal Claude or ChatGPT conversation can discuss a programme, but it does not own the squad workflow. Power Coach observes new athlete events, preserves longitudinal state, proposes bounded actions, waits for authority, executes approved messages, and verifies delivery.
+      </p>
+      <div class="grid-3">
+        <div class="feature-card"><span class="badge badge-blue">PERSISTENT STATE</span><h3>Remembers the actual journey</h3><p>Sessions, sleep, nutrition, injuries, goals, calendar constraints, approvals and delivery events remain connected to the athlete—not to one chat transcript.</p></div>
+        <div class="feature-card"><span class="badge badge-yellow">EVENT-DRIVEN</span><h3>Acts when facts change</h3><p>A morning check-in, missed log, fresh injury or new schedule conflict recomputes the relevant plan and opens a coach decision.</p></div>
+        <div class="feature-card"><span class="badge badge-green">CONTROLLED ACTION</span><h3>Closes the loop</h3><p>The coach approves exact wording; the system schedules it, sends through WhatsApp, records who approved it, and tracks delivered, read or failed.</p></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Capability</th><th>Normal chat</th><th>Power Coach</th></tr></thead><tbody>
+        <tr><td>Twenty-athlete longitudinal state</td><td>Manually supplied context</td><td><strong>Stored and continuously updated</strong></td></tr>
+        <tr><td>Proactive daily workflow</td><td>Waits for a prompt</td><td><strong>Drafts, schedules and surfaces exceptions</strong></td></tr>
+        <tr><td>Safety authority</td><td>Prompt instruction</td><td><strong>Code-enforced injury and supplement gates</strong></td></tr>
+        <tr><td>External action</td><td>Produces prose</td><td><strong>Coach-approved WhatsApp and calendar execution</strong></td></tr>
+        <tr><td>Audit</td><td>Read the transcript</td><td><strong>Evidence version, approver and delivery state</strong></td></tr>
+      </tbody></table></div>
     </section>
 
     <!-- Transparent Engineering Note -->

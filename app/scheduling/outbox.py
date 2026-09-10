@@ -27,6 +27,7 @@ from app.storage import db
 
 MORNING = "morning_checkin"
 COACH_NOTE = "coach_note"
+FEEDBACK_REPLY = "feedback_reply:"
 
 
 def _local_now(conn: sqlite3.Connection, athlete_id: str, now_utc: datetime):
@@ -89,6 +90,10 @@ def send_approved_prompts(
 
         if row is None or row["status"] != "approved":
             continue          # unreviewed or skipped: silence, not a broadcast
+        if db.invalidate_draft_if_evidence_changed(
+            conn, prompt.athlete_id, MORNING, prompt.local_date
+        ):
+            continue          # newer check-in/injury/schedule fact needs fresh approval
         body = str(row["body"])
 
         sender(prompt.athlete_id, body)
@@ -123,5 +128,25 @@ def send_approved_notes(
             continue
         sender(athlete_id, str(row["body"]))
         db.mark_draft_sent(conn, athlete_id, COACH_NOTE, str(row["local_date"]))
+        sent += 1
+    return sent
+
+
+def send_approved_feedback(
+    conn: sqlite3.Connection,
+    sender: Callable[[str, str], None],
+) -> int:
+    """Send coach-approved responses to athlete feedback on the next worker tick."""
+    sent = 0
+    for row in db.approved_drafts_with_prefix(conn, FEEDBACK_REPLY):
+        athlete_id = str(row["athlete_id"])
+        message_kind = str(row["message_kind"])
+        local_date = str(row["local_date"])
+        if db.invalidate_draft_if_evidence_changed(
+            conn, athlete_id, message_kind, local_date
+        ):
+            continue
+        sender(athlete_id, str(row["body"]))
+        db.mark_draft_sent(conn, athlete_id, message_kind, local_date)
         sent += 1
     return sent

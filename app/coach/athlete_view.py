@@ -319,15 +319,55 @@ _ATHLETE_STYLE = """
   overflow: visible;
 }
 
+.pivot-panel { border: 1px solid var(--plate-red-border); background: var(--plate-red-bg); border-radius: 14px; padding: 18px; margin-bottom: 22px; }
+.pivot-panel > p { font-size: 13px; color: var(--plate-red-text); }
+.pivot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pivot-option { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 15px; }
+.pivot-option.recommended { border-color: var(--accent-cyan); }
+.pivot-option h3 { font-size: 14px; margin: 8px 0 6px; }
+.pivot-option p { font-size: 12.5px; color: var(--ink-soft); margin: 6px 0; }
+.pivot-option form { margin-top: 10px; }
+.goal-signal { padding: 11px 13px; border-radius: 10px; background: var(--plate-blue-bg); border: 1px solid var(--plate-blue-border); font-size: 12.5px; margin-top: 12px; }
+
 @media(max-width:860px){
   .profile-grid { grid-template-columns: 1fr; }
   .coach-draft { position: static; }
 }
 
 @media(max-width:540px){
-  .context-grid { grid-template-columns: 1fr; }
+  .context-grid, .pivot-grid { grid-template-columns: 1fr; }
 }
 """
+
+
+def _injury_pivot_panel(detail: AthleteDetail) -> str:
+    if not detail.injured or detail.injury_entry_id is None:
+        return ""
+    selected = detail.injury_plan_decision
+    selected_note = ""
+    if selected and int(selected.get("injury_entry_id", -1)) == detail.injury_entry_id:
+        selected_note = (
+            '<div class="msg ok"><strong>Current coach-approved pivot:</strong> '
+            f'{escape(str(selected.get("plan_text", "")))}</div>'
+        )
+    options = []
+    for option in detail.injury_pivots:
+        marker = '<span class="badge badge-blue">Recommended starting path</span>' if option.recommended else ""
+        options.append(
+            f'<div class="pivot-option {"recommended" if option.recommended else ""}">{marker}'
+            f'<h3>{escape(option.title)}</h3><p>{escape(option.plan)}</p>'
+            f'<p><strong>Why consider it:</strong> {escape(option.rationale)}</p>'
+            f'<form method="post" action="/coach/athlete/{escape(detail.athlete_id)}/injury-plan">'
+            f'<input type="hidden" name="injury_entry_id" value="{detail.injury_entry_id}">'
+            f'<input type="hidden" name="option_code" value="{escape(option.code)}">'
+            '<button type="submit">Approve this training pivot</button></form></div>'
+        )
+    return (
+        '<section class="pivot-panel"><h2>Fresh injury · coach decision required</h2>'
+        '<p>The injury gate remains open in every path. These options change training only; '
+        'they do not diagnose the injury or clear the athlete.</p>'
+        f'{selected_note}<div class="pivot-grid">{"".join(options)}</div></section>'
+    )
 
 
 def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:
@@ -491,10 +531,24 @@ def render_athlete(
     )
     program_panel = '<div class="context-card"><h2><span class="sym">⚙</span> Programming</h2>' + facts([
         ("Method", str(detail.program.get("methodology", "")).replace("_", " ")),
+        ("Suggested starting method", detail.suggested_method),
+        ("Why", detail.suggested_method_reason),
+        ("Inputs still needed", ", ".join(detail.suggested_method_inputs)),
         ("Experience", detail.program.get("experience")),
         ("Training days", detail.program.get("days_per_week")),
+        ("Starting bodyweight", f'{detail.profile.get("bodyweight_kg")} kg' if detail.profile.get("bodyweight_kg") else None),
+        ("Squat 1RM", f'{detail.profile.get("squat_1rm_kg")} kg' if detail.profile.get("squat_1rm_kg") else None),
+        ("Bench 1RM", f'{detail.profile.get("bench_1rm_kg")} kg' if detail.profile.get("bench_1rm_kg") else None),
+        ("Deadlift 1RM", f'{detail.profile.get("deadlift_1rm_kg")} kg' if detail.profile.get("deadlift_1rm_kg") else None),
         ("Meet date", detail.program.get("meet_date")),
-    ]) + '</div>'
+    ]) + (
+        '<div class="goal-signal"><strong>Goal pace:</strong> '
+        f'{escape(detail.goal_pace.status.replace("_", " ").title())} · '
+        f'{detail.goal_pace.current_kg:g} kg current e1RM vs '
+        f'{detail.goal_pace.expected_kg:g} kg expected today, targeting '
+        f'{detail.goal_pace.target_kg:g} kg by {escape(detail.goal_pace.target_date)}.</div>'
+        if detail.goal_pace else ""
+    ) + '</div>'
     schedule_panel = '<div class="context-card"><h2><span class="sym">◷</span> Schedule & logistics</h2>' + facts([
         ("Calendar", "Connected" if detail.calendar_connected else "Not connected"),
         ("Timezone", detail.schedule.get("timezone")),
@@ -515,6 +569,7 @@ def render_athlete(
     body = (
         f"{banner}<p class='back'><a href='/coach/athletes'>← All athletes / Roster</a></p>"
         f'<div class="status-strip"><strong><span class="sym">●</span> Current status:</strong> {escape(status)}</div>'
+        f'{_injury_pivot_panel(detail)}'
         f'<div class="grid">{tile_html}</div>'
         '<div class="profile-grid"><div>'
         f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'

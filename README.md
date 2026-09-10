@@ -14,8 +14,9 @@ coach gets busy — which is exactly when an athlete most needs someone to notic
 This agent absorbs that work. Athletes text their sessions in plain English from
 the app they already have open. The agent parses them into structured data,
 tracks training, sleep, readiness, soreness, stress, bodyweight and nutrition,
-and returns a deterministic verdict — progressing, stalled, deload — computed
-the same way every time. The coach reviews exceptions instead of an inbox.
+and prepares a deterministic verdict — progressing, stalled, deload — computed
+the same way every time. The coach approves the resulting guidance from one
+daily WhatsApp desk instead of reconstructing context across twenty chats.
 
 ## What the coach stops doing by hand
 
@@ -49,18 +50,17 @@ The two ❌ rows are enforced in code, not in a prompt. See
 
 ---
 
-Athletes still get a direct, useful reply — the coach layer sits behind it:
+Athletes receive an immediate receipt; coaching guidance waits for the coach:
 
 ```
 athlete                                                        agent
    │
    │  "squat 3x5 at 140 today, felt way harder than tuesday, rpe 9"
    ├──────────────────────────────────────────────────────────────▶
-   │                                                    ✅ Logged: Squat 3x5 @ 140 kg RPE 9
-   │                                                    *Squat — Stalled*
-   │                                                    Flat at 140 kg for 2 sessions with
-   │                                                    RPE climbing — same bar, more effort.
+   │                                                    Got it — I’ve logged your update and
+   │                                                    sent it to your coach for review.
    ◀──────────────────────────────────────────────────────────────┤
+                          agent draft ──▶ coach approves ──▶ WhatsApp
 ```
 
 ---
@@ -91,7 +91,7 @@ Three layers, and the split is the whole point.
    │                            No randomness.                     │
    └───────────────────────────────┼───────────────────────────────┘
                                    ▼
-                        templated reply ──▶ WhatsApp
+                        deterministic draft ──▶ coach ──▶ WhatsApp
 ```
 
 **Why the split:** messy input needs a model, but the output is advice real
@@ -312,12 +312,15 @@ logs the set *and* raises the injury flag.
    ```
 4. In the sandbox settings, set **"When a message comes in"** to
    `https://<your-host>/webhook/whatsapp`, method `POST`.
+   Outgoing API messages automatically request delivery updates at
+   `https://<your-host>/webhook/whatsapp/status` when `PUBLIC_BASE_URL` is set.
 5. Copy `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and your public URL into
    `.env`. Set `PUBLIC_BASE_URL` to exactly the URL you pasted into Twilio —
    behind a proxy the app sees a different host than the one Twilio signed, and
    the signature check will fail on a mismatch.
 
-Text the sandbox number. It replies.
+Text the sandbox number. It acknowledges the log immediately; the coaching
+response appears in the coach's WhatsApp Desk for approval.
 
 ### 5. Deploy
 
@@ -372,7 +375,7 @@ the log but do not grant scheduling authority.
 ## Tests
 
 ```bash
-pytest -q          # 321 tests, no network
+pytest -q          # 341 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -426,7 +429,7 @@ trustworthy:
                     │        graded return-to-load protocols are not built yet
         │
   coach console    built: overview, searchable squad directory, athlete history,
-                    readiness/program/nutrition context, and approval queue
+                    readiness/program/nutrition context, and WhatsApp Desk
         │
   nutrition        food-access timing built; targets still need athlete/pro approval
 ```
@@ -438,15 +441,23 @@ dietitian or physio in the loop rather than a rule in a Python file.
 
 **The coach console** is what makes this a coaching tool rather than twenty
 separate athlete tools. Sign in once at `/coach/login`; the authenticated
-workspace then has three persistent sections:
+workspace then has four persistent sections:
 
 - **Overview** — squad totals, same-day check-ins, pending approvals, and the
   exceptions that need a coach first.
 - **Athletes** — searchable status/readiness directory. Each athlete opens into
   training history and charts plus recovery, programming, scheduling, nutrition,
   supplements, and an evidence-based message draft.
-- **Review queue** — the exact pending message beside the latest session,
-  current training trend, readiness state, and the reason it was surfaced.
+- **WhatsApp Desk** — Inbox, Needs approval, Scheduled, and Sent views with the
+  athlete conversation, unread feedback, exact drafts and delivery status.
+- **Analytics** — dated goal pacing across the squad: ahead, on track, or
+  lagging against a visible starting-1RM-to-target checkpoint.
+
+Athlete onboarding starts with bodyweight, all three 1RMs, training frequency,
+experience, current injuries, and an optional dated lift goal. A fresh injury
+opens four deterministic training-management paths for the coach to choose
+between; none diagnoses or clears the athlete, and any newer injury report makes
+the earlier choice stale.
 
 The overview still orders decisions before observations:
 
@@ -484,9 +495,9 @@ The agent messages first. That is the useful part and also the risky part — an
 outbound message is the one thing an athlete cannot ignore, and it arrives with
 the coach's authority attached whether or not the coach wrote it.
 
-So the send is split in two. The evening before, the agent drafts tomorrow's
-messages and queues them at `/coach/outbox` with the reason it wants to send
-each one:
+So the send is split in two. The agent prepares morning prompts and responses to
+athlete feedback, then queues them at `/coach/whatsapp` with the supporting
+evidence:
 
 ```
 Coach Rao — outbox                                     2026-09-10
@@ -510,6 +521,16 @@ not an unsupervised broadcast — the same way an unset token closes the console
 rather than opening it. This cannot be disabled by deployment configuration.
 
 Every approval records who made it, when, and whether the wording was changed.
+Untouched morning prompts whose evidence has not changed can be approved as a
+safe batch. New readiness data, an injury, a schedule update, an edit, or any
+other newer athlete fact forces individual review. If evidence changes after
+approval but before sending, the approval is invalidated automatically.
+
+To test the workflow without Twilio, load the fictional demo squad from
+Overview, open **WhatsApp → Inbox → Test the WhatsApp workflow**, and submit a
+check-in such as `slept 5h, readiness 4, soreness 6, stress 7`. The simulator
+uses the real parser, storage and approval queue but is restricted to reserved
+non-dialable demo numbers, so it cannot message a real athlete.
 
 There is also a terminal equivalent, for a deployment with no web access:
 
@@ -558,5 +579,5 @@ docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       clear_injury.py — COACH TOOL: list flagged athletes, close a flag
                check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         321 tests, no network
+tests/         341 tests, no network
 ```

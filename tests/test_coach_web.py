@@ -37,6 +37,8 @@ def test_landing_page_renders_complete_product_story():
         # Authority boundaries
         assert "Close an injury flag" in html
         assert "Coach Only" in html
+        assert "WHY THIS IS AN AGENT, NOT A CHAT WINDOW" in html
+        assert "This system keeps working" in html
 
 
 def test_login_page_renders_form():
@@ -80,6 +82,8 @@ def test_authenticated_coach_console_with_cookie():
         assert "Overview" in resp.text
         assert "Daily agent loop" in resp.text
         assert "Approval queue" in resp.text
+        assert "Load a demo squad" in resp.text or "Remove demo athletes" in resp.text
+        assert "Open tutorial" in resp.text
         assert "/coach/logout" in resp.text
 
 
@@ -92,7 +96,39 @@ def test_athlete_directory_is_a_separate_authenticated_workspace():
         assert "Current status, recent progress and readiness" in resp.text
         assert 'id="athlete-search"' in resp.text
         assert 'id="athlete-filter"' in resp.text
-        assert "/coach/outbox" in resp.text
+        assert "/coach/whatsapp" in resp.text
+        assert 'name="squat_1rm_kg"' in resp.text
+        assert 'name="bench_1rm_kg"' in resp.text
+        assert 'name="deadlift_1rm_kg"' in resp.text
+        assert 'name="bodyweight_kg"' in resp.text
+
+
+def test_whatsapp_desk_is_a_separate_authenticated_workspace():
+    with TestClient(app) as client:
+        assert client.get("/coach/whatsapp", follow_redirects=False).status_code == 303
+        client.cookies.set(COOKIE_NAME, TOKEN)
+        resp = client.get("/coach/whatsapp")
+        assert resp.status_code == 200
+        assert "WhatsApp Desk" in resp.text
+        assert "New feedback" in resp.text
+        assert "Needs approval" in resp.text
+        assert "Scheduled" in resp.text
+        assert "Sent" in resp.text
+        assert "/coach/whatsapp/bulk-approve" in client.get(
+            "/coach/whatsapp?tab=approval"
+        ).text
+
+
+def test_goal_analytics_is_a_separate_authenticated_workspace():
+    with TestClient(app) as client:
+        assert client.get("/coach/analytics", follow_redirects=False).status_code == 303
+        client.cookies.set(COOKIE_NAME, TOKEN)
+        resp = client.get("/coach/analytics")
+        assert resp.status_code == 200
+        assert "Goal Analytics" in resp.text
+        assert "Ahead of track" in resp.text
+        assert "On track" in resp.text
+        assert "Lagging" in resp.text
 
 
 def test_authenticated_coach_console_with_query_param_fallback():
