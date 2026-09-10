@@ -105,7 +105,10 @@ def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
         '<aside class="side-nav">'
         '<div class="side-brand-wrap">'
         '<a class="side-brand" href="/coach">'
-        'Power AI <span class="brand-badge">COACH DESK</span>'
+        '<div class="mac-app-icon" aria-hidden="true" style="width:24px;height:24px;border-radius:6px;">'
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>'
+        '</div>'
+        '<span class="brand-name">Power AI</span> <span class="brand-badge">Coach Desk</span>'
         '</a>'
         '</div>'
         f'<nav class="side-links" aria-label="Roster navigation">{"".join(side_nav)}</nav>'
@@ -138,6 +141,9 @@ def coach_frame(
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{escape(title)} — Power AI Coach Desk</title>"
         "<link rel='icon' href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>'>"
+        "<link rel='preconnect' href='https://fonts.googleapis.com'>"
+        "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>"
+        "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>"
         "<link rel='stylesheet' href='/static/tokens.css'>"
         "<link rel='stylesheet' href='/static/app.css'>"
         f"<style>{extra_style}</style>"
@@ -565,6 +571,9 @@ def render_login(error: str | None = None, message: str | None = None) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Power AI — Coach Sign In</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/motion.js" defer></script>
@@ -574,17 +583,21 @@ def render_login(error: str | None = None, message: str | None = None) -> str:
   <div class="noise-overlay" aria-hidden="true"></div>
   <div class="wrapper" style="min-height: 100vh; display: flex; align-items: center; justify-content: center;">
     <div class="login-box">
-      <div class="brand-link" style="margin-bottom: 16px;">
-        Power AI <span class="brand-badge">COACH ACCESS</span>
+      <div class="brand-link" style="margin-bottom: 20px;">
+        <div class="mac-app-icon" aria-hidden="true" style="width:28px;height:28px;border-radius:7px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+        </div>
+        <span class="brand-name">Power AI</span>
+        <span class="brand-badge">Coach Access</span>
       </div>
       <h1>Coach Sign In</h1>
       <p>Enter your coach access token. Authenticating sets a secure HTTP-only cookie so your token is never exposed in page URLs.</p>
       {error_markup}
       {msg_markup}
       <form method="post" action="/coach/login">
-        <label class="tag-mono" for="token" style="margin-bottom: 6px;">ACCESS TOKEN</label>
+        <label class="mac-eyebrow" for="token" style="margin-bottom: 8px; display: block;">Coach Access Token</label>
         <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste coach token here">
-        <button type="submit" class="btn btn-primary" style="margin-top: 8px;">Authenticate &rarr;</button>
+        <button type="submit" class="btn btn-mac-primary" style="margin-top: 12px; width: 100%; padding: 10px 18px;">Authenticate &rarr;</button>
       </form>
       <div style="margin-top: 24px; text-align: center;">
         <a class="back-link" href="/">&larr; Back to Public Overview</a>
@@ -598,9 +611,13 @@ def render_login(error: str | None = None, message: str | None = None) -> str:
 def render_landing(*, is_logged_in: bool = False) -> str:
     """Render the public landing page with Power AI design system."""
     coach_link = "/coach" if is_logged_in else "/coach/login"
-    coach_text = "Open Console" if is_logged_in else "Coach Sign In"
-
-    arrow_svg = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13L13 3M13 3H5M13 3V11"/></svg>'
+    coach_text = "Open Coach Desk" if is_logged_in else "Coach Sign In"
+    arrow_svg = (
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
+        'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
+        '<line x1="7" y1="17" x2="17" y2="7"></line>'
+        '<polyline points="7 7 17 7 17 17"></polyline></svg>'
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -609,6 +626,9 @@ def render_landing(*, is_logged_in: bool = False) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Power AI — WhatsApp Powerlifting Coach</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/motion.js" defer></script>
@@ -622,18 +642,24 @@ def render_landing(*, is_logged_in: bool = False) -> str:
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand-link" href="/">
-        Power AI <span class="brand-badge">TRAINING LOG AGENT</span>
+        <div class="mac-app-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <span class="brand-name">Power AI</span>
+        <span class="brand-badge">Training Log Agent</span>
       </a>
       <div class="header-status">
         <span class="pulse-dot"></span>
-        <span>AGENT ONLINE &middot; DETERMINISTIC</span>
+        <span>Active &middot; Deterministic</span>
       </div>
       <nav class="site-nav">
-        <a class="nav-link" href="#protocols">01 Protocols</a>
-        <a class="nav-link" href="#architecture">02 Architecture</a>
-        <a class="nav-link" href="#boundaries">03 Boundaries</a>
+        <a class="nav-link" href="#protocols">Protocols</a>
+        <a class="nav-link" href="#architecture">Architecture</a>
+        <a class="nav-link" href="#boundaries">Boundaries</a>
         <a class="nav-link" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">GitHub &nearr;</a>
-        <a class="btn btn-primary" href="{coach_link}">
+        <a class="btn btn-mac-primary" href="{coach_link}">
           <span>{coach_text}</span>
           {arrow_svg}
         </a>
@@ -644,7 +670,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
   <main class="wrapper">
     <!-- Hero Section -->
     <section class="hero">
-      <div class="hero-tag tag-mono">[ POWER AI // PROTOCOL 01 · WHATSAPP POWERLIFTING INTELLIGENCE ]</div>
+      <div class="mac-pill-eyebrow"><span class="mac-pill-icon">⚡</span> WhatsApp Powerlifting Intelligence</div>
       <h1 class="hero-h1">
         The coach reads exceptions,<br>
         <span class="serif">not twenty WhatsApp texts a day.</span>
@@ -653,7 +679,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
         A WhatsApp agent for a 20-athlete powerlifting squad. Athletes text their sessions, sleep, and soreness; deterministic Python evaluates progress and readiness; the coach triages exceptions and approves drafted morning messages.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary btn-lg" href="{coach_link}">
+        <a class="btn btn-mac-primary btn-lg" href="{coach_link}">
           <span>{coach_text} &rarr;</span>
         </a>
         <a class="btn btn-ghost btn-lg" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">
@@ -685,32 +711,43 @@ def render_landing(*, is_logged_in: bool = False) -> str:
         </div>
       </div>
 
-      <!-- WhatsApp Simulation Showcase (Glass bubbles & scenario switcher) -->
+      <!-- WhatsApp Simulation Showcase (macOS Window with traffic lights & segmented control) -->
       <div id="protocols" class="showcase-container">
-        <div class="showcase-header">
-          <div>
-            <span class="tag-mono">[ PROTOCOL 01 // WHATSAPP CONVERSATION ]</span>
-            <h3 style="font-size: 18px; margin-top: 4px; font-weight: 600;">Raw Lifter Notes &rarr; Structured Verdicts</h3>
+        <div class="mac-window-titlebar">
+          <div class="mac-traffic-lights" aria-hidden="true">
+            <span class="mac-light mac-close"></span>
+            <span class="mac-light mac-min"></span>
+            <span class="mac-light mac-max"></span>
           </div>
-          <div class="scenario-pills">
-            <button class="scenario-btn active" data-scenario="stall" onclick="switchScenario('stall')">Stalled Squat (140kg)</button>
-            <button class="scenario-btn" data-scenario="injury" onclick="switchScenario('injury')">Acute Shoulder Pain</button>
-            <button class="scenario-btn" data-scenario="pr" onclick="switchScenario('pr')">Bench Press PR</button>
-          </div>
+          <span class="mac-window-title">WhatsApp Lifter Console</span>
+          <div class="mac-window-dummy"></div>
         </div>
-
-        <div class="chat-box">
-          <div id="chat-athlete-msg" class="chat-bubble chat-athlete">
-            squat 3x5 at 140 today, felt way harder than tuesday, rpe 9
-            <span class="chat-meta">17:42 &check;&check;</span>
-          </div>
-          <div id="chat-agent-msg" class="chat-bubble chat-agent">
-            <div class="chat-reply-header">
-              <span class="chat-verdict tag-watch">Squat — Stalled</span>
-              <span class="chat-meta">17:42</span>
+        <div class="showcase-body">
+          <div class="showcase-header">
+            <div>
+              <span class="mac-eyebrow">WhatsApp Conversation Protocol</span>
+              <h3 style="font-size: 18px; margin-top: 4px; font-weight: 600;">Raw Lifter Notes &rarr; Structured Verdicts</h3>
             </div>
-            <div class="chat-logged-line">&check; Logged: Squat 3x5 @ 140 kg RPE 9</div>
-            <div class="chat-body-line">Flat at 140 kg for 2 sessions with RPE climbing &mdash; same bar, more effort.</div>
+            <div class="scenario-pills">
+              <button class="scenario-btn active" data-scenario="stall" onclick="switchScenario('stall')">Stalled Squat (140kg)</button>
+              <button class="scenario-btn" data-scenario="injury" onclick="switchScenario('injury')">Acute Shoulder Pain</button>
+              <button class="scenario-btn" data-scenario="pr" onclick="switchScenario('pr')">Bench Press PR</button>
+            </div>
+          </div>
+
+          <div class="chat-box">
+            <div id="chat-athlete-msg" class="chat-bubble chat-athlete">
+              squat 3x5 at 140 today, felt way harder than tuesday, rpe 9
+              <span class="chat-meta">17:42 &check;&check;</span>
+            </div>
+            <div id="chat-agent-msg" class="chat-bubble chat-agent">
+              <div class="chat-reply-header">
+                <span class="chat-verdict tag-watch">Squat — Stalled</span>
+                <span class="chat-meta">17:42</span>
+              </div>
+              <div class="chat-logged-line">&check; Logged: Squat 3x5 @ 140 kg RPE 9</div>
+              <div class="chat-body-line">Flat at 140 kg for 2 sessions with RPE climbing &mdash; same bar, more effort.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -719,7 +756,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
     <!-- 3-Layers Section -->
     <section id="architecture" class="content-section">
       <div class="section-head">
-        <span class="tag-mono">[ PROTOCOL 02 // ARCHITECTURAL SEPARATION ]</span>
+        <span class="mac-eyebrow">Architectural Separation</span>
         <h2 class="section-title">The Core Separation <span class="serif">3 Layers</span></h2>
         <p class="section-desc">
           Messy input needs a language model; coaching advice real humans lift under must be provable, repeatable, and deterministic. The split is the whole design:
@@ -748,7 +785,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
     <!-- Authority Boundaries Section -->
     <section id="boundaries" class="content-section">
       <div class="section-head">
-        <span class="tag-mono">[ PROTOCOL 03 // SAFETY GOVERNANCE ]</span>
+        <span class="mac-eyebrow">Safety Governance &amp; Boundaries</span>
         <h2 class="section-title">Authority Boundaries <span class="serif">Who Decides What</span></h2>
         <p class="section-desc">
           Safety is enforced by immutable software boundaries, not system prompt guidelines. Neither the lifter nor the LLM has permission to override coaching gates.
@@ -810,7 +847,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
     <!-- Grounded in Meet Data Section -->
     <section id="benchmarks" class="content-section">
       <div class="section-head">
-        <span class="tag-mono">[ PROTOCOL 04 // EMPIRICAL VALIDATION ]</span>
+        <span class="mac-eyebrow">Empirical Ground Truth</span>
         <h2 class="section-title">Grounded in Meet Data <span class="serif">Top 300 All-Time</span></h2>
         <p class="section-desc">
           Validation bounds and plausibility checks are derived directly from OpenPowerlifting competition results (top 300 lifters by Dots, Raw+Wraps), recomputed by the test suite on every run so code cannot drift from empirical evidence.
@@ -840,7 +877,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
     <!-- Agentic product difference -->
     <section id="agentic" class="content-section">
       <div class="section-head">
-        <span class="tag-mono">[ PROTOCOL 05 // WHY THIS IS AN AGENT, NOT A CHAT WINDOW ]</span>
+        <span class="mac-eyebrow">WHY THIS IS AN AGENT, NOT A CHAT WINDOW</span>
         <h2 class="section-title">Conversation answers once. <span class="serif">This system keeps working.</span></h2>
         <p class="section-desc">
           A normal Claude or ChatGPT conversation can discuss a programme, but it does not own the squad workflow. Power AI observes new athlete events, preserves longitudinal state, proposes bounded actions, waits for authority, executes approved messages, and verifies delivery.
@@ -861,31 +898,36 @@ def render_landing(*, is_logged_in: bool = False) -> str:
     </section>
 
     <!-- Transparent Engineering Note -->
-    <div class="manifesto-panel">
-      <div class="tag-mono" style="margin-bottom: 10px;">[ MANIFESTO // ZERO TRACKERS &middot; PURE PYTHON ]</div>
-      <p>
-        <strong>Transparent Note:</strong> This is a student-built engineering project for a 20-athlete powerlifting squad, not a venture-backed commercial SaaS. Zero trackers, zero analytics cookies, and no runtime framework beyond Python and SQLite.
-      </p>
+    <div class="mac-note-wrap">
+      <div class="mac-note">
+        <span class="mac-note-badge">Pure Python &amp; SQLite</span>
+        <span class="mac-note-text">
+          <strong>Transparent Note:</strong> This is a student-built engineering project for a 20-athlete powerlifting squad, not a venture-backed commercial SaaS. Zero trackers, zero analytics cookies, and no runtime framework beyond Python and SQLite.
+        </span>
+      </div>
     </div>
 
-    <!-- Squad Deployment CTA Card -->
-    <div class="footer-hero">
-      <div class="footer-kicker">READY FOR SQUAD DEPLOYMENT</div>
-      <h2 class="footer-headline">
+    <!-- Squad Deployment CTA Section (Completely frameless, seamless Apple CTA) -->
+    <section class="mac-cta-section">
+      <div class="mac-eyebrow">Ready for Squad Deployment</div>
+      <h2 class="mac-cta-headline">
         The squad on WhatsApp.<br>
-        <span class="serif">The coach in control.</span>
+        <span class="mac-cta-accent">The coach in control.</span>
       </h2>
-      <a class="btn btn-primary btn-lg" href="{coach_link}">
-        <span>{coach_text}</span>
-        {arrow_svg}
-      </a>
-    </div>
+      <p class="mac-cta-sub">Deterministic rules, instant athlete triage, coach approval required for every message.</p>
+      <div class="mac-cta-actions">
+        <a class="btn btn-mac-primary btn-lg" href="{coach_link}">
+          <span>{coach_text}</span>
+          {arrow_svg}
+        </a>
+      </div>
+    </section>
   </main>
 
   <!-- Full-Width Seamless Footer -->
   <footer class="site-footer">
     <div class="wrapper">
-      <div class="footer-bottom" style="border-top: none; padding-top: 0;">
+      <div class="footer-bottom">
         <div>Training Log Agent &middot; Built for Powerlifting Teams</div>
         <div>
           <a href="/privacy">Privacy Policy</a> &middot;
@@ -913,6 +955,9 @@ def render_privacy() -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Power AI — Privacy Policy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -921,7 +966,13 @@ def render_privacy() -> str:
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand-link" href="/">
-        Power AI <span class="brand-badge">TRAINING LOG AGENT</span>
+        <div class="mac-app-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <span class="brand-name">Power AI</span>
+        <span class="brand-badge">Training Log Agent</span>
       </a>
       <nav class="site-nav">
         <a class="nav-link" href="/">&larr; Return to Home</a>
@@ -932,7 +983,7 @@ def render_privacy() -> str:
 
   <div class="wrapper">
     <div class="legal-container">
-      <div class="tag-mono">[ LEGAL // TRANSPARENCY &amp; DATA PRIVACY ]</div>
+      <div class="mac-eyebrow">Data Privacy &amp; Encryption Boundaries</div>
       <h1>Privacy Policy</h1>
       <p>Calendar connection is optional. The service reads event start/end times and usable locations only to plan travel and training. It does not retain event titles, descriptions, attendees or meeting content.</p>
       <p>OAuth tokens and saved places are encrypted at rest with Fernet cryptography when the calendar integration is configured. Confirmed workout references are stored until the athlete asks to delete them. Calendar data is never sold and is never sent to the language model.</p>
@@ -955,6 +1006,9 @@ def render_terms() -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Power AI — Terms of Service</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -963,7 +1017,13 @@ def render_terms() -> str:
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand-link" href="/">
-        Power AI <span class="brand-badge">TRAINING LOG AGENT</span>
+        <div class="mac-app-icon" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <span class="brand-name">Power AI</span>
+        <span class="brand-badge">Training Log Agent</span>
       </a>
       <nav class="site-nav">
         <a class="nav-link" href="/">&larr; Return to Home</a>
@@ -974,7 +1034,7 @@ def render_terms() -> str:
 
   <div class="wrapper">
     <div class="legal-container">
-      <div class="tag-mono">[ LEGAL // BOUNDARIES &amp; MEDICAL DISCLAIMER ]</div>
+      <div class="mac-eyebrow">Medical Boundaries &amp; Liability</div>
       <h1>Terms of Service</h1>
       <p>This service is a training-log and planning aid, not medical care or clinical diagnostic software. Athletes remain responsible for confirming calendar changes and following medical advice from their coach, clinician, or registered dietitian.</p>
       <p>Injury flags immediately suppress all load progression advice. The agent never prescribes load to an injured athlete; clearance requires explicit authorization by a named human coach or medical practitioner.</p>

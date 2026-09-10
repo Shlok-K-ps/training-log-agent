@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 @view-transition {
   navigation: auto;
@@ -78,10 +79,10 @@
   --unseen-blush: #6AA8FF;
   --unseen-sand: #F4F5F7;
 
-  /* Typography: Apple system fonts found on Mac */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --font-serif: "New York", -apple-system-ui-serif, "Iowan Old Style", "Apple Garamond", Georgia, serif;
+  /* Typography: Apple San Francisco typography with Inter fallback for non-Mac browsers */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", "Inter", -system-ui, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+  --font-serif: "New York", -apple-system-ui-serif, Georgia, serif;
 
   /* Motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
