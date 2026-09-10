@@ -1,8 +1,9 @@
-# Training-Log Agent
+# Power AI — Training-Log Agent
 
-GitHub: <https://github.com/Shlok-K-ps/training-log-agent>
+GitHub: <https://github.com/Shlok-K-ps/training-log-agent>  
+Live: <https://training-log-agent.onrender.com/>
 
-**A coaching agent for one coach and twenty athletes.**
+**A deterministic powerlifting coaching agent for one coach and twenty athletes.**
 
 A powerlifting coach's real job is not writing programs. It is reading twenty
 WhatsApp messages a day, remembering who is hurt, noticing who has gone quiet,

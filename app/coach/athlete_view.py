@@ -355,35 +355,43 @@ def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:
         f'fill="var(--faint)">{v:g}</text>'
         for v in (lo, (lo + hi) / 2, hi)
     )
+    gradient_id = f"grad-{escape(lift)}"
+    defs = (
+        f'<defs><linearGradient id="{gradient_id}" x1="0" y1="0" x2="1" y2="0">'
+        '<stop offset="0%" stop-color="var(--accent-cyan)" stop-opacity="0.75"/>'
+        '<stop offset="100%" stop-color="#ffffff" stop-opacity="0.95"/>'
+        '</linearGradient></defs>'
+    )
     path = " ".join(
         f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}"
         for i, (_, v) in enumerate(points)
     )
     dots = "".join(
-        f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="4.5" fill="var(--card)" '
-        f'stroke="var(--meet)" stroke-width="2"><title>{escape(d)} · {v:g} kg</title></circle>'
+        f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="4" fill="var(--surface)" '
+        f'stroke="var(--accent-cyan)" stroke-width="2"><title>{escape(d)} · {v:g} kg</title></circle>'
         for i, (d, v) in enumerate(points)
     )
     last_d, last_v = points[-1]
+    active_dot = f'<circle cx="{x(len(points) - 1):.1f}" cy="{y(last_v):.1f}" r="5" fill="#ffffff" stroke="var(--accent-cyan)" stroke-width="2.5"/>'
     label = (
-        f'<text x="{x(len(points) - 1) + 9:.1f}" y="{y(last_v) + 4:.1f}" font-size="12" '
-        f'font-weight="600" fill="var(--ink)">{last_v:g} kg</text>'
+        f'<text x="{x(len(points) - 1) + 11:.1f}" y="{y(last_v) + 4:.1f}" font-size="12" '
+        f'font-family="var(--font-mono)" font-weight="700" fill="#ffffff">{last_v:g} kg</text>'
     )
     axis = (
-        f'<text x="{pad_l}" y="{h - 6}" font-size="11" fill="var(--faint)">{escape(points[0][0])}</text>'
-        f'<text x="{w - pad_r}" y="{h - 6}" text-anchor="end" font-size="11" '
+        f'<text x="{pad_l}" y="{h - 6}" font-size="11" font-family="var(--font-mono)" fill="var(--faint)">{escape(points[0][0])}</text>'
+        f'<text x="{w - pad_r}" y="{h - 6}" text-anchor="end" font-size="11" font-family="var(--font-mono)" '
         f'fill="var(--faint)">{escape(last_d)}</text>'
     )
     return (
-        f'<div class="chart"><h3>{escape(lift.title())}</h3>'
-        f'<p class="cap">Top set per session, {len(points)} sessions</p>'
+        f'<div class="chart"><h3><span class="sym">📈</span> {escape(lift.title())}</h3>'
+        f'<p class="cap">Top set per session &middot; {len(points)} sessions recorded</p>'
         f'<svg viewBox="0 0 {w} {h}" role="img" '
         f'aria-label="{escape(lift)} top set over {len(points)} sessions, '
         f'latest {last_v:g} kilograms">'
-        f"{grid}"
-        f'<path d="{path}" fill="none" stroke="var(--meet)" stroke-width="2" '
+        f"{defs}{grid}"
+        f'<path d="{path}" fill="none" stroke="url(#{gradient_id})" stroke-width="2.5" '
         f'stroke-linejoin="round" stroke-linecap="round"/>'
-        f"{dots}{label}{axis}</svg></div>"
+        f"{dots}{active_dot}{label}{axis}</svg></div>"
     )
 
 
