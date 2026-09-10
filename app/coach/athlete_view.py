@@ -454,22 +454,32 @@ def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:
     )
     gradient_id = f"grad-{escape(lift)}"
     defs = (
-        f'<defs><linearGradient id="{gradient_id}" x1="0" y1="0" x2="1" y2="0">'
-        '<stop offset="0%" stop-color="var(--accent-cyan)" stop-opacity="0.75"/>'
-        '<stop offset="100%" stop-color="#ffffff" stop-opacity="0.95"/>'
-        '</linearGradient></defs>'
+        f'<defs>'
+        f'<linearGradient id="{gradient_id}" x1="0" y1="0" x2="1" y2="0">'
+        '<stop offset="0%" stop-color="var(--gradient-color-1)"/>'
+        '<stop offset="50%" stop-color="var(--gradient-color-2)"/>'
+        '<stop offset="100%" stop-color="var(--gradient-color-3)"/>'
+        '</linearGradient>'
+        f'<filter id="glow-{gradient_id}" x="-40%" y="-40%" width="180%" height="180%">'
+        '<feGaussianBlur in="SourceGraphic" stdDeviation="3.5" result="blur"/>'
+        '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>'
+        '</filter>'
+        '</defs>'
     )
     path = " ".join(
         f"{'M' if i == 0 else 'L'}{x(i):.1f},{y(v):.1f}"
         for i, (_, v) in enumerate(points)
     )
     dots = "".join(
-        f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="4" fill="var(--surface)" '
+        f'<circle cx="{x(i):.1f}" cy="{y(v):.1f}" r="3.5" fill="var(--surface)" '
         f'stroke="var(--accent-cyan)" stroke-width="2"><title>{escape(d)} · {v:g} kg</title></circle>'
         for i, (d, v) in enumerate(points)
     )
     last_d, last_v = points[-1]
-    active_dot = f'<circle cx="{x(len(points) - 1):.1f}" cy="{y(last_v):.1f}" r="5" fill="#ffffff" stroke="var(--accent-cyan)" stroke-width="2.5"/>'
+    active_dot = (
+        f'<circle cx="{x(len(points) - 1):.1f}" cy="{y(last_v):.1f}" r="5.5" fill="#ffffff" '
+        f'stroke="var(--gradient-color-1)" stroke-width="2.5" filter="url(#glow-{gradient_id})"/>'
+    )
     label = (
         f'<text x="{x(len(points) - 1) + 11:.1f}" y="{y(last_v) + 4:.1f}" font-size="12" '
         f'font-family="var(--font-mono)" font-weight="700" fill="#ffffff">{last_v:g} kg</text>'
@@ -480,7 +490,7 @@ def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:
         f'fill="var(--faint)">{escape(last_d)}</text>'
     )
     return (
-        f'<div class="chart"><h3><span class="sym">📈</span> {escape(lift.title())}</h3>'
+        f'<div class="chart"><h3>{escape(lift.title())}</h3>'
         f'<p class="cap">Top set per session &middot; {len(points)} sessions recorded</p>'
         f'<svg viewBox="0 0 {w} {h}" role="img" '
         f'aria-label="{escape(lift)} top set over {len(points)} sessions, '
@@ -505,20 +515,20 @@ def render_athlete(
         banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
 
     tiles = [
-        ("Last logged", detail.last_activity or "never", False, "◷"),
-        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in", detail.readiness_band in {"orange", "red"}, "⚡"),
-        ("Sleep", f"{detail.checkin.sleep_hours:g} h" if detail.checkin and detail.checkin.sleep_hours is not None else "not reported", False, "☾"),
-        ("Phase", detail.phase, False, "◈"),
+        ("Last logged", detail.last_activity or "never", False, ""),
+        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in", detail.readiness_band in {"orange", "red"}, ""),
+        ("Sleep", f"{detail.checkin.sleep_hours:g} h" if detail.checkin and detail.checkin.sleep_hours is not None else "not reported", False, ""),
+        ("Phase", detail.phase, False, ""),
     ]
     if detail.injured:
         days = f"{detail.injury_days_open}d" if detail.injury_days_open is not None else "open"
-        tiles.append(("Injury", days, True, "⚠"))
+        tiles.append(("Injury", days, True, ""))
     if any(f.kind == "silent" for f in detail.roster.flags):
-        tiles.append(("Silent", f"{detail.roster.days_silent}d", True, "◷"))
+        tiles.append(("Silent", f"{detail.roster.days_silent}d", True, ""))
     if detail.roster.weeks_to_meet is not None:
-        tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False, "✦"))
+        tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False, ""))
     tile_html = "".join(
-        f'<div class="tile"><div class="k"><span class="sym">{sym}</span> {escape(k)}</div>'
+        f'<div class="tile"><div class="k">{escape(k)}</div>'
         f'<div class="v{" warn" if warn else ""}">{escape(v)}</div></div>'
         for k, v, warn, sym in tiles
     )
@@ -554,12 +564,17 @@ def render_athlete(
 
     compose = (
         '<div class="context-card compose coach-draft">'
-        '<div class="draft-state"><span class="sym">◈</span> Prepared · requires coach approval</div>'
+        '<div class="draft-state">Prepared · requires coach approval</div>'
         '<h2>Message for the athlete</h2>'
         '<form method="post" action="/coach/athlete/'
         f'{escape(detail.athlete_id)}/message">'
-        f'<textarea name="body" maxlength="1400">{escape(suggested)}</textarea>'
-        '<div class="btns"><button class="approve" type="submit">Approve and queue</button></div>'
+        f'<textarea name="body" id="draft-composer" maxlength="1400" '
+        f'oninput="document.getElementById(\'live-preview-bubble\').textContent=this.value">{escape(suggested)}</textarea>'
+        '<div class="draft-preview-wrap" style="margin: 12px 0;">'
+        '<div class="tag-mono" style="font-size:10px;margin-bottom:6px;">LIVE WHATSAPP PREVIEW</div>'
+        f'<div id="live-preview-bubble" class="chat-bubble chat-agent" style="max-width:100%;">{escape(suggested)}</div>'
+        '</div>'
+        '<div class="btns"><button class="btn btn-primary" style="width:100%;" type="submit">Approve and queue</button></div>'
         '<p class="hint">Built from this athlete\'s record and current trend. Edit freely. '
         "The exact approved wording is what will be sent.</p>"
         "</form></div>"
@@ -583,10 +598,10 @@ def render_athlete(
     ])
     reasons = "".join(f"<li>{escape(reason)}</li>" for reason in detail.readiness_reasons)
     recovery_panel = (
-        '<div class="context-card"><h2><span class="sym">⚡</span> Recovery today</h2>' + recovery
+        '<div class="context-card"><h2>Recovery today</h2>' + recovery
         + (f'<ul class="recovery-reasons">{reasons}</ul>' if reasons else "") + '</div>'
     )
-    program_panel = '<div class="context-card"><h2><span class="sym">⚙</span> Programming</h2>' + facts([
+    program_panel = '<div class="context-card"><h2>Programming</h2>' + facts([
         ("Method", str(detail.program.get("methodology", "")).replace("_", " ")),
         ("Suggested starting method", detail.suggested_method),
         ("Why", detail.suggested_method_reason),
@@ -606,7 +621,7 @@ def render_athlete(
         f'{detail.goal_pace.target_kg:g} kg by {escape(detail.goal_pace.target_date)}.</div>'
         if detail.goal_pace else ""
     ) + '</div>'
-    schedule_panel = '<div class="context-card"><h2><span class="sym">◷</span> Schedule & logistics</h2>' + facts([
+    schedule_panel = '<div class="context-card"><h2>Schedule & logistics</h2>' + facts([
         ("Calendar", "Connected" if detail.calendar_connected else "Not connected"),
         ("Timezone", detail.schedule.get("timezone")),
         ("Morning check-in", detail.schedule.get("morning_checkin_time")),
@@ -614,7 +629,7 @@ def render_athlete(
         ("Bedtime", detail.schedule.get("bedtime")),
     ]) + '</div>'
     supplement_text = "; ".join(detail.supplements) if detail.supplements else None
-    nutrition_panel = '<div class="context-card"><h2><span class="sym">◈</span> Nutrition & supplements</h2>' + facts([
+    nutrition_panel = '<div class="context-card"><h2>Nutrition & supplements</h2>' + facts([
         ("Diet", detail.nutrition.get("diet_style")),
         ("Foods available", detail.nutrition.get("foods_available")),
         ("Allergies", detail.nutrition.get("allergies")),
@@ -625,15 +640,22 @@ def render_athlete(
     status = " · ".join(f.detail for f in detail.roster.flags) or "No active flags — current trend is within policy."
     body = (
         f"{banner}<p class='back'><a href='/coach/athletes'>← All athletes / Roster</a></p>"
-        f'<div class="status-strip"><strong><span class="sym">●</span> Current status:</strong> {escape(status)}</div>'
+        f'<div class="status-strip"><strong>Current status:</strong> {escape(status)}</div>'
         f'{_injury_clearance_panel(detail)}{_injury_pivot_panel(detail)}'
         f'<div class="grid">{tile_html}</div>'
         '<div class="profile-grid"><div>'
         f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
         f"{verdict_table}{charts}{log}</div>{compose}</div>"
     )
+    bucket_tints = {
+        "needs_you": ":root { --gradient-color-1: #B8323A; --gradient-color-2: #5B2A86; --gradient-color-3: #15171C; }",
+        "watch": ":root { --gradient-color-1: #B8860B; --gradient-color-2: #5B2A86; --gradient-color-3: #15171C; }",
+        "meet_prep": ":root { --gradient-color-1: #1D3FA8; --gradient-color-2: #5B2A86; --gradient-color-3: #15171C; }",
+        "fine": ":root { --gradient-color-1: #1E6B48; --gradient-color-2: #1D3FA8; --gradient-color-3: #15171C; }",
+    }
+    tint_style = bucket_tints.get(detail.roster.bucket.value, "") + _ATHLETE_STYLE
     return coach_frame(
         body, active="athletes", coach=coach, title=detail.display_name,
         subtitle=f"{detail.athlete_id} · complete training, recovery and plan history",
-        today=detail.reviewed_on.isoformat(), extra_style=_ATHLETE_STYLE,
+        today=detail.reviewed_on.isoformat(), extra_style=tint_style,
     )

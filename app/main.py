@@ -294,13 +294,13 @@ def _render_console(token: str, message: tuple[str, str] | None) -> str:
 
 
 @app.get("/coach/athletes", response_class=HTMLResponse)
-async def coach_athletes(request: Request) -> Response:
+async def coach_athletes(request: Request, token: str = "") -> Response:
     """Searchable squad directory and the entry point to each athlete workspace."""
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
+    effective_token = token.strip() if token else request.cookies.get(COOKIE_NAME, "").strip()
+    if not effective_token:
         return RedirectResponse(url="/coach/login", status_code=303)
     try:
-        coach_auth.check(token)
+        coach_auth.check(effective_token)
     except coach_auth.CoachAuthError as exc:
         return HTMLResponse(render_login(error=str(exc)), status_code=403)
     return HTMLResponse(await run_in_threadpool(_render_athlete_directory, None))

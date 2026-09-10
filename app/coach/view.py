@@ -16,1093 +16,7 @@ from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage,
 # Base CSS: Powerlifting visual identity (calibrated plates palette, mobile-first)
 # Red 25kg (Action/Deload), Yellow 15kg (Watch/Stall), Blue 20kg (Meet/Nav), Green 10kg (On track)
 # ------------------------------------------------------------------------------
-_BASE_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Newsreader:ital,opsz,wght@1,6..72,300;1,6..72,400;1,6..72,500&family=JetBrains+Mono:wght@400;500;600&display=swap');
-
-:root {
-  --bg: #070709;
-  --surface: #0c0c10;
-  --surface-raised: #111116;
-  --surface-inset: #08080b;
-  --card: #0f0f14;
-  --card-hover: #15151c;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.18);
-  --ink: #ffffff;
-  --ink-secondary: #e2e8f0;
-  --ink-soft: #94a3b8;
-  --ink-faint: #64748b;
-  --faint: #64748b;
-  --soft: #cbd5e1;
-  
-  --accent-cyan: #38bdf8;
-  --accent-pearl: #f8fafc;
-  --unseen-blush: #38bdf8;
-  --unseen-sand: #e2e8f0;
-  
-  /* Competition Calibrated Plates - Dark Precision */
-  --plate-red: #f43f5e;
-  --plate-red-bg: rgba(244, 63, 94, 0.09);
-  --plate-red-border: rgba(244, 63, 94, 0.25);
-  --plate-red-text: #fda4af;
-  --act: #f43f5e;
-
-  --plate-yellow: #fbbf24;
-  --plate-yellow-bg: rgba(251, 191, 36, 0.09);
-  --plate-yellow-border: rgba(251, 191, 36, 0.25);
-  --plate-yellow-text: #fde68a;
-  --watch: #fbbf24;
-
-  --plate-blue: #38bdf8;
-  --plate-blue-bg: rgba(56, 189, 248, 0.09);
-  --plate-blue-border: rgba(56, 189, 248, 0.25);
-  --plate-blue-text: #bae6fd;
-  --meet: #38bdf8;
-
-  --plate-green: #34d399;
-  --plate-green-bg: rgba(52, 211, 153, 0.09);
-  --plate-green-border: rgba(52, 211, 153, 0.25);
-  --plate-green-text: #a7f3d0;
-  --fine: #34d399;
-
-  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-serif: 'Newsreader', 'Saol Display', Georgia, serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-*, *::before, *::after { box-sizing: border-box; }
-
-html {
-  background: var(--bg);
-  color: var(--ink);
-  font-size: 15px;
-  -webkit-text-size-adjust: 100%;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;
-}
-
-.unseen-ambient {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100vw;
-  height: 650px;
-  background: radial-gradient(ellipse 65% 45% at 50% -10%, rgba(255, 255, 255, 0.045) 0%, rgba(56, 189, 248, 0.02) 40%, transparent 80%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-.wrap {
-  position: relative;
-  z-index: 1;
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 24px 20px 80px;
-}
-
-.wrap-wide {
-  position: relative;
-  z-index: 1;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 28px 28px 80px;
-}
-
-/* Authenticated Workspace Shell */
-.app-shell {
-  position: relative;
-  z-index: 1;
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 24px 24px 80px;
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  gap: 36px;
-}
-
-/* Side Nav */
-.side-nav {
-  position: sticky;
-  top: 24px;
-  align-self: start;
-  min-height: calc(100vh - 48px);
-  display: flex;
-  flex-direction: column;
-  padding: 8px 0;
-}
-
-.side-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: 0.04em;
-  color: var(--ink);
-  text-decoration: none;
-  margin-bottom: 32px;
-  text-transform: uppercase;
-}
-
-.brand-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--border-strong);
-  color: var(--accent-cyan);
-  padding: 3px 8px;
-  border-radius: 9999px;
-  font-family: var(--font-mono);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.brand-badge .sym {
-  font-size: 11px;
-}
-
-.side-links {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.side-links a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 9px 14px;
-  border-radius: 9999px;
-  color: var(--ink-soft);
-  text-decoration: none;
-  font-size: 13.5px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
-}
-
-.side-links a span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.side-links a .sym {
-  font-size: 13px;
-  color: var(--ink-faint);
-  transition: color 0.2s ease;
-}
-
-.side-links a:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--ink);
-  border-color: var(--border);
-}
-
-.side-links a:hover .sym {
-  color: var(--accent-cyan);
-}
-
-.side-links a.active {
-  background: #ffffff;
-  color: #070709;
-  border-color: #ffffff;
-  font-weight: 600;
-}
-
-.side-links a.active .sym {
-  color: #070709;
-}
-
-.nav-count {
-  min-width: 20px;
-  text-align: center;
-  padding: 1px 6px;
-  border-radius: 9999px;
-  background: var(--plate-red);
-  color: #ffffff;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 11px;
-}
-
-.side-links a.active .nav-count {
-  background: #070709;
-  color: #ffffff;
-}
-
-.side-meta {
-  margin-top: auto;
-  padding: 20px 10px 0;
-  font-size: 12px;
-  color: var(--ink-faint);
-  border-top: 1px solid var(--border);
-  line-height: 1.5;
-}
-
-.side-meta strong {
-  color: var(--ink-soft);
-}
-
-.side-meta a {
-  color: var(--plate-red);
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.side-meta a:hover {
-  text-decoration: underline;
-}
-
-/* Workspace Main */
-.workspace {
-  min-width: 0;
-}
-
-.workspace-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 20px;
-  padding: 0 0 20px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 28px;
-}
-
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--accent-cyan);
-  margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.workspace-head h1 {
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0;
-  line-height: 1.2;
-}
-
-.workspace-sub {
-  color: var(--ink-soft);
-  font-size: 14px;
-  margin: 6px 0 0;
-  max-width: 680px;
-}
-
-.workspace-date {
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-faint);
-  letter-spacing: 0.05em;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.workspace-date .sym {
-  color: var(--accent-cyan);
-}
-
-/* Stat Grid */
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 28px;
-}
-
-.stat {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 18px;
-  transition: all 0.2s ease;
-}
-
-.stat:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-}
-
-.stat strong {
-  display: block;
-  font-size: 30px;
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  color: var(--ink-faint);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-weight: 600;
-}
-
-.stat.alert strong { color: var(--plate-red); }
-.stat.alert span { color: var(--plate-red-text); }
-
-.stat.ready strong { color: var(--plate-green); }
-.stat.ready span { color: var(--plate-green-text); }
-
-/* Dashboard Grid & Panels */
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
-  gap: 24px;
-}
-
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 20px 22px;
-  margin-bottom: 16px;
-}
-
-.panel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.panel-head h2 {
-  margin: 0;
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.panel-head h2 .sym {
-  color: var(--accent-cyan);
-}
-
-.panel-head a {
-  font-size: 12.5px;
-  color: var(--accent-cyan);
-  text-decoration: none;
-  font-weight: 500;
-  transition: opacity 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.panel-head a:hover {
-  opacity: 0.8;
-  text-decoration: underline;
-}
-
-.athlete-line {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(130px, 0.8fr) auto;
-  gap: 16px;
-  align-items: center;
-  padding: 12px 0;
-  border-top: 1px solid var(--border);
-}
-
-.athlete-line:first-of-type {
-  border-top: 0;
-}
-
-.athlete-name {
-  color: var(--ink);
-  font-weight: 600;
-  text-decoration: none;
-  font-size: 14.5px;
-}
-
-.athlete-name:hover {
-  color: var(--accent-cyan);
-}
-
-.muted {
-  color: var(--ink-faint);
-  font-size: 12.5px;
-}
-
-.signal {
-  font-size: 13px;
-  color: var(--ink-soft);
-}
-
-.readiness-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border-radius: 9999px;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  font-size: 11px;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.readiness-pill .dot {
-  font-size: 9px;
-}
-
-.readiness-pill.green {
-  color: var(--plate-green-text);
-  background: var(--plate-green-bg);
-  border-color: var(--plate-green-border);
-}
-
-.readiness-pill.yellow, .readiness-pill.orange {
-  color: var(--plate-yellow-text);
-  background: var(--plate-yellow-bg);
-  border-color: var(--plate-yellow-border);
-}
-
-.readiness-pill.red {
-  color: var(--plate-red-text);
-  background: var(--plate-red-bg);
-  border-color: var(--plate-red-border);
-}
-
-.flow-step {
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  gap: 12px;
-  margin: 14px 0;
-}
-
-.flow-step b {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--accent-cyan);
-}
-
-.flow-step strong {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13.5px;
-  color: var(--ink);
-}
-
-.flow-step strong .sym {
-  color: var(--accent-cyan);
-}
-
-.flow-step p {
-  margin: 3px 0 0;
-  font-size: 12.5px;
-  color: var(--ink-faint);
-  line-height: 1.5;
-}
-
-/* Directory Tools & Table */
-.directory-tools {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.directory-tools input {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  color: var(--ink);
-  padding: 10px 18px;
-  font-family: inherit;
-  font-size: 13.5px;
-  flex: 1;
-}
-
-.directory-tools input:focus {
-  outline: none;
-  border-color: var(--accent-cyan);
-}
-
-.directory-tools select {
-  padding: 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  background: var(--surface);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 13px;
-}
-
-.directory {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
-}
-
-.directory-row {
-  display: grid;
-  grid-template-columns: minmax(150px, 1.2fr) minmax(140px, 1fr) 95px 105px;
-  gap: 14px;
-  align-items: center;
-  padding: 14px 18px;
-  border-top: 1px solid var(--border);
-}
-
-.directory-row:first-child {
-  border-top: 0;
-}
-
-.directory-head {
-  background: var(--surface-inset);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-family: var(--font-mono);
-  color: var(--ink-faint);
-}
-
-.directory-head span {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.directory-head span .sym {
-  color: var(--accent-cyan);
-}
-
-/* Review / Outbox Message Cards */
-.message-card {
-  border-left-width: 4px;
-  padding: 0;
-  overflow: hidden;
-  border-radius: 14px;
-  margin-bottom: 16px;
-}
-
-.message-card.needs_you { border-left-color: var(--plate-red); }
-.message-card.watch { border-left-color: var(--plate-yellow); }
-.message-card.meet_prep { border-left-color: var(--plate-blue); }
-.message-card.fine { border-left-color: var(--plate-green); }
-
-.message-card .panel-head {
-  padding: 16px 18px 0;
-  margin-bottom: 14px;
-}
-
-.message-card form {
-  padding: 0 18px 18px;
-  display: block;
-}
-
-.message-card form textarea {
-  width: 100%;
-  min-height: 110px;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  color: var(--ink);
-  font-family: inherit;
-  padding: 10px 12px;
-  font-size: 13.5px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.message-card form textarea:focus {
-  outline: none;
-  border-color: var(--accent-cyan);
-}
-
-.evidence-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  background: var(--surface-inset);
-  padding: 12px 18px;
-  margin: 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.evidence-grid span, .draft-label {
-  display: block;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-family: var(--font-mono);
-  color: var(--ink-faint);
-  font-weight: 600;
-}
-
-.evidence-grid strong {
-  display: block;
-  font-size: 13px;
-  margin-top: 4px;
-  line-height: 1.35;
-  color: var(--ink-secondary);
-}
-
-.evidence-reason {
-  margin: 0;
-  padding: 12px 18px;
-  font-size: 13px;
-  color: var(--ink-soft);
-}
-
-.draft-label {
-  margin: 12px 0 6px;
-}
-
-.review-note {
-  padding: 14px 18px;
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent-cyan);
-  background: var(--surface);
-  color: var(--ink-secondary);
-  border-radius: 12px;
-  margin-bottom: 24px;
-  font-size: 13.5px;
-  line-height: 1.5;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.review-note .sym {
-  color: var(--accent-cyan);
-  font-size: 16px;
-  margin-top: 2px;
-}
-
-.review-note strong {
-  color: var(--ink);
-}
-
-/* Buttons */
-button {
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s ease;
-}
-
-button.approve, .btn-primary {
-  background: #ffffff;
-  color: #070709;
-  border: 1px solid #ffffff;
-  border-radius: 9999px;
-  font-weight: 600;
-  font-size: 13.5px;
-  padding: 9px 18px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-button.approve:hover, .btn-primary:hover {
-  opacity: 0.92;
-  transform: translateY(-1px);
-}
-
-button.skip, .btn-secondary {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--ink-soft);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  font-weight: 500;
-  font-size: 13.5px;
-  padding: 9px 18px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-button.skip:hover, .btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--ink);
-  border-color: var(--border-strong);
-}
-
-/* Clear Injury Form */
-.card form {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.card form input[type="text"] {
-  flex: 1;
-  min-width: 200px;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  color: var(--ink);
-  padding: 8px 14px;
-  font-size: 13px;
-}
-
-.card form input[type="text"]:focus {
-  outline: none;
-  border-color: var(--accent-cyan);
-}
-
-.card form button {
-  background: var(--plate-red);
-  color: #ffffff;
-  border: none;
-  border-radius: 9999px;
-  padding: 8px 16px;
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-/* Register & Demo Components */
-.register form {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.register input[type="text"], .register input[type="number"],
-.register input[type="date"], .register select {
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  color: var(--ink);
-  padding: 9px 14px;
-  font-size: 13.5px;
-}
-
-.register input:focus, .register select:focus {
-  outline: none;
-  border-color: var(--accent-cyan);
-}
-
-.register button {
-  background: #ffffff;
-  color: #070709;
-  border: 1px solid #ffffff;
-  border-radius: 9999px;
-  padding: 9px 18px;
-  font-weight: 600;
-  font-size: 13.5px;
-}
-
-.register .hint {
-  font-size: 12px;
-  color: var(--ink-faint);
-  margin: 10px 0 0;
-}
-
-.onboarding {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  margin-top: 12px;
-}
-.onboarding summary { cursor: pointer; padding: 16px 18px; font-weight: 600; list-style: none; }
-.onboarding summary::-webkit-details-marker { display: none; }
-.onboarding summary:after { content: '+'; float: right; color: var(--accent-cyan); }
-.onboarding[open] summary:after { content: '−'; }
-.onboarding .onboarding-form { display: block; padding: 0 18px 18px; margin: 0; }
-.onboarding-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
-.onboarding-grid label { font: 600 10.5px var(--font-mono); color: var(--ink-faint); text-transform: uppercase; letter-spacing: .05em; }
-.onboarding-grid input, .onboarding-grid select { display: block; width: 100%; margin-top: 5px; border-radius: 10px; }
-.onboarding-wide { grid-column: 1 / -1; }
-.date-fields { display: grid; grid-template-columns: .8fr 1.35fr 1fr; gap: 7px; margin-top: 5px; }
-.date-fields select { margin-top: 0; min-width: 0; padding-left: 10px; padding-right: 8px; }
-.clearance-link { display: inline-flex; align-items: center; gap: 7px; color: var(--plate-red-text); border: 1px solid var(--plate-red-border); background: var(--plate-red-bg); padding: 8px 13px; border-radius: 9999px; text-decoration: none; font-size: 12.5px; font-weight: 700; }
-.clearance-link:hover { border-color: var(--plate-red); color: #fff; }
-
-.demo {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 18px;
-  margin-bottom: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-
-.demo p {
-  margin: 0;
-  font-size: 13.5px;
-  color: var(--ink-soft);
-}
-
-.demo button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  color: var(--ink);
-  border-radius: 9999px;
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.demo button:hover {
-  border-color: var(--border-strong);
-}
-
-/* Card & Who */
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 20px;
-  margin-bottom: 12px;
-  transition: border-color 0.2s ease;
-}
-
-.card:hover {
-  border-color: var(--border-strong);
-}
-
-.card.needs_you { border-left: 4px solid var(--plate-red); }
-.card.watch { border-left: 4px solid var(--plate-yellow); }
-.card.meet_prep { border-left: 4px solid var(--plate-blue); }
-.card.fine { border-left: 4px solid var(--plate-green); }
-
-.who {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.who a.name {
-  font-weight: 700;
-  font-size: 16px;
-  color: var(--ink);
-  text-decoration: none;
-}
-
-.who a.name:hover {
-  color: var(--accent-cyan);
-}
-
-.id {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--ink-faint);
-}
-
-ul {
-  margin: 8px 0 0 0;
-  padding-left: 20px;
-}
-
-li {
-  font-size: 13.5px;
-  color: var(--ink-soft);
-  margin-bottom: 4px;
-}
-
-li.act {
-  color: var(--plate-red-text);
-  font-weight: 500;
-}
-
-/* Badges */
-.badge {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 9999px;
-  margin-left: 8px;
-  vertical-align: middle;
-}
-
-.badge-red {
-  color: var(--plate-red-text);
-  background: var(--plate-red-bg);
-  border: 1px solid var(--plate-red-border);
-}
-
-.badge-yellow {
-  color: var(--plate-yellow-text);
-  background: var(--plate-yellow-bg);
-  border: 1px solid var(--plate-yellow-border);
-}
-
-.badge-blue {
-  color: var(--plate-blue-text);
-  background: var(--plate-blue-bg);
-  border: 1px solid var(--plate-blue-border);
-}
-
-/* Alerts */
-.msg {
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 13.5px;
-  margin-bottom: 20px;
-}
-
-.msg.ok {
-  background: var(--plate-green-bg);
-  border: 1px solid var(--plate-green-border);
-  color: var(--plate-green-text);
-}
-
-.msg.err {
-  background: var(--plate-red-bg);
-  border: 1px solid var(--plate-red-border);
-  color: var(--plate-red-text);
-}
-
-/* Login Box */
-.login-box {
-  max-width: 440px;
-  margin: 60px auto;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 36px 30px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-}
-
-.login-box h1 {
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin: 0 0 8px 0;
-}
-
-.login-box p {
-  color: var(--ink-soft);
-  font-size: 14px;
-  margin: 0 0 24px;
-  line-height: 1.5;
-}
-
-.login-box form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.login-box input[type="password"], .login-box input[type="text"] {
-  width: 100%;
-  padding: 10px 16px;
-  background: var(--surface-inset);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-  color: var(--ink);
-}
-
-.login-box input:focus {
-  outline: none;
-  border-color: var(--accent-cyan);
-}
-
-.login-box button {
-  width: 100%;
-  padding: 12px;
-  font-size: 14px;
-}
-
-.back-link {
-  display: inline-block;
-  font-size: 13px;
-  color: var(--accent-cyan);
-  text-decoration: none;
-}
-
-.back-link:hover {
-  text-decoration: underline;
-}
-
-/* Footer */
-footer {
-  border-top: 1px solid var(--border);
-  padding-top: 24px;
-  margin-top: 48px;
-  font-size: 12.5px;
-  color: var(--faint);
-  line-height: 1.6;
-}
-
-@media(max-width:860px){
-  .app-shell { display: block; padding: 16px 16px 60px; }
-  .side-nav { position: static; min-height: 0; padding: 0; margin-bottom: 24px; }
-  .side-brand { margin-bottom: 14px; }
-  .side-links { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
-  .side-links a { white-space: nowrap; }
-  .side-meta { display: none; }
-  .dashboard-grid { grid-template-columns: 1fr; }
-  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .directory-row { grid-template-columns: minmax(135px, 1fr) minmax(120px, 1fr) 80px; }
-  .directory-row > *:nth-child(4) { display: none; }
-}
-
-@media(max-width:540px){
-  .workspace-head { align-items: flex-start; }
-  .workspace-head h1 { font-size: 23px; }
-  .workspace-date { display: none; }
-  .athlete-line { grid-template-columns: 1fr auto; }
-  .athlete-line .signal { grid-column: 1 / -1; }
-  .directory-row { grid-template-columns: 1fr auto; }
-  .directory-row > *:nth-child(2) { grid-column: 1 / -1; }
-  .directory-head { display: none; }
-  .message-evidence, .evidence-grid { grid-template-columns: 1fr; }
-  .onboarding-grid { grid-template-columns: 1fr; }
-  .onboarding-wide { grid-column: auto; }
-}
-"""
+_BASE_CSS = ""
 
 def _card(entry) -> str:
     """Render an individual athlete card."""
@@ -1149,27 +63,43 @@ def _card(entry) -> str:
 def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
     """Stable product navigation shared by every authenticated coach page."""
     links = (
-        ("overview", "/coach", "Overview", "✦"),
-        ("athletes", "/coach/athletes", "Athletes / Roster", "●"),
-        ("whatsapp", "/coach/whatsapp", "WhatsApp Desk", "◈"),
-        ("analytics", "/coach/analytics", "Goal Analytics", "◇"),
+        ("overview", "/coach", "Overview"),
+        ("athletes", "/coach/athletes", "Athletes"),
+        ("whatsapp", "/coach/whatsapp", "WhatsApp Desk"),
+        ("analytics", "/coach/analytics", "Goal Analytics"),
+        ("outbox", "/coach/outbox", "Outbox"),
     )
-    nav = []
-    for key, href, label, sym in links:
-        count = (
+    side_nav = []
+    bottom_nav = []
+    for key, href, label in links:
+        is_active = key == active
+        active_cls = " active" if is_active else ""
+        badge = (
             f'<span class="nav-count">{pending_count}</span>'
-            if key == "whatsapp" and pending_count else ""
+            if (key == "whatsapp" or key == "outbox") and pending_count else ""
         )
-        nav.append(
-            f'<a class="{"active" if key == active else ""}" href="{href}">'
-            f'<span><span class="sym">{sym}</span> {label}</span>{count}</a>'
+        side_nav.append(
+            f'<a class="nav-item{active_cls}" href="{href}">'
+            f'<span>{label}</span>{badge}</a>'
+        )
+        bottom_nav.append(
+            f'<a class="bottom-item{active_cls}" href="{href}">'
+            f'<span>{label}</span>{badge}</a>'
         )
     return (
         '<aside class="side-nav">'
-        '<a class="side-brand" href="/coach"><span class="brand-badge"><span class="sym">✦</span> POWER AI</span> Coach Desk</a>'
-        f'<nav class="side-links" aria-label="Roster and review">{"".join(nav)}</nav>'
-        f'<div class="side-meta">Signed in as<br><strong>{escape(coach)}</strong><br><br>'
-        '<a href="/coach/logout">&times; Sign out</a></div></aside>'
+        '<div class="side-brand-wrap">'
+        '<a class="side-brand" href="/coach">'
+        'Power AI <span class="brand-badge">COACH DESK</span>'
+        '</a>'
+        '</div>'
+        f'<nav class="side-links" aria-label="Roster navigation">{"".join(side_nav)}</nav>'
+        f'<div class="side-meta">'
+        f'<div class="coach-profile">Signed in as <strong>{escape(coach)}</strong></div>'
+        '<a class="signout-link" href="/coach/logout">&times; Sign out</a>'
+        '</div>'
+        '</aside>'
+        f'<nav class="bottom-bar" aria-label="Mobile navigation">{"".join(bottom_nav)}</nav>'
     )
 
 
@@ -1188,14 +118,21 @@ def coach_frame(
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{escape(title)} — Power AI Coach Desk</title><style>{_BASE_CSS}{extra_style}</style>"
-        "</head><body><div class='unseen-ambient'></div><div class='app-shell'>"
+        f"<title>{escape(title)} — Power AI Coach Desk</title>"
+        "<link rel='stylesheet' href='/static/tokens.css'>"
+        "<link rel='stylesheet' href='/static/app.css'>"
+        f"<style>{extra_style}</style>"
+        "<script src='/static/motion.js' defer></script>"
+        "</head><body>"
+        "<canvas id='hero-canvas' class='mesh-canvas mesh-band' aria-hidden='true'></canvas>"
+        "<div class='noise-overlay' aria-hidden='true'></div>"
+        "<div class='app-shell'>"
         f"{_coach_nav(active=active, coach=coach, pending_count=pending_count)}"
         "<main class='workspace'><div class='workspace-head'><div>"
-        f"<div class='eyebrow'><span class='sym'>✦</span> Power AI &middot; Coach Workspace</div><h1>{escape(title)}</h1>"
+        f"<div class='workspace-eyebrow'>Power AI &middot; Coach Workspace</div><h1>{escape(title)}</h1>"
         f"<p class='workspace-sub'>{escape(subtitle)}</p></div>"
-        f"<span class='workspace-date'><span class='sym'>◷</span> {escape(str(today))}</span></div>"
-        f"{body}<footer>✦ Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
+        f"<span class='workspace-date'>{escape(str(today))}</span></div>"
+        f"{body}<footer>Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
         "record and deterministic coaching rules. The coach remains the approval gate."
         "</footer></main></div></body></html>"
     )
@@ -1294,22 +231,73 @@ def _tutorial() -> str:
 def render(
     roster: Roster,
     *,
-    token: str,
+    token: str = "",
     coach: str,
     message: tuple[str, str] | None = None,
     has_demo: bool = False,
     pending_count: int = 0,
 ) -> str:
-    """Render the operating overview: exceptions, readiness and approval load."""
+    """Render the operating overview: one big thing, counts sentence, and grouped buckets."""
     banner = ""
     if message:
         kind, text = message
         banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
 
-    priorities = [e for e in roster.entries if e.bucket is not Bucket.FINE][:7]
-    priority_rows = []
-    for entry in priorities:
-        signal = " · ".join(f.detail for f in entry.flags) or "No active flags"
+    # 1. Counts sentence replacing the stat tiles
+    needs_you_count = sum(1 for e in roster.entries if e.bucket is Bucket.NEEDS_YOU)
+    watch_count = sum(1 for e in roster.entries if e.bucket is Bucket.WATCH)
+    meet_prep_count = sum(1 for e in roster.entries if e.bucket is Bucket.MEET_PREP)
+    fine_count = sum(1 for e in roster.entries if e.bucket is Bucket.FINE)
+
+    counts_sentence = (
+        f'<div class="counts-sentence">'
+        f'<span class="dot-count act">● {needs_you_count} need attention</span> · '
+        f'<span class="dot-count watch">● {watch_count} on watch</span> · '
+        f'<span class="dot-count meet">● {meet_prep_count} in meet prep</span> · '
+        f'<span class="dot-count fine">● {fine_count} on track</span>'
+        f'</div>'
+    )
+
+    # 2. One Big Thing panel: single most urgent Needs You athlete
+    most_urgent = next((e for e in roster.entries if e.bucket is Bucket.NEEDS_YOU), None)
+    if not most_urgent and roster.entries:
+        most_urgent = next((e for e in roster.entries if e.bucket is Bucket.WATCH), None)
+
+    one_big_thing = ""
+    if most_urgent:
+        signal = " · ".join(f.detail for f in most_urgent.flags) or "Urgent coach action required"
+        action_btn = (
+            f'<a class="btn btn-primary" href="/coach/athlete/{escape(most_urgent.athlete_id)}#clearance-review">'
+            'Review injury clearance &rarr;</a>'
+            if (most_urgent.needs_action and most_urgent.injury_days_open is not None) else
+            f'<a class="btn btn-primary" href="/coach/athlete/{escape(most_urgent.athlete_id)}">'
+            'Open athlete file &rarr;</a>'
+        )
+        obt_badge = (
+            '<span class="obt-bucket tag-act">Needs You</span>'
+            if most_urgent.bucket is Bucket.NEEDS_YOU else
+            '<span class="obt-bucket tag-watch">Watch</span>'
+        )
+        one_big_thing = (
+            f'<section class="one-big-thing" aria-label="Most urgent exception">'
+            f'<div class="obt-header">'
+            f'<span class="tag-mono" style="color:var(--plate-red-text)">PRIORITY 01 // IMMEDIATE ATTENTION</span>'
+            f'{obt_badge}'
+            f'</div>'
+            f'<div class="obt-body">'
+            f'<div class="obt-info">'
+            f'<h2 class="obt-name"><a href="/coach/athlete/{escape(most_urgent.athlete_id)}">{escape(most_urgent.display_name)}</a></h2>'
+            f'<div class="obt-meta">{escape(most_urgent.athlete_id)} &middot; Latest: {escape(most_urgent.latest_session or "No recent session")}</div>'
+            f'<p class="obt-reason">{escape(signal)}</p>'
+            f'</div>'
+            f'<div class="obt-action">{action_btn}</div>'
+            f'</div>'
+            f'</section>'
+        )
+
+    # 3. Rest of the queue as glass rows grouped by bucket, Fine collapsed
+    def render_row(entry) -> str:
+        signal = " · ".join(f.detail for f in entry.flags) or "On track"
         readiness = (
             f'<span class="readiness-pill {escape(entry.readiness_band or "")}">'
             f'<span class="dot">●</span> {entry.readiness_score}/100</span>'
@@ -1318,52 +306,89 @@ def render(
         action = ""
         if entry.needs_action and entry.injury_days_open is not None:
             action = (
-                f'<div style="grid-column:1/-1"><a class="clearance-link" '
-                f'href="/coach/athlete/{escape(entry.athlete_id)}#clearance-review">'
-                'Review injury clearance →</a></div>'
+                f'<div><a class="clearance-link" href="/coach/athlete/{escape(entry.athlete_id)}#clearance-review">'
+                'Clearance &rarr;</a></div>'
             )
-        priority_rows.append(
+        return (
             '<div class="athlete-line">'
-            f'<div><a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">'
-            f'{escape(entry.display_name)}</a><div class="muted">{escape(entry.latest_session or "No session logged")}</div></div>'
+            f'<div><a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+            f'<div class="muted">{escape(entry.latest_session or "No session logged")}</div></div>'
             f'<div class="signal">{escape(signal)}</div>{readiness}{action}</div>'
         )
-    priority_body = "".join(priority_rows) or '<p class="empty">No athletes need attention.</p>'
-    stats = (
-        '<div class="stat-grid">'
-        f'<div class="stat alert"><strong>{roster.needing_attention}</strong><span>▲ Need attention</span></div>'
-        f'<div class="stat"><strong>{pending_count}</strong><span>◈ Awaiting approval</span></div>'
-        f'<div class="stat ready"><strong>{roster.checked_in_today}</strong><span>● Checked in today</span></div>'
-        f'<div class="stat"><strong>{roster.total}</strong><span>✦ Active athletes</span></div>'
-        '</div>'
+
+    # Buckets: Needs you, Watch, Meet prep
+    bucket_sections = []
+    bucket_groups = [
+        ("Needs you", [e for e in roster.entries if e.bucket is Bucket.NEEDS_YOU and e != most_urgent], "tag-act"),
+        ("Watch", [e for e in roster.entries if e.bucket is Bucket.WATCH and e != most_urgent], "tag-watch"),
+        ("Meet prep", [e for e in roster.entries if e.bucket is Bucket.MEET_PREP], "tag-meet"),
+    ]
+    for title, entries, tag_cls in bucket_groups:
+        if entries:
+            bucket_sections.append(
+                f'<div class="bucket-group">'
+                f'<div class="bucket-group-title"><span class="badge {tag_cls}">{escape(title)}</span> '
+                f'<span class="muted">({len(entries)})</span></div>'
+                f'{"".join(render_row(e) for e in entries)}'
+                f'</div>'
+            )
+
+    fine_entries = [e for e in roster.entries if e.bucket is Bucket.FINE]
+    fine_markup = ""
+    if fine_entries:
+        fine_markup = (
+            f'<details class="fine-collapse">'
+            f'<summary class="fine-summary">'
+            f'<span>Fine ({len(fine_entries)}) &mdash; athletes on track</span>'
+            f'<span>&darr;</span>'
+            f'</summary>'
+            f'<div class="fine-rows">{"".join(render_row(e) for e in fine_entries)}</div>'
+            f'</details>'
+        )
+
+    priority_body = (
+        "".join(bucket_sections) + fine_markup
+        if (bucket_sections or fine_markup)
+        else '<p class="empty">No athletes in squad.</p>'
     )
+
+    # 4. Daily agent loop: fixed numbering 01, 02, 03, no emoji/symbols in headings
     workflow = (
         '<div class="panel"><div class="panel-head"><h2>Daily agent loop</h2></div>'
-        '<div class="flow-step"><b>01</b><div><strong><span class="sym">✦</span> Observe</strong><p>Sleep, readiness, training and nutrition arrive through WhatsApp.</p></div></div>'
-        '<div class="flow-step"><b>2</b><div><strong>Prepare</strong><p>Rules combine today\'s check-in with history and current trends.</p></div></div>'
-        '<div class="flow-step"><b>03</b><div><strong><span class="sym">✓</span> Verify</strong><p>You edit or approve; only your approved wording can leave the queue.</p></div></div>'
+        '<div class="flow-step"><b>01</b><div><strong>Observe</strong><p>Sleep, readiness, training and nutrition arrive through WhatsApp.</p></div></div>'
+        '<div class="flow-step"><b>02</b><div><strong>Prepare</strong><p>Rules combine today\'s check-in with history and current trends.</p></div></div>'
+        '<div class="flow-step"><b>03</b><div><strong>Verify</strong><p>You edit or approve; only your approved wording can leave the queue.</p></div></div>'
         '</div>'
     )
+
     squad_links = ", ".join(
-        f'<a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">'
-        f'{escape(entry.display_name)}</a>' for entry in roster.entries
+        f'<a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+        for entry in roster.entries
     ) or '<span class="empty">No athletes yet.</span>'
     squad_panel = (
-        '<div class="panel"><div class="panel-head"><h2>Squad at a glance</h2>'
-        '<a href="/coach/athletes">Open directory →</a></div>'
+        '<div class="panel"><div class="panel-head"><h2>Squad directory</h2>'
+        '<a href="/coach/athletes">Open directory &rarr;</a></div>'
         f'<p style="font-size:13px;line-height:1.8;margin:0">{squad_links}</p></div>'
     )
+
     body = (
-        f"{banner}{stats}"
-        '<div class="dashboard-grid"><div>'
-        '<div class="panel"><div class="panel-head"><h2>Today\'s priorities</h2>'
-        '<a href="/coach/athletes">View all athletes →</a></div>'
-        f'{priority_body}</div></div><div>'
+        f"{banner}"
+        f"{one_big_thing}"
+        f"{counts_sentence}"
+        '<div class="dashboard-grid">'
+        '<div>'
+        '<div class="panel"><div class="panel-head"><h2>Roster priorities</h2>'
+        '<a href="/coach/athletes">View all athletes &rarr;</a></div>'
+        f'{priority_body}</div>'
+        '</div>'
+        '<div>'
         '<div class="panel"><div class="panel-head"><h2>Approval queue</h2>'
-        '<a href="/coach/whatsapp?tab=approval">Open queue →</a></div>'
-        f'<p style="font-size:30px;font-weight:800;margin:2px 0">{pending_count}</p>'
+        '<a href="/coach/whatsapp?tab=approval">Open queue &rarr;</a></div>'
+        f'<p style="font-size:32px;font-weight:800;letter-spacing:-0.02em;margin:2px 0">{pending_count}</p>'
         '<p class="section-note">Prepared messages waiting for a human decision.</p></div>'
-        f'{workflow}{_tutorial()}{squad_panel}</div></div>'
+        f'{workflow}{_tutorial()}{squad_panel}'
+        '</div>'
+        '</div>'
         + _demo_controls(roster, has_demo)
     )
     return coach_frame(
@@ -1394,10 +419,11 @@ def render_athletes(
             if entry.readiness_score is not None else '<span class="muted">Not checked in</span>'
         )
         haystack = f"{entry.display_name} {entry.athlete_id} {entry.bucket.value} {status}".lower()
+        dot_cls = "act" if entry.bucket is Bucket.NEEDS_YOU else ("watch" if entry.bucket is Bucket.WATCH else ("meet" if entry.bucket is Bucket.MEET_PREP else "fine"))
         rows.append(
             f'<div class="directory-row athlete-record" data-bucket="{entry.bucket.value}" '
             f'data-search="{escape(haystack)}">'
-            f'<div><a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+            f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
             f'<div class="muted">{escape(entry.athlete_id)}</div></div>'
             f'<div><strong style="font-size:13px">{escape(entry.training_summary or "No training baseline")}</strong>'
             f'<div class="muted">{escape(status)}</div></div>{readiness}'
@@ -1405,7 +431,7 @@ def render_athletes(
         )
     directory = (
         '<div class="directory"><div class="directory-row directory-head">'
-        '<span><span class="sym">✦</span> Athlete</span><span><span class="sym">⚙</span> Current status</span><span><span class="sym">⚡</span> Readiness</span><span><span class="sym">◷</span> Last log</span></div>'
+        '<span>Athlete</span><span>Current status</span><span>Readiness</span><span>Last log</span></div>'
         + ("".join(rows) if rows else '<p class="empty" style="padding:16px">No athletes yet.</p>')
         + '</div>'
     )
@@ -1447,26 +473,26 @@ def _outbox_card(item: PendingMessage) -> str:
         '<div class="panel-head"><div>'
         f'<a class="athlete-name" href="/coach/athlete/{escape(item.athlete_id)}">'
         f'{escape(a.display_name)}</a>'
-        f'<div class="muted">{escape(item.message_kind.replace("_", " ").title())} · '
+        f'<div class="muted">{escape(item.message_kind.replace("_", " ").title())} &middot; '
         f'{escape(item.local_date)}</div></div>'
-        '<span class="readiness-pill yellow"><span class="dot">◈</span> Awaiting approval</span></div>'
+        '<span class="readiness-pill yellow">Awaiting approval</span></div>'
         '<div class="evidence-grid">'
         f'<div><span>Training trend</span><strong>{escape(a.training_summary or "No baseline")}</strong></div>'
         f'<div><span>Latest session</span><strong>{escape(a.latest_session or "Nothing logged")}</strong></div>'
         f'<div><span>Readiness</span><strong>{escape(readiness)}</strong></div>'
         '</div>'
-        f'<p class="evidence-reason"><b>Why it is surfaced:</b> {reasons}</p>'
+        f'<p class="evidence-reason"><b>Why surfaced:</b> {reasons}</p>'
         '<form method="post" action="/coach/outbox/review">'
         f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
         f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
         f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
-        '<label class="draft-label">Message the athlete will receive</label>'
+        '<label class="draft-label">Message the athlete will receive (editable in place)</label>'
         f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
-        '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-        '<button class="approve" type="submit" name="decision" value="approved">✓ '
+        '<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">'
+        '<button class="btn btn-primary" type="submit" name="decision" value="approved">&check; '
         f'Approve for {escape(item.local_date)}</button>'
-        '<button class="skip" type="submit" name="decision" value="skipped">'
-        "&times; Don\u2019t send</button></div></form></div>"
+        '<button class="btn btn-ghost" type="submit" name="decision" value="skipped">'
+        "&times; Hold / Don’t send</button></div></form></div>"
     )
 
 
@@ -1498,21 +524,18 @@ def render_outbox(
         )
 
     intro = (
-        '<div class="review-note"><span class="sym">◈</span><div><strong>Human approval is the final step.</strong> '
+        '<div class="review-note"><div><strong>Human approval is the final step.</strong> '
         'The agent prepared each draft from recorded history and current status. '
-        'Edit freely, approve it, or hold it back. Nothing below has been sent.</div></div>'
+        'Edit freely, approve it, or hold it back. <strong>Nothing below has been sent.</strong></div></div>'
     )
     return coach_frame(
-        f"{banner}{intro}{body}", active="review", coach=coach,
-        title="Review queue / Outbox",
+        f"{banner}{intro}{body}", active="outbox", coach=coach,
+        title="Outbox",
         subtitle="Verify the evidence, edit the wording, then approve what goes to each athlete.",
         today=today.isoformat(), pending_count=len(pending),
     )
 
 
-# ------------------------------------------------------------------------------
-# Login Page
-# ------------------------------------------------------------------------------
 def render_login(error: str | None = None, message: str | None = None) -> str:
     """Render the coach sign-in page."""
     error_markup = f'<div class="msg err">{escape(error)}</div>' if error else ""
@@ -1523,40 +546,35 @@ def render_login(error: str | None = None, message: str | None = None) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Power AI — Coach Access</title>
-  <style>{_BASE_CSS}</style>
+  <title>Power AI — Coach Sign In</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/motion.js" defer></script>
 </head>
 <body>
-  <div class="unseen-ambient"></div>
-  <div class="wrap">
+  <canvas id="hero-canvas" class="mesh-canvas" aria-hidden="true"></canvas>
+  <div class="noise-overlay" aria-hidden="true"></div>
+  <div class="wrapper" style="min-height: 100vh; display: flex; align-items: center; justify-content: center;">
     <div class="login-box">
-      <div class="side-brand" style="margin-bottom:12px;">
-        <span class="brand-badge"><span class="sym">✦</span> POWER AI</span> Coach Access
+      <div class="brand-link" style="margin-bottom: 16px;">
+        Power AI <span class="brand-badge">COACH ACCESS</span>
       </div>
       <h1>Coach Sign In</h1>
-      <p>Enter the coach access token configured for this squad. Signing in sets an HTTP-only secure cookie so credentials don't leak into URLs or screenshots.</p>
+      <p>Enter your coach access token. Authenticating sets a secure HTTP-only cookie so your token is never exposed in page URLs.</p>
       {error_markup}
       {msg_markup}
       <form method="post" action="/coach/login">
-        <label style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:var(--faint);" for="token">ACCESS TOKEN</label>
-        <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste token here">
-        <button type="submit" class="btn-primary">Authenticate &rarr;</button>
+        <label class="tag-mono" for="token" style="margin-bottom: 6px;">ACCESS TOKEN</label>
+        <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste coach token here">
+        <button type="submit" class="btn btn-primary" style="margin-top: 8px;">Authenticate &rarr;</button>
       </form>
-      <div style="margin-top:24px;text-align:center;">
-        <a class="back-link" href="/">&larr; Back to Power AI Overview</a>
+      <div style="margin-top: 24px; text-align: center;">
+        <a class="back-link" href="/">&larr; Back to Public Overview</a>
       </div>
     </div>
   </div>
 </body>
 </html>"""
-
-
-# Landing Page (GET /) & Public Legal Views — Unseen Studio Redesign
-# ------------------------------------------------------------------------------
-
-# Modern styling migrated to /static/tokens.css, /static/app.css, and /static/motion.js
-_UNSEEN_LANDING_CSS = ""
-_LANDING_JS = ""
 
 
 def render_landing(*, is_logged_in: bool = False) -> str:
