@@ -19,50 +19,53 @@ _BASE_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Newsreader:ital,opsz,wght@1,6..72,300;1,6..72,400;1,6..72,500&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --bg: #09090b;
-  --surface: #101014;
-  --surface-raised: #14141a;
-  --surface-inset: #0d0d10;
-  --card: #131318;
-  --card-hover: #181820;
+  --bg: #070709;
+  --surface: #0c0c10;
+  --surface-raised: #111116;
+  --surface-inset: #08080b;
+  --card: #0f0f14;
+  --card-hover: #15151c;
   --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-subtle: rgba(255, 255, 255, 0.04);
   --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
+  --line-strong: rgba(255, 255, 255, 0.18);
   --ink: #ffffff;
-  --ink-secondary: #e4e4e7;
-  --ink-soft: #a1a1aa;
-  --ink-faint: #71717a;
-  --faint: #71717a;
-  --soft: #d4d4d8;
+  --ink-secondary: #e2e8f0;
+  --ink-soft: #94a3b8;
+  --ink-faint: #64748b;
+  --faint: #64748b;
+  --soft: #cbd5e1;
   
-  --unseen-blush: #f6c8c3;
-  --unseen-sand: #efded9;
+  --accent-cyan: #38bdf8;
+  --accent-pearl: #f8fafc;
+  --unseen-blush: #38bdf8;
+  --unseen-sand: #e2e8f0;
   
-  /* Competition Calibrated Plates */
-  --plate-red: #ef4444;
-  --plate-red-bg: rgba(239, 68, 68, 0.12);
-  --plate-red-border: rgba(239, 68, 68, 0.3);
-  --plate-red-text: #fca5a5;
-  --act: #ef4444;
+  /* Competition Calibrated Plates - Dark Precision */
+  --plate-red: #f43f5e;
+  --plate-red-bg: rgba(244, 63, 94, 0.09);
+  --plate-red-border: rgba(244, 63, 94, 0.25);
+  --plate-red-text: #fda4af;
+  --act: #f43f5e;
 
-  --plate-yellow: #f59e0b;
-  --plate-yellow-bg: rgba(245, 158, 11, 0.12);
-  --plate-yellow-border: rgba(245, 158, 11, 0.3);
+  --plate-yellow: #fbbf24;
+  --plate-yellow-bg: rgba(251, 191, 36, 0.09);
+  --plate-yellow-border: rgba(251, 191, 36, 0.25);
   --plate-yellow-text: #fde68a;
-  --watch: #f59e0b;
+  --watch: #fbbf24;
 
-  --plate-blue: #3b82f6;
-  --plate-blue-bg: rgba(59, 130, 246, 0.12);
-  --plate-blue-border: rgba(59, 130, 246, 0.3);
-  --plate-blue-text: #93c5fd;
-  --meet: #3b82f6;
+  --plate-blue: #38bdf8;
+  --plate-blue-bg: rgba(56, 189, 248, 0.09);
+  --plate-blue-border: rgba(56, 189, 248, 0.25);
+  --plate-blue-text: #bae6fd;
+  --meet: #38bdf8;
 
-  --plate-green: #10b981;
-  --plate-green-bg: rgba(16, 185, 129, 0.12);
-  --plate-green-border: rgba(16, 185, 129, 0.3);
-  --plate-green-text: #86efac;
-  --fine: #10b981;
+  --plate-green: #34d399;
+  --plate-green-bg: rgba(52, 211, 153, 0.09);
+  --plate-green-border: rgba(52, 211, 153, 0.25);
+  --plate-green-text: #a7f3d0;
+  --fine: #34d399;
 
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-serif: 'Newsreader', 'Saol Display', Georgia, serif;
@@ -96,7 +99,7 @@ body {
   transform: translateX(-50%);
   width: 100vw;
   height: 650px;
-  background: radial-gradient(circle at 50% 10%, rgba(246, 200, 195, 0.04) 0%, rgba(59, 130, 246, 0.02) 40%, transparent 70%);
+  background: radial-gradient(ellipse 65% 45% at 50% -10%, rgba(255, 255, 255, 0.045) 0%, rgba(56, 189, 248, 0.02) 40%, transparent 80%);
   pointer-events: none;
   z-index: 0;
 }
@@ -160,10 +163,17 @@ body {
   text-transform: uppercase;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border-strong);
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
   padding: 3px 8px;
   border-radius: 9999px;
   font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.brand-badge .sym {
+  font-size: 11px;
 }
 
 .side-links {
@@ -186,17 +196,37 @@ body {
   border: 1px solid transparent;
 }
 
+.side-links a span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.side-links a .sym {
+  font-size: 13px;
+  color: var(--ink-faint);
+  transition: color 0.2s ease;
+}
+
 .side-links a:hover {
   background: rgba(255, 255, 255, 0.04);
   color: var(--ink);
   border-color: var(--border);
 }
 
+.side-links a:hover .sym {
+  color: var(--accent-cyan);
+}
+
 .side-links a.active {
   background: #ffffff;
-  color: #09090b;
+  color: #070709;
   border-color: #ffffff;
   font-weight: 600;
+}
+
+.side-links a.active .sym {
+  color: #070709;
 }
 
 .nav-count {
@@ -212,7 +242,7 @@ body {
 }
 
 .side-links a.active .nav-count {
-  background: #09090b;
+  background: #070709;
   color: #ffffff;
 }
 
@@ -260,8 +290,11 @@ body {
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
   margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .workspace-head h1 {
@@ -285,6 +318,13 @@ body {
   font-size: 12px;
   color: var(--ink-faint);
   letter-spacing: 0.05em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.workspace-date .sym {
+  color: var(--accent-cyan);
 }
 
 /* Stat Grid */
@@ -300,11 +340,12 @@ body {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px 18px;
-  transition: border-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .stat:hover {
   border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
 
 .stat strong {
@@ -317,7 +358,9 @@ body {
 }
 
 .stat span {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-top: 6px;
   color: var(--ink-faint);
   font-family: var(--font-mono);
@@ -328,7 +371,10 @@ body {
 }
 
 .stat.alert strong { color: var(--plate-red); }
+.stat.alert span { color: var(--plate-red-text); }
+
 .stat.ready strong { color: var(--plate-green); }
+.stat.ready span { color: var(--plate-green-text); }
 
 /* Dashboard Grid & Panels */
 .dashboard-grid {
@@ -361,14 +407,24 @@ body {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-head h2 .sym {
+  color: var(--accent-cyan);
 }
 
 .panel-head a {
   font-size: 12.5px;
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
   text-decoration: none;
   font-weight: 500;
   transition: opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .panel-head a:hover {
@@ -397,7 +453,7 @@ body {
 }
 
 .athlete-name:hover {
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
 }
 
 .muted {
@@ -422,6 +478,10 @@ body {
   background: var(--surface-inset);
   border: 1px solid var(--border);
   white-space: nowrap;
+}
+
+.readiness-pill .dot {
+  font-size: 9px;
 }
 
 .readiness-pill.green {
@@ -458,14 +518,20 @@ body {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--unseen-blush);
+  font-size: 11px;
+  color: var(--accent-cyan);
 }
 
 .flow-step strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 13.5px;
   color: var(--ink);
+}
+
+.flow-step strong .sym {
+  color: var(--accent-cyan);
 }
 
 .flow-step p {
@@ -496,7 +562,7 @@ body {
 
 .directory-tools input:focus {
   outline: none;
-  border-color: var(--unseen-blush);
+  border-color: var(--accent-cyan);
 }
 
 .directory-tools select {
@@ -539,6 +605,16 @@ body {
   color: var(--ink-faint);
 }
 
+.directory-head span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.directory-head span .sym {
+  color: var(--accent-cyan);
+}
+
 /* Review / Outbox Message Cards */
 .message-card {
   border-left-width: 4px;
@@ -568,7 +644,7 @@ body {
   min-height: 110px;
   background: var(--surface-inset);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--ink);
   font-family: inherit;
   padding: 10px 12px;
@@ -579,7 +655,7 @@ body {
 
 .message-card form textarea:focus {
   outline: none;
-  border-color: var(--unseen-blush);
+  border-color: var(--accent-cyan);
 }
 
 .evidence-grid {
@@ -625,13 +701,22 @@ body {
 .review-note {
   padding: 14px 18px;
   border: 1px solid var(--border);
-  border-left: 4px solid var(--unseen-blush);
+  border-left: 4px solid var(--accent-cyan);
   background: var(--surface);
   color: var(--ink-secondary);
   border-radius: 12px;
   margin-bottom: 24px;
   font-size: 13.5px;
   line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.review-note .sym {
+  color: var(--accent-cyan);
+  font-size: 16px;
+  margin-top: 2px;
 }
 
 .review-note strong {
@@ -647,12 +732,15 @@ button {
 
 button.approve, .btn-primary {
   background: #ffffff;
-  color: #09090b;
+  color: #070709;
   border: 1px solid #ffffff;
   border-radius: 9999px;
   font-weight: 600;
   font-size: 13.5px;
   padding: 9px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 button.approve:hover, .btn-primary:hover {
@@ -668,6 +756,9 @@ button.skip, .btn-secondary {
   font-weight: 500;
   font-size: 13.5px;
   padding: 9px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 button.skip:hover, .btn-secondary:hover {
@@ -699,7 +790,7 @@ button.skip:hover, .btn-secondary:hover {
 
 .card form input[type="text"]:focus {
   outline: none;
-  border-color: var(--unseen-blush);
+  border-color: var(--accent-cyan);
 }
 
 .card form button {
@@ -731,12 +822,12 @@ button.skip:hover, .btn-secondary:hover {
 
 .register input[type="text"]:focus {
   outline: none;
-  border-color: var(--unseen-blush);
+  border-color: var(--accent-cyan);
 }
 
 .register button {
   background: #ffffff;
-  color: #09090b;
+  color: #070709;
   border: 1px solid #ffffff;
   border-radius: 9999px;
   padding: 9px 18px;
@@ -817,7 +908,7 @@ button.skip:hover, .btn-secondary:hover {
 }
 
 .who a.name:hover {
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
 }
 
 .id {
@@ -899,7 +990,7 @@ li.act {
   border: 1px solid var(--border);
   border-radius: 18px;
   padding: 36px 30px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
 .login-box h1 {
@@ -933,7 +1024,7 @@ li.act {
 
 .login-box input:focus {
   outline: none;
-  border-color: var(--unseen-blush);
+  border-color: var(--accent-cyan);
 }
 
 .login-box button {
@@ -945,7 +1036,7 @@ li.act {
 .back-link {
   display: inline-block;
   font-size: 13px;
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
   text-decoration: none;
 }
 
@@ -989,10 +1080,6 @@ footer {
 }
 """
 
-
-# ------------------------------------------------------------------------------
-# Roster View & Outbox Card Helpers
-# ------------------------------------------------------------------------------
 def _card(entry) -> str:
     """Render an individual athlete card."""
     items = "".join(
@@ -1042,26 +1129,26 @@ def _card(entry) -> str:
 def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
     """Stable product navigation shared by every authenticated coach page."""
     links = (
-        ("overview", "/coach", "Overview"),
-        ("athletes", "/coach/athletes", "Athletes / Roster"),
-        ("review", "/coach/outbox", "Review queue / Outbox"),
+        ("overview", "/coach", "Overview", "✦"),
+        ("athletes", "/coach/athletes", "Athletes / Roster", "●"),
+        ("review", "/coach/outbox", "Review queue / Outbox", "◈"),
     )
     nav = []
-    for key, href, label in links:
+    for key, href, label, sym in links:
         count = (
             f'<span class="nav-count">{pending_count}</span>'
             if key == "review" and pending_count else ""
         )
         nav.append(
             f'<a class="{"active" if key == active else ""}" href="{href}">'
-            f"<span>{label}</span>{count}</a>"
+            f'<span><span class="sym">{sym}</span> {label}</span>{count}</a>'
         )
     return (
         '<aside class="side-nav">'
-        '<a class="side-brand" href="/coach"><span class="brand-badge">POWER AI</span> Coach Desk</a>'
+        '<a class="side-brand" href="/coach"><span class="brand-badge"><span class="sym">✦</span> POWER AI</span> Coach Desk</a>'
         f'<nav class="side-links" aria-label="Roster and review">{"".join(nav)}</nav>'
         f'<div class="side-meta">Signed in as<br><strong>{escape(coach)}</strong><br><br>'
-        '<a href="/coach/logout">Sign out</a></div></aside>'
+        '<a href="/coach/logout">&times; Sign out</a></div></aside>'
     )
 
 
@@ -1084,10 +1171,10 @@ def coach_frame(
         "</head><body><div class='unseen-ambient'></div><div class='app-shell'>"
         f"{_coach_nav(active=active, coach=coach, pending_count=pending_count)}"
         "<main class='workspace'><div class='workspace-head'><div>"
-        f"<div class='eyebrow'>Power AI · Coach Workspace</div><h1>{escape(title)}</h1>"
+        f"<div class='eyebrow'><span class='sym'>✦</span> Power AI &middot; Coach Workspace</div><h1>{escape(title)}</h1>"
         f"<p class='workspace-sub'>{escape(subtitle)}</p></div>"
-        f"<span class='workspace-date'>{escape(str(today))}</span></div>"
-        f"{body}<footer>Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
+        f"<span class='workspace-date'><span class='sym'>◷</span> {escape(str(today))}</span></div>"
+        f"{body}<footer>✦ Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
         "record and deterministic coaching rules. The coach remains the approval gate."
         "</footer></main></div></body></html>"
     )
@@ -1151,7 +1238,7 @@ def render(
         signal = " · ".join(f.detail for f in entry.flags) or "No active flags"
         readiness = (
             f'<span class="readiness-pill {escape(entry.readiness_band or "")}">'
-            f'{entry.readiness_score}/100</span>'
+            f'<span class="dot">●</span> {entry.readiness_score}/100</span>'
             if entry.readiness_score is not None else '<span class="muted">No check-in</span>'
         )
         action = ""
@@ -1172,17 +1259,17 @@ def render(
     priority_body = "".join(priority_rows) or '<p class="empty">No athletes need attention.</p>'
     stats = (
         '<div class="stat-grid">'
-        f'<div class="stat alert"><strong>{roster.needing_attention}</strong><span>Need attention</span></div>'
-        f'<div class="stat"><strong>{pending_count}</strong><span>Awaiting approval</span></div>'
-        f'<div class="stat ready"><strong>{roster.checked_in_today}</strong><span>Checked in today</span></div>'
-        f'<div class="stat"><strong>{roster.total}</strong><span>Active athletes</span></div>'
+        f'<div class="stat alert"><strong>{roster.needing_attention}</strong><span>▲ Need attention</span></div>'
+        f'<div class="stat"><strong>{pending_count}</strong><span>◈ Awaiting approval</span></div>'
+        f'<div class="stat ready"><strong>{roster.checked_in_today}</strong><span>● Checked in today</span></div>'
+        f'<div class="stat"><strong>{roster.total}</strong><span>✦ Active athletes</span></div>'
         '</div>'
     )
     workflow = (
         '<div class="panel"><div class="panel-head"><h2>Daily agent loop</h2></div>'
-        '<div class="flow-step"><b>1</b><div><strong>Observe</strong><p>Sleep, readiness, training and nutrition arrive through WhatsApp.</p></div></div>'
+        '<div class="flow-step"><b>01</b><div><strong><span class="sym">✦</span> Observe</strong><p>Sleep, readiness, training and nutrition arrive through WhatsApp.</p></div></div>'
         '<div class="flow-step"><b>2</b><div><strong>Prepare</strong><p>Rules combine today\'s check-in with history and current trends.</p></div></div>'
-        '<div class="flow-step"><b>3</b><div><strong>Verify</strong><p>You edit or approve; only your approved wording can leave the queue.</p></div></div>'
+        '<div class="flow-step"><b>03</b><div><strong><span class="sym">✓</span> Verify</strong><p>You edit or approve; only your approved wording can leave the queue.</p></div></div>'
         '</div>'
     )
     squad_links = ", ".join(
@@ -1246,7 +1333,7 @@ def render_athletes(
         )
     directory = (
         '<div class="directory"><div class="directory-row directory-head">'
-        '<span>Athlete</span><span>Current training status</span><span>Readiness</span><span>Last log</span></div>'
+        '<span><span class="sym">✦</span> Athlete</span><span><span class="sym">⚙</span> Current status</span><span><span class="sym">⚡</span> Readiness</span><span><span class="sym">◷</span> Last log</span></div>'
         + ("".join(rows) if rows else '<p class="empty" style="padding:16px">No athletes yet.</p>')
         + '</div>'
     )
@@ -1287,7 +1374,7 @@ def _outbox_card(item: PendingMessage) -> str:
         f'{escape(a.display_name)}</a>'
         f'<div class="muted">{escape(item.message_kind.replace("_", " ").title())} · '
         f'{escape(item.local_date)}</div></div>'
-        '<span class="readiness-pill yellow">Awaiting approval</span></div>'
+        '<span class="readiness-pill yellow"><span class="dot">◈</span> Awaiting approval</span></div>'
         '<div class="evidence-grid">'
         f'<div><span>Training trend</span><strong>{escape(a.training_summary or "No baseline")}</strong></div>'
         f'<div><span>Latest session</span><strong>{escape(a.latest_session or "Nothing logged")}</strong></div>'
@@ -1301,10 +1388,10 @@ def _outbox_card(item: PendingMessage) -> str:
         '<label class="draft-label">Message the athlete will receive</label>'
         f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
         '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-        '<button class="approve" type="submit" name="decision" value="approved">'
+        '<button class="approve" type="submit" name="decision" value="approved">✓ '
         f'Approve for {escape(item.local_date)}</button>'
         '<button class="skip" type="submit" name="decision" value="skipped">'
-        "Don\u2019t send</button></div></form></div>"
+        "&times; Don\u2019t send</button></div></form></div>"
     )
 
 
@@ -1336,9 +1423,9 @@ def render_outbox(
         )
 
     intro = (
-        '<div class="review-note"><strong>Human approval is the final step.</strong> '
+        '<div class="review-note"><span class="sym">◈</span><div><strong>Human approval is the final step.</strong> '
         'The agent prepared each draft from recorded history and current status. '
-        'Edit freely, approve it, or hold it back. Nothing below has been sent.</div>'
+        'Edit freely, approve it, or hold it back. Nothing below has been sent.</div></div>'
     )
     return coach_frame(
         f"{banner}{intro}{body}", active="review", coach=coach,
@@ -1369,7 +1456,7 @@ def render_login(error: str | None = None, message: str | None = None) -> str:
   <div class="wrap">
     <div class="login-box">
       <div class="side-brand" style="margin-bottom:12px;">
-        <span class="brand-badge">POWER AI</span> Coach Access
+        <span class="brand-badge"><span class="sym">✦</span> POWER AI</span> Coach Access
       </div>
       <h1>Coach Sign In</h1>
       <p>Enter the coach access token configured for this squad. Signing in sets an HTTP-only secure cookie so credentials don't leak into URLs or screenshots.</p>
@@ -1408,17 +1495,27 @@ _UNSEEN_LANDING_CSS = """
   --ink-soft: #a1a1aa;
   --ink-faint: #71717a;
   
-  --unseen-blush: #f6c8c3;
-  --unseen-sand: #efded9;
+  --unseen-blush: #38bdf8;
+  --unseen-sand: #e2e8f0;
+  --accent-cyan: #38bdf8;
+  --accent-pearl: #f8fafc;
   
-  --plate-red: #ef4444;
-  --plate-red-bg: rgba(239, 68, 68, 0.12);
-  --plate-yellow: #f59e0b;
-  --plate-yellow-bg: rgba(245, 158, 11, 0.12);
-  --plate-blue: #3b82f6;
-  --plate-blue-bg: rgba(59, 130, 246, 0.12);
-  --plate-green: #10b981;
-  --plate-green-bg: rgba(16, 185, 129, 0.12);
+  --plate-red: #f43f5e;
+  --plate-red-bg: rgba(244, 63, 94, 0.09);
+  --plate-red-border: rgba(244, 63, 94, 0.25);
+  --plate-red-text: #fda4af;
+  --plate-yellow: #fbbf24;
+  --plate-yellow-bg: rgba(251, 191, 36, 0.09);
+  --plate-yellow-border: rgba(251, 191, 36, 0.25);
+  --plate-yellow-text: #fde68a;
+  --plate-blue: #38bdf8;
+  --plate-blue-bg: rgba(56, 189, 248, 0.09);
+  --plate-blue-border: rgba(56, 189, 248, 0.25);
+  --plate-blue-text: #bae6fd;
+  --plate-green: #34d399;
+  --plate-green-bg: rgba(52, 211, 153, 0.09);
+  --plate-green-border: rgba(52, 211, 153, 0.25);
+  --plate-green-text: #a7f3d0;
 
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-serif: 'Newsreader', 'Saol Display', 'Playfair Display', Georgia, serif;
@@ -1455,7 +1552,7 @@ body {
   transform: translateX(-50%);
   width: 100vw;
   height: 650px;
-  background: radial-gradient(circle at 50% 10%, rgba(246, 200, 195, 0.04) 0%, rgba(59, 130, 246, 0.02) 40%, transparent 70%);
+  background: radial-gradient(ellipse 65% 45% at 50% -10%, rgba(255, 255, 255, 0.045) 0%, rgba(56, 189, 248, 0.02) 40%, transparent 80%);
   pointer-events: none;
   z-index: 0;
 }

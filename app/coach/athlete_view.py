@@ -11,7 +11,7 @@ from html import escape
 from app.coach.athlete import AthleteDetail, progress_series
 from app.coach.view import coach_frame
 
-_ATHLETE_STYLE = '''
+_ATHLETE_STYLE = """
 :root {
   --card: var(--surface);
   --line: var(--border);
@@ -27,9 +27,10 @@ _ATHLETE_STYLE = '''
 }
 
 .back a {
-  color: var(--unseen-blush);
+  color: var(--accent-cyan);
   text-decoration: none;
   font-family: var(--font-mono);
+  font-size: 12.5px;
   letter-spacing: 0.04em;
   display: inline-flex;
   align-items: center;
@@ -50,22 +51,29 @@ _ATHLETE_STYLE = '''
 .status-strip {
   padding: 12px 18px;
   border-radius: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
   background: var(--surface-inset);
   border: 1px solid var(--border);
   font-size: 13.5px;
   color: var(--ink-soft);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .status-strip strong {
   color: var(--ink);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-strip strong .sym {
+  color: var(--accent-cyan);
 }
 
 .grid {
@@ -80,11 +88,12 @@ _ATHLETE_STYLE = '''
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px 16px;
-  transition: border-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .tile:hover {
   border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
 
 .tile .k {
@@ -93,6 +102,14 @@ _ATHLETE_STYLE = '''
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tile .k .sym {
+  color: var(--accent-cyan);
+  font-size: 12px;
 }
 
 .tile .v {
@@ -130,12 +147,20 @@ _ATHLETE_STYLE = '''
 
 .context-card h2 {
   margin: 0 0 14px;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   font-family: var(--font-mono);
-  color: var(--ink-soft);
+  color: var(--ink-secondary);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.context-card h2 .sym {
+  color: var(--accent-cyan);
+  font-size: 13px;
 }
 
 .facts {
@@ -189,13 +214,15 @@ _ATHLETE_STYLE = '''
   font-weight: 700;
   font-family: var(--font-mono);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: var(--plate-yellow-text);
   margin-bottom: 10px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: var(--plate-yellow-bg);
   border: 1px solid var(--plate-yellow-border);
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 9999px;
 }
 
@@ -211,7 +238,7 @@ _ATHLETE_STYLE = '''
   font-size: 14px;
   line-height: 1.6;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface-inset);
   color: var(--ink);
   resize: vertical;
@@ -219,8 +246,8 @@ _ATHLETE_STYLE = '''
 
 .coach-draft textarea:focus {
   outline: none;
-  border-color: var(--unseen-blush);
-  box-shadow: 0 0 0 3px rgba(246, 200, 195, 0.12);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
 }
 
 .coach-draft .btns {
@@ -233,11 +260,15 @@ _ATHLETE_STYLE = '''
   font-size: 14px;
   font-weight: 600;
   background: #ffffff;
-  color: #09090b;
+  color: #070709;
   border: 1px solid #ffffff;
   border-radius: 9999px;
   cursor: pointer;
   transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .coach-draft .btns button.approve:hover {
@@ -265,6 +296,13 @@ _ATHLETE_STYLE = '''
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart h3 .sym {
+  color: var(--accent-cyan);
 }
 
 .chart .cap {
@@ -289,7 +327,7 @@ _ATHLETE_STYLE = '''
 @media(max-width:540px){
   .context-grid { grid-template-columns: 1fr; }
 }
-'''
+"""
 
 
 def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:
@@ -362,22 +400,22 @@ def render_athlete(
         banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
 
     tiles = [
-        ("Last logged", detail.last_activity or "never", False),
-        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in", detail.readiness_band in {"orange", "red"}),
-        ("Sleep", f"{detail.checkin.sleep_hours:g} h" if detail.checkin and detail.checkin.sleep_hours is not None else "not reported", False),
-        ("Phase", detail.phase, False),
+        ("Last logged", detail.last_activity or "never", False, "◷"),
+        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in", detail.readiness_band in {"orange", "red"}, "⚡"),
+        ("Sleep", f"{detail.checkin.sleep_hours:g} h" if detail.checkin and detail.checkin.sleep_hours is not None else "not reported", False, "☾"),
+        ("Phase", detail.phase, False, "◈"),
     ]
     if detail.injured:
         days = f"{detail.injury_days_open}d" if detail.injury_days_open is not None else "open"
-        tiles.append(("Injury", days, True))
+        tiles.append(("Injury", days, True, "⚠"))
     if any(f.kind == "silent" for f in detail.roster.flags):
-        tiles.append(("Silent", f"{detail.roster.days_silent}d", True))
+        tiles.append(("Silent", f"{detail.roster.days_silent}d", True, "◷"))
     if detail.roster.weeks_to_meet is not None:
-        tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False))
+        tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False, "✦"))
     tile_html = "".join(
-        f'<div class="tile"><div class="k">{escape(k)}</div>'
+        f'<div class="tile"><div class="k"><span class="sym">{sym}</span> {escape(k)}</div>'
         f'<div class="v{" warn" if warn else ""}">{escape(v)}</div></div>'
-        for k, v, warn in tiles
+        for k, v, warn, sym in tiles
     )
 
     verdicts = "".join(
@@ -411,7 +449,7 @@ def render_athlete(
 
     compose = (
         '<div class="context-card compose coach-draft">'
-        '<div class="draft-state">Prepared · requires coach approval</div>'
+        '<div class="draft-state"><span class="sym">◈</span> Prepared · requires coach approval</div>'
         '<h2>Message for the athlete</h2>'
         '<form method="post" action="/coach/athlete/'
         f'{escape(detail.athlete_id)}/message">'
@@ -440,16 +478,16 @@ def render_athlete(
     ])
     reasons = "".join(f"<li>{escape(reason)}</li>" for reason in detail.readiness_reasons)
     recovery_panel = (
-        '<div class="context-card"><h2>Recovery today</h2>' + recovery
+        '<div class="context-card"><h2><span class="sym">⚡</span> Recovery today</h2>' + recovery
         + (f'<ul class="recovery-reasons">{reasons}</ul>' if reasons else "") + '</div>'
     )
-    program_panel = '<div class="context-card"><h2>Programming</h2>' + facts([
+    program_panel = '<div class="context-card"><h2><span class="sym">⚙</span> Programming</h2>' + facts([
         ("Method", str(detail.program.get("methodology", "")).replace("_", " ")),
         ("Experience", detail.program.get("experience")),
         ("Training days", detail.program.get("days_per_week")),
         ("Meet date", detail.program.get("meet_date")),
     ]) + '</div>'
-    schedule_panel = '<div class="context-card"><h2>Schedule & logistics</h2>' + facts([
+    schedule_panel = '<div class="context-card"><h2><span class="sym">◷</span> Schedule & logistics</h2>' + facts([
         ("Calendar", "Connected" if detail.calendar_connected else "Not connected"),
         ("Timezone", detail.schedule.get("timezone")),
         ("Morning check-in", detail.schedule.get("morning_checkin_time")),
@@ -457,7 +495,7 @@ def render_athlete(
         ("Bedtime", detail.schedule.get("bedtime")),
     ]) + '</div>'
     supplement_text = "; ".join(detail.supplements) if detail.supplements else None
-    nutrition_panel = '<div class="context-card"><h2>Nutrition & supplements</h2>' + facts([
+    nutrition_panel = '<div class="context-card"><h2><span class="sym">◈</span> Nutrition & supplements</h2>' + facts([
         ("Diet", detail.nutrition.get("diet_style")),
         ("Foods available", detail.nutrition.get("foods_available")),
         ("Allergies", detail.nutrition.get("allergies")),
@@ -467,8 +505,8 @@ def render_athlete(
     ]) + '</div>'
     status = " · ".join(f.detail for f in detail.roster.flags) or "No active flags — current trend is within policy."
     body = (
-        f"{banner}<p class='back'><a href='/coach/athletes'>← All athletes</a></p>"
-        f'<div class="status-strip"><strong>Current status:</strong> {escape(status)}</div>'
+        f"{banner}<p class='back'><a href='/coach/athletes'>← All athletes / Roster</a></p>"
+        f'<div class="status-strip"><strong><span class="sym">●</span> Current status:</strong> {escape(status)}</div>'
         f'<div class="grid">{tile_html}</div>'
         '<div class="profile-grid"><div>'
         f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
