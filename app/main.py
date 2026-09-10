@@ -23,6 +23,7 @@ from functools import lru_cache
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
@@ -140,6 +141,8 @@ app = FastAPI(
     description="Power AI: WhatsApp coaching agent with deterministic readiness, nutrition and calendar planning.",
     lifespan=lifespan,
 )
+
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)

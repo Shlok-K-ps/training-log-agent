@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&display=swap');
+
+:root {
+  /* Colour, dark base */
+  --canvas: #07080B;
+  --level-1: #0E1014;
+  --level-2: #15171C;
+  --level-3: #1D2027;
+
+  /* Aliases for semantic surfaces */
+  --bg: #07080B;
+  --surface: #0E1014;
+  --surface-raised: #15171C;
+  --surface-inset: #07080B;
+  --card: #15171C;
+  --card-hover: #1D2027;
+
+  --text: #F4F5F7;
+  --text-2: #BCC2CB;
+  --text-3: #7B818C;
+  --ink: #F4F5F7;
+  --ink-secondary: #BCC2CB;
+  --ink-soft: #7B818C;
+  --ink-faint: #4E535E;
+  --faint: #7B818C;
+  --soft: #BCC2CB;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  --highlight-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
+  --highlight-top-raised: inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+
+  /* Mesh gradient: #1D3FA8 (plate blue), #5B2A86 (violet), #B8323A (plate red ember), #0E1014 (keeps it dark) */
+  --gradient-color-1: #1D3FA8;
+  --gradient-color-2: #5B2A86;
+  --gradient-color-3: #B8323A;
+  --gradient-color-4: #0E1014;
+
+  /* Status: Needs you #FF6B6B, Watch #F5C451, Meet prep #6AA8FF, Fine #58D39A */
+  --status-needs-you: #FF6B6B;
+  --status-watch: #F5C451;
+  --status-meet-prep: #6AA8FF;
+  --status-fine: #58D39A;
+
+  /* Plate accents */
+  --plate-red: #FF6B6B;
+  --plate-red-bg: rgba(255, 107, 107, 0.12);
+  --plate-red-border: rgba(255, 107, 107, 0.30);
+  --plate-red-text: #FF9B9B;
+  --act: #FF6B6B;
+
+  --plate-yellow: #F5C451;
+  --plate-yellow-bg: rgba(245, 196, 81, 0.12);
+  --plate-yellow-border: rgba(245, 196, 81, 0.30);
+  --plate-yellow-text: #FDE68A;
+  --watch: #F5C451;
+
+  --plate-blue: #6AA8FF;
+  --plate-blue-bg: rgba(106, 168, 255, 0.12);
+  --plate-blue-border: rgba(106, 168, 255, 0.30);
+  --plate-blue-text: #BAE6FD;
+  --meet: #6AA8FF;
+
+  --plate-green: #58D39A;
+  --plate-green-bg: rgba(88, 211, 154, 0.12);
+  --plate-green-border: rgba(88, 211, 154, 0.30);
+  --plate-green-text: #A7F3D0;
+  --fine: #58D39A;
+
+  --accent-cyan: #6AA8FF;
+  --unseen-blush: #6AA8FF;
+  --unseen-sand: #F4F5F7;
+
+  /* Typography: Geist for everything */
+  --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-serif: 'Newsreader', Georgia, serif;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-press: 120ms;
+  --duration-hover: 240ms;
+  --duration-panel: 480ms;
+  --duration-hero: 700ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-press: 0ms;
+    --duration-hover: 0ms;
+    --duration-panel: 0ms;
+    --duration-hero: 0ms;
+  }
+}
