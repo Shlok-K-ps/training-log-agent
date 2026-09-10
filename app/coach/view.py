@@ -633,7 +633,7 @@ td strong { color: var(--ink); }
 # ------------------------------------------------------------------------------
 # Roster View & Outbox Card Helpers
 # ------------------------------------------------------------------------------
-def _card(entry, token: str) -> str:
+def _card(entry) -> str:
     """Render an individual athlete card."""
     items = "".join(
         f'<li class="{"act" if f.action else ""}">{escape(f.detail)}</li>'
@@ -644,7 +644,6 @@ def _card(entry, token: str) -> str:
     if entry.needs_action and entry.injury_days_open is not None:
         form = (
             '<form method="post" action="/coach/clear-injury">'
-            f'<input type="hidden" name="token" value="{escape(token)}">'
             f'<input type="hidden" name="athlete_id" value="{escape(entry.athlete_id)}">'
             '<input type="text" name="reason" required maxlength="200" '
             'placeholder="Who cleared them, and on what basis">'
@@ -699,7 +698,7 @@ def render(
                 f'<div class="fine-list">{names}</div></section>'
             )
             continue
-        cards = "".join(_card(e, token) for e in entries)
+        cards = "".join(_card(e) for e in entries)
         sections.append(
             f"<section><h2>{BUCKET_LABEL[bucket]} <span class='n'>{len(entries)}</span></h2>"
             f"{cards}</section>"
@@ -736,10 +735,32 @@ def render(
     )
 
 
+def _outbox_card(item: PendingMessage) -> str:
+    a = item.athlete
+    reasons = " · ".join(escape(f.detail) for f in a.flags) or "nothing flagged"
+    return (
+        f'<div class="card {a.bucket.value}">'
+        f'<div class="who"><span>{escape(a.display_name)}</span>'
+        f'<span class="id">{escape(item.athlete_id)}</span></div>'
+        f'<p style="margin:6px 0 10px;font-size:13.5px;color:var(--ink-soft);">'
+        f'<b>Where they are:</b> {reasons}</p>'
+        '<form method="post" action="/coach/outbox/review">'
+        f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
+        f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
+        f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
+        f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
+        '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
+        '<button class="approve" type="submit" name="decision" value="approved">'
+        f'Approve for {escape(item.local_date)}</button>'
+        '<button class="skip" type="submit" name="decision" value="skipped">'
+        "Don\u2019t send</button></div></form></div>"
+    )
+
+
 def render_outbox(
     pending: tuple[PendingMessage, ...],
     *,
-    token: str,
+    token: str = "",
     coach: str,
     today,
     message: tuple[str, str] | None = None,
@@ -756,28 +777,7 @@ def render_outbox(
             "each athlete's morning, in their own timezone.</p>"
         )
     else:
-        cards = []
-        for item in pending:
-            a = item.athlete
-            reasons = " · ".join(escape(f.detail) for f in a.flags) or "nothing flagged"
-            cards.append(
-                f'<div class="card {a.bucket.value}">'
-                f'<div class="who"><span>{escape(a.display_name)}</span>'
-                f'<span class="id">{escape(item.athlete_id)}</span></div>'
-                f'<p style="margin:6px 0 10px;font-size:13.5px;color:var(--ink-soft);">'
-                f'<b>Where they are:</b> {reasons}</p>'
-                '<form method="post" action="/coach/outbox/review">'
-                f'<input type="hidden" name="token" value="{escape(token)}">'
-                f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
-                f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
-                f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
-                f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
-                '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
-                '<button class="approve" type="submit" name="decision" value="approved">'
-                f'Approve for {escape(item.local_date)}</button>'
-                '<button class="skip" type="submit" name="decision" value="skipped">'
-                "Don\u2019t send</button></div></form></div>"
-            )
+        cards = [_outbox_card(item) for item in pending]
         body = (
             f"<section><h2>Queued for tomorrow <span class='n'>{len(pending)}</span></h2>"
             + "".join(cards)
