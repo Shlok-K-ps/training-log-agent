@@ -72,6 +72,15 @@ class Settings:
         return self.twilio_account_sid, self.twilio_auth_token, self.twilio_whatsapp_from
 
     @property
+    def twilio_configured(self) -> bool:
+        """Whether outbound WhatsApp transport has every required credential."""
+        return bool(
+            self.twilio_account_sid
+            and self.twilio_auth_token
+            and self.twilio_whatsapp_from
+        )
+
+    @property
     def calendar_configured(self) -> bool:
         return bool(
             self.public_base_url

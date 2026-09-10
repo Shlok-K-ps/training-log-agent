@@ -190,6 +190,7 @@ def render_whatsapp_desk(
     tab: str,
     coach: str,
     today: date,
+    transport_ready: bool,
     message: tuple[str, str] | None = None,
 ) -> str:
     """Render inbox, approval, schedule and delivery states in one daily desk."""
@@ -202,6 +203,11 @@ def render_whatsapp_desk(
     banner = ""
     if message:
         banner = f'<div class="msg {escape(message[0])}">{escape(message[1])}</div>'
+    transport = (
+        '<div class="msg ok"><strong>Live WhatsApp connected.</strong> Approved messages can be sent through Twilio.</div>'
+        if transport_ready else
+        '<div class="msg warn"><strong>Simulator mode.</strong> Twilio is not configured; the approval workflow works, but no real WhatsApp message can be sent.</div>'
+    )
     stats = (
         '<div class="desk-stats">'
         f'<div class="desk-stat"><strong>{counts["inbox"]}</strong><span>New feedback</span></div>'
@@ -241,7 +247,7 @@ field.addEventListener('input',()=>{{bulk.disabled=safeEligible===0||[...documen
             f'{_thread_list(conversations, selected_athlete, tab)}</section>'
             f'<section class="thread-panel">{_conversation(messages, selected_name, selected_athlete or "")}</section></div>'
         )
-    body = f'{banner}{stats}{_tabs(tab, counts)}{content}'
+    body = f'{banner}{transport}{stats}{_tabs(tab, counts)}{content}'
     return coach_frame(
         body, active="whatsapp", coach=coach, title="WhatsApp Desk",
         subtitle="Review athlete feedback, approve today’s messages, and verify delivery.",

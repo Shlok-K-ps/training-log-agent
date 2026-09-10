@@ -701,6 +701,7 @@ def _render_whatsapp(
         scheduled=scheduled, sent=sent, selected_athlete=selected,
         selected_name=selected_name, tab=tab, coach=settings.coach_name,
         demo_athletes=demo_athletes, today=date.today(), message=message,
+        transport_ready=settings.twilio_configured,
     )
 
 
@@ -774,6 +775,7 @@ async def health() -> dict[str, object]:
         "model": settings.gemini_model if settings.gemini_api_key else "offline-stub",
         "database": str(settings.db_file),
         "signature_validation": settings.validate_twilio_signature,
+        "whatsapp_integration": settings.twilio_configured,
         "morning_scheduler": settings.enable_morning_scheduler,
         "calendar_integration": settings.calendar_configured,
     }

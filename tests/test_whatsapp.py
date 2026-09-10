@@ -75,6 +75,7 @@ def test_health_reports_which_parser_is_live(client):
     body = client.get("/health").json()
     assert body["status"] == "ok"
     assert body["model"] == "offline-stub"
+    assert body["whatsapp_integration"] is False
 
 
 def test_the_webhook_logs_a_set_and_queues_coaching_for_review(client):
