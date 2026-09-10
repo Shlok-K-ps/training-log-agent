@@ -11,55 +11,285 @@ from html import escape
 from app.coach.athlete import AthleteDetail, progress_series
 from app.coach.view import coach_frame
 
-_ATHLETE_STYLE = """
-:root{--card:var(--surface);--line:var(--border);--meet:var(--plate-blue);
---faint:var(--ink-faint);--soft:var(--ink-soft);--act:var(--plate-red)}
-.back{margin:0 0 18px;font-size:14px}
-.back a{color:var(--meet)}
-.grid{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
-margin-bottom:22px}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:3px;
-padding:11px 13px}
-.tile .k{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
-color:var(--faint)}
-.tile .v{font-size:19px;font-weight:600;margin-top:3px;
-font-variant-numeric:tabular-nums}
-.tile .v.warn{color:var(--act)}
-table{border-collapse:collapse;width:100%;font-size:14px;margin-top:4px}
-th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line)}
-th:first-child,td:first-child{text-align:left}
-thead th{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
-color:var(--faint);font-weight:600}
-tbody td{font-variant-numeric:tabular-nums;color:var(--soft)}
-tbody td:first-child{color:var(--ink);font-family:ui-monospace,monospace;font-size:12.5px}
-.chart{background:var(--card);border:1px solid var(--line);border-radius:3px;
-padding:14px 15px;margin-bottom:10px}
-.chart h3{margin:0 0 2px;font-size:14.5px;font-weight:600}
-.chart .cap{margin:0 0 9px;font-size:12.5px;color:var(--faint)}
-.chart svg{display:block;width:100%;height:auto;overflow:visible}
-.compose textarea{width:100%;min-height:150px;padding:10px;font:inherit;
-font-size:14.5px;line-height:1.5;border:1px solid var(--line);border-radius:3px;
-background:var(--bg);color:var(--ink);resize:vertical}
-.compose .hint{font-size:12.5px;color:var(--faint);margin:7px 0 0}
-.profile-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(290px,.8fr);gap:20px}
-.context-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:18px 0 24px}
-.context-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px}
-.context-card h2{margin-bottom:10px;color:var(--ink)}
-.facts{margin:0;display:grid;gap:7px}
-.facts div{display:flex;justify-content:space-between;gap:12px;border-top:1px solid var(--border);padding-top:7px}
-.facts div:first-child{border-top:0;padding-top:0}
-.facts dt{font-size:12.5px;color:var(--ink-faint)}
-.facts dd{margin:0;text-align:right;font-size:12.5px;font-weight:600}
-.coach-draft{position:sticky;top:22px}
-.coach-draft .draft-state{font-size:11px;font-weight:700;text-transform:uppercase;
-letter-spacing:.08em;color:var(--plate-yellow-text);margin-bottom:8px}
-.coach-draft form{display:block}.coach-draft textarea{width:100%}.coach-draft .btns{margin-top:10px}
-.recovery-reasons{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--ink-soft)}
-.status-strip{padding:11px 13px;border-radius:5px;margin-bottom:15px;background:var(--surface-inset);
-font-size:13px;color:var(--ink-soft)}
-@media(max-width:820px){.profile-grid{grid-template-columns:1fr}.coach-draft{position:static}}
-@media(max-width:540px){.context-grid{grid-template-columns:1fr}}
-"""
+_ATHLETE_STYLE = '''
+:root {
+  --card: var(--surface);
+  --line: var(--border);
+  --meet: var(--plate-blue);
+  --faint: var(--ink-faint);
+  --soft: var(--ink-soft);
+  --act: var(--plate-red);
+}
+
+.back {
+  margin: 0 0 20px;
+  font-size: 13.5px;
+}
+
+.back a {
+  color: var(--unseen-blush);
+  text-decoration: none;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  transition: all 0.2s ease;
+}
+
+.back a:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--border-strong);
+  color: #ffffff;
+}
+
+.status-strip {
+  padding: 12px 18px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-strip strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin-bottom: 28px;
+}
+
+.tile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  transition: border-color 0.2s ease;
+}
+
+.tile:hover {
+  border-color: var(--border-strong);
+}
+
+.tile .k {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.tile .v {
+  font-size: 22px;
+  font-weight: 700;
+  margin-top: 5px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.tile .v.warn {
+  color: var(--plate-red);
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: 24px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 24px;
+}
+
+.context-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.context-card h2 {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  color: var(--ink-soft);
+}
+
+.facts {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.facts div:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.facts dt {
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.facts dd {
+  margin: 0;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+}
+
+.recovery-reasons {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.coach-draft {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+}
+
+.coach-draft .draft-state {
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--plate-yellow-text);
+  margin-bottom: 10px;
+  display: inline-block;
+  background: var(--plate-yellow-bg);
+  border: 1px solid var(--plate-yellow-border);
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+.coach-draft form {
+  display: block;
+}
+
+.coach-draft textarea {
+  width: 100%;
+  min-height: 160px;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-inset);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.coach-draft textarea:focus {
+  outline: none;
+  border-color: var(--unseen-blush);
+  box-shadow: 0 0 0 3px rgba(246, 200, 195, 0.12);
+}
+
+.coach-draft .btns {
+  margin-top: 14px;
+}
+
+.coach-draft .btns button.approve {
+  width: 100%;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #ffffff;
+  color: #09090b;
+  border: 1px solid #ffffff;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.coach-draft .btns button.approve:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.compose .hint {
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin: 10px 0 0;
+  line-height: 1.5;
+}
+
+.chart {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.chart h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.chart .cap {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  font-family: var(--font-mono);
+  color: var(--ink-faint);
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+@media(max-width:860px){
+  .profile-grid { grid-template-columns: 1fr; }
+  .coach-draft { position: static; }
+}
+
+@media(max-width:540px){
+  .context-grid { grid-template-columns: 1fr; }
+}
+'''
 
 
 def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:

@@ -112,9 +112,9 @@ def _send_morning_prompts() -> int:
 
 
 app = FastAPI(
-    title="Powerlifting Training-Log Agent",
+    title="Power AI — Powerlifting Training-Log Agent",
     version="0.2.0",
-    description="WhatsApp coaching with deterministic readiness, nutrition and calendar planning.",
+    description="Power AI: WhatsApp coaching agent with deterministic readiness, nutrition and calendar planning.",
     lifespan=lifespan,
 )
 
