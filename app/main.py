@@ -26,6 +26,7 @@ from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import whatsapp
 from app.coach import auth as coach_auth
+from app.coach.demo import clear_demo_squad, is_demo, seed_demo_squad
 from app.coach import (
     COOKIE_NAME,
     build_roster,
@@ -221,9 +222,61 @@ def _render_console(token: str, message: tuple[str, str] | None) -> str:
     try:
         db.init_db(conn)
         roster = build_roster(conn, today=date.today())
+        roster_ids = db.list_athletes(conn)
     finally:
         conn.close()
-    return render_roster(roster, token=token, coach=settings.coach_name, message=message)
+    has_demo = any(is_demo(a) for a in roster_ids)
+    return render_roster(
+        roster, token=token, coach=settings.coach_name, message=message,
+        has_demo=has_demo,
+    )
+
+
+@app.post("/coach/demo/seed", response_class=HTMLResponse)
+async def coach_seed_demo(request: Request) -> Response:
+    """Load a demo squad so an empty console can show what a full one looks like."""
+    form = dict(await request.form())
+    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+    message = await run_in_threadpool(_seed_demo)
+    return HTMLResponse(await run_in_threadpool(_render_console, token, message))
+
+
+@app.post("/coach/demo/clear", response_class=HTMLResponse)
+async def coach_clear_demo(request: Request) -> Response:
+    form = dict(await request.form())
+    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
+    message = await run_in_threadpool(_clear_demo)
+    return HTMLResponse(await run_in_threadpool(_render_console, token, message))
+
+
+def _seed_demo() -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        added = seed_demo_squad(conn)
+    finally:
+        conn.close()
+    if not added:
+        return ("err", "The demo squad is already loaded.")
+    return ("ok", f"Loaded {added} demo athletes. Remove them whenever you like.")
+
+
+def _clear_demo() -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        removed = clear_demo_squad(conn)
+    finally:
+        conn.close()
+    return ("ok", f"Removed {removed} demo athletes.")
 
 
 @app.get("/coach/outbox", response_class=HTMLResponse)

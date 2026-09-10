@@ -668,12 +668,35 @@ def _card(entry) -> str:
     )
 
 
+def _demo_controls(roster: Roster, has_demo: bool) -> str:
+    """Offer the demo squad on an empty console, and a way to remove it after."""
+    if roster.total == 0:
+        return (
+            '<div class="demo">'
+            "<p>Nothing has been logged yet. On a live team this fills up as "
+            "athletes text their sessions.</p>"
+            '<form method="post" action="/coach/demo/seed">'
+            '<button type="submit">Load a demo squad</button></form>'
+            "</div>"
+        )
+    if has_demo:
+        return (
+            '<div class="demo">'
+            "<p>This roster includes demo athletes.</p>"
+            '<form method="post" action="/coach/demo/clear">'
+            '<button class="skip" type="submit">Remove demo athletes</button></form>'
+            "</div>"
+        )
+    return ""
+
+
 def render(
     roster: Roster,
     *,
     token: str,
     coach: str,
     message: tuple[str, str] | None = None,
+    has_demo: bool = False,
 ) -> str:
     """Render the full coach roster console."""
     banner = ""
@@ -728,7 +751,7 @@ def render(
         f"<div style='margin-top:8px;'><span class='when'>{roster.reviewed_on.isoformat()}</span></div>"
         "</header>"
         f"<p class='summary'>{summary}</p>"
-        f"{banner}{''.join(sections)}"
+        f"{banner}{_demo_controls(roster, has_demo)}{''.join(sections)}"
         "<footer>Every line here is computed by the same rules that answer the "
         "athlete. This page decides nothing on its own.</footer>"
         "</div></body></html>"
