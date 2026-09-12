@@ -80,7 +80,7 @@ def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
     links = (
         ("overview", "/coach", "Overview"),
         ("athletes", "/coach/athletes", "Athletes"),
-        ("whatsapp", "/coach/whatsapp", "WhatsApp Desk"),
+        ("whatsapp", "/coach/whatsapp", "Messaging Desk"),
         ("analytics", "/coach/analytics", "Goal Analytics"),
         ("outbox", "/coach/outbox", "Outbox"),
     )
@@ -221,7 +221,7 @@ def _demo_controls(roster: Roster, has_demo: bool) -> str:
     message = (
         "Nothing has been logged yet. Load a mixed fictional squad to explore every screen."
         if roster.total == 0 else
-        "Add a mixed fictional squad alongside the roster to preview check-ins, injuries, goals and WhatsApp states."
+        "Add a mixed fictional squad alongside the roster to preview check-ins, injuries, goals and messaging states."
     )
     return (
         '<div class="demo"><p>' + escape(message) + '</p>'
@@ -242,11 +242,11 @@ def _tutorial() -> str:
   <ol>
     <li><strong>Add athletes:</strong> record bodyweight, 1RMs, training frequency, current injuries and a dated goal.</li>
     <li><strong>Read Overview:</strong> start with exceptions rather than checking every athlete manually.</li>
-    <li><strong>Open WhatsApp:</strong> review new feedback, inspect the prepared change, and approve or hold the exact message.</li>
+    <li><strong>Open Messaging Desk:</strong> review feedback, inspect the prepared change, and approve or hold the exact message.</li>
     <li><strong>Handle injuries:</strong> choose a bounded training pivot; the injury gate stays open until independent clearance.</li>
     <li><strong>Check Analytics:</strong> use ahead/on-track/lagging as a prompt to review—not an automatic programme change.</li>
   </ol>
-  <p>For a safe walkthrough, load the demo squad and use “Test the WhatsApp workflow” inside WhatsApp.</p>
+  <p>For a safe walkthrough, load the demo squad and use “Test the messaging workflow” inside Messaging Desk.</p>
   <form method="dialog"><button type="submit">Got it</button></form>
 </dialog>
 """
@@ -379,7 +379,7 @@ def render(
     # 4. Daily agent loop: fixed numbering 01, 02, 03, no emoji/symbols in headings
     workflow = (
         '<div class="panel"><div class="panel-head"><h2>Daily agent loop</h2></div>'
-        '<div class="flow-step"><b>01</b><div><strong>Observe</strong><p>Sleep, readiness, training and nutrition arrive through WhatsApp.</p></div></div>'
+        '<div class="flow-step"><b>01</b><div><strong>Observe</strong><p>Sleep, readiness, training and nutrition arrive through Telegram or WhatsApp.</p></div></div>'
         '<div class="flow-step"><b>02</b><div><strong>Prepare</strong><p>Rules combine today\'s check-in with history and current trends.</p></div></div>'
         '<div class="flow-step"><b>03</b><div><strong>Verify</strong><p>You edit or approve; only your approved wording can leave the queue.</p></div></div>'
         '</div>'
@@ -624,7 +624,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Power AI — WhatsApp Powerlifting Coach</title>
+  <title>Power AI — Messaging Powerlifting Coach</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -692,7 +692,7 @@ def render_landing(*, is_logged_in: bool = False) -> str:
         <div class="spec-col">
           <span class="spec-num">01</span>
           <span class="spec-name">INGESTION</span>
-          <span class="spec-detail">Twilio &middot; Vonage Sandbox</span>
+          <span class="spec-detail">Telegram &middot; Twilio &middot; Vonage</span>
         </div>
         <div class="spec-col">
           <span class="spec-num">02</span>
@@ -886,13 +886,13 @@ def render_landing(*, is_logged_in: bool = False) -> str:
       <div class="grid-3">
         <div class="feature-card"><span class="feature-badge badge-blue">PERSISTENT STATE</span><h3>Remembers the actual journey</h3><p>Sessions, sleep, nutrition, injuries, goals, calendar constraints, approvals and delivery events remain connected to the athlete—not to one chat transcript.</p></div>
         <div class="feature-card"><span class="feature-badge badge-yellow">EVENT-DRIVEN</span><h3>Acts when facts change</h3><p>A morning check-in, missed log, fresh injury or new schedule conflict recomputes the relevant plan and opens a coach decision.</p></div>
-        <div class="feature-card"><span class="feature-badge badge-red">CONTROLLED ACTION</span><h3>Closes the loop</h3><p>The coach approves exact wording; the system schedules it, sends through WhatsApp, records who approved it, and tracks delivered, read or failed.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">CONTROLLED ACTION</span><h3>Closes the loop</h3><p>The coach approves exact wording; the system schedules it, sends through the athlete's paired channel, records who approved it, and tracks delivery.</p></div>
       </div>
       <div class="table-container"><table class="data-table"><thead><tr><th>Capability</th><th>Normal chat</th><th>Power AI</th></tr></thead><tbody>
         <tr><td>Twenty-athlete longitudinal state</td><td>Manually supplied context</td><td><strong>Stored and continuously updated</strong></td></tr>
         <tr><td>Proactive daily workflow</td><td>Waits for a prompt</td><td><strong>Drafts, schedules and surfaces exceptions</strong></td></tr>
         <tr><td>Safety authority</td><td>Prompt instruction</td><td><strong>Code-enforced injury and supplement gates</strong></td></tr>
-        <tr><td>External action</td><td>Produces prose</td><td><strong>Coach-approved WhatsApp and calendar execution</strong></td></tr>
+        <tr><td>External action</td><td>Produces prose</td><td><strong>Coach-approved messaging and calendar execution</strong></td></tr>
         <tr><td>Audit</td><td>Read the transcript</td><td><strong>Evidence version, approver and delivery state</strong></td></tr>
       </tbody></table></div>
     </section>
@@ -988,7 +988,7 @@ def render_privacy() -> str:
       <p>Calendar connection is optional. The service reads event start/end times and usable locations only to plan travel and training. It does not retain event titles, descriptions, attendees or meeting content.</p>
       <p>OAuth tokens and saved places are encrypted at rest with Fernet cryptography when the calendar integration is configured. Confirmed workout references are stored until the athlete asks to delete them. Calendar data is never sold and is never sent to the language model.</p>
       <p>Training, sleep, readiness and nutrition messages may be sent to the configured language-model provider for structured parsing. Coaching decisions are made by deterministic application rules in pure Python, not by that model.</p>
-      <p>Athletes can send <em>“disconnect calendar”</em> in WhatsApp to delete stored calendar tokens, or <em>“forget my locations”</em> to erase saved home, office and gym places.</p>
+      <p>Athletes can send <em>“disconnect calendar”</em> through Telegram or WhatsApp to delete stored calendar tokens, or <em>“forget my locations”</em> to erase saved home, office and gym places.</p>
       <div style="margin-top:32px;padding-top:20px;border-top:1px solid var(--border);">
         <a href="/" class="btn btn-ghost">&larr; Return to Home</a>
       </div>

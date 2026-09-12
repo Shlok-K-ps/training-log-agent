@@ -117,7 +117,7 @@ def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeyp
     assert response.status_code == 200
     assert "Simulated athlete message received" in response.text
     assert "slept 5h" in response.text
-    assert "Test the WhatsApp workflow" in response.text
+    assert "Test the messaging workflow" in response.text
 
     approval = client.get("/coach/whatsapp?tab=approval")
     assert approval.status_code == 200

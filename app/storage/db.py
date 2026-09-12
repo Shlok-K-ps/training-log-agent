@@ -137,6 +137,17 @@ CREATE TABLE IF NOT EXISTS whatsapp_messages (
     created_at     TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS telegram_links (
+    chat_id       TEXT PRIMARY KEY,
+    athlete_id    TEXT NOT NULL UNIQUE,
+    linked_at     TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS telegram_pairing_state (
+    athlete_id    TEXT PRIMARY KEY,
+    version       INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_athlete_time
     ON whatsapp_messages (athlete_id, occurred_at DESC, id DESC);
 
@@ -306,6 +317,10 @@ ATHLETE_PROFILE_COLUMNS = {
     "goal_start_date": "TEXT",
 }
 
+WHATSAPP_MESSAGE_COLUMNS = {
+    "channel": "TEXT NOT NULL DEFAULT 'whatsapp'",
+}
+
 
 @dataclass(frozen=True)
 class Entry:
@@ -470,6 +485,12 @@ def init_db(conn: sqlite3.Connection) -> None:
             conn.execute(
                 f"ALTER TABLE athlete_profile_revisions ADD COLUMN {name} {column_type}"
             )
+    message_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(whatsapp_messages)")
+    }
+    for name, column_type in WHATSAPP_MESSAGE_COLUMNS.items():
+        if name not in message_columns:
+            conn.execute(f"ALTER TABLE whatsapp_messages ADD COLUMN {name} {column_type}")
     conn.commit()
 
 
@@ -1248,12 +1269,15 @@ def record_whatsapp_message(
     occurred_at: str | None = None,
     scheduled_for: str | None = None,
     reply_to_sid: str | None = None,
+    channel: str = "whatsapp",
 ) -> int:
     """Append a transport event once; Twilio retries are idempotent by MessageSid."""
     if direction not in {"inbound", "outbound"}:
         raise ValueError("message direction must be inbound or outbound")
     if status not in {"received", "queued", "sent", "delivered", "read", "failed"}:
         raise ValueError("unsupported WhatsApp message status")
+    if channel not in {"whatsapp", "telegram"}:
+        raise ValueError("unsupported messaging channel")
     body = (body or "").strip()
     if not body:
         raise ValueError("a WhatsApp message cannot be empty")
@@ -1268,12 +1292,12 @@ def record_whatsapp_message(
         """
         INSERT INTO whatsapp_messages
             (athlete_id, provider_sid, direction, body, message_kind, status,
-             occurred_at, scheduled_for, reply_to_sid, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             occurred_at, scheduled_for, reply_to_sid, created_at, channel)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             athlete_id, provider_sid or None, direction, body, message_kind, status,
-            occurred_at or now, scheduled_for, reply_to_sid, now,
+            occurred_at or now, scheduled_for, reply_to_sid, now, channel,
         ),
     )
     if direction == "inbound":
@@ -1289,6 +1313,76 @@ def record_whatsapp_message(
         )
     conn.commit()
     return int(cur.lastrowid)
+
+
+def link_telegram_chat(
+    conn: sqlite3.Connection,
+    *,
+    chat_id: str,
+    athlete_id: str,
+    pairing_version: int | None = None,
+) -> None:
+    """Bind one private Telegram chat to one existing athlete, without takeover."""
+    if athlete_id not in list_athletes(conn):
+        raise ValueError("that athlete is not enrolled")
+    current_chat = telegram_chat_id(conn, athlete_id)
+    current_athlete = telegram_athlete_id(conn, chat_id)
+    if current_chat not in (None, chat_id) or current_athlete not in (None, athlete_id):
+        raise ValueError("this athlete or Telegram chat is already paired")
+    if pairing_version is not None:
+        current_version = telegram_pairing_version(conn, athlete_id)
+        if pairing_version != current_version:
+            raise ValueError("this pairing link has already been used or replaced")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO telegram_links (chat_id, athlete_id, linked_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET athlete_id = excluded.athlete_id, "
+        "linked_at = excluded.linked_at",
+        (chat_id, athlete_id, now),
+    )
+    if pairing_version is not None:
+        conn.execute(
+            "UPDATE telegram_pairing_state SET version = version + 1 "
+            "WHERE athlete_id = ?",
+            (athlete_id,),
+        )
+    conn.commit()
+
+
+def telegram_pairing_version(conn: sqlite3.Connection, athlete_id: str) -> int:
+    conn.execute(
+        "INSERT OR IGNORE INTO telegram_pairing_state (athlete_id, version) "
+        "VALUES (?, 1)",
+        (athlete_id,),
+    )
+    row = conn.execute(
+        "SELECT version FROM telegram_pairing_state WHERE athlete_id = ?",
+        (athlete_id,),
+    ).fetchone()
+    conn.commit()
+    return int(row["version"])
+
+
+def telegram_athlete_id(conn: sqlite3.Connection, chat_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT athlete_id FROM telegram_links WHERE chat_id = ?", (str(chat_id),)
+    ).fetchone()
+    return str(row["athlete_id"]) if row is not None else None
+
+
+def telegram_chat_id(conn: sqlite3.Connection, athlete_id: str) -> str | None:
+    row = conn.execute(
+        "SELECT chat_id FROM telegram_links WHERE athlete_id = ?", (athlete_id,)
+    ).fetchone()
+    return str(row["chat_id"]) if row is not None else None
+
+
+def unlink_telegram_chat(conn: sqlite3.Connection, athlete_id: str) -> bool:
+    cur = conn.execute(
+        "DELETE FROM telegram_links WHERE athlete_id = ?", (athlete_id,)
+    )
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def whatsapp_messages(

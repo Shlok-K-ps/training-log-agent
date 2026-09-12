@@ -1,4 +1,4 @@
-"""The coach's daily WhatsApp workspace.
+"""The coach's daily cross-channel messaging workspace.
 
 This is deliberately a view over recorded messages and guarded drafts. It does
 not infer intent, approve coaching, or send anything by itself.
@@ -47,7 +47,7 @@ _DESK_CSS = """
 def _tabs(active: str, counts: dict[str, int]) -> str:
     labels = (("inbox", "Inbox"), ("approval", "Needs approval"),
               ("scheduled", "Scheduled"), ("sent", "Sent"))
-    return '<nav class="desk-tabs" aria-label="WhatsApp work states">' + "".join(
+    return '<nav class="desk-tabs" aria-label="Messaging work states">' + "".join(
         f'<a class="{"active" if active == key else ""}" href="/coach/whatsapp?tab={key}">'
         f'{label} <b>{counts.get(key, 0)}</b></a>'
         for key, label in labels
@@ -56,7 +56,7 @@ def _tabs(active: str, counts: dict[str, int]) -> str:
 
 def _thread_list(conversations, selected: str | None, tab: str) -> str:
     if not conversations:
-        return '<div class="desk-empty">No WhatsApp conversations yet.</div>'
+        return '<div class="desk-empty">No athlete conversations yet.</div>'
     rows = []
     for row in conversations:
         athlete_id = str(row["athlete_id"])
@@ -81,10 +81,12 @@ def _conversation(messages, athlete_name: str, athlete_id: str) -> str:
         direction = str(row["direction"])
         status = str(row["status"])
         timestamp = str(row["occurred_at"]).replace("T", " ")[:16]
+        channel = str(row["channel"] or "whatsapp")
         error = f' · error {escape(str(row["error_code"]))}' if row["error_code"] else ""
         bubbles.append(
             f'<div class="bubble {escape(direction)}">{escape(str(row["body"]))}'
-            f'<span class="bubble-meta">{escape(timestamp)} · {escape(status)}{error}</span></div>'
+            f'<span class="bubble-meta">{escape(channel)} · {escape(timestamp)} · '
+            f'{escape(status)}{error}</span></div>'
         )
     return (
         f'<h2>Conversation with {escape(athlete_name)}</h2><div class="chat-stream">'
@@ -142,6 +144,7 @@ def _sent_list(rows) -> str:
     items = []
     for row in rows:
         status = str(row["status"])
+        channel = str(row["channel"] or "whatsapp")
         error = f' · error {row["error_code"]}' if row["error_code"] else ""
         items.append(
             '<div class="delivery-row">'
@@ -149,7 +152,8 @@ def _sent_list(rows) -> str:
             f'<p>{escape(str(row["occurred_at"]).replace("T", " ")[:16])}</p></div>'
             f'<div><strong>{escape(str(row["message_kind"]).replace("_", " ").title())}</strong>'
             f'<p>{escape(str(row["body"]))}</p></div>'
-            f'<span class="delivery-state">{escape(status + error)}</span></div>'
+            f'<span class="delivery-state">{escape(channel)} · '
+            f'{escape(status + error)}</span></div>'
         )
     return '<div class="delivery-list">' + "".join(items) + "</div>"
 
@@ -157,7 +161,7 @@ def _sent_list(rows) -> str:
 def _simulator(demo_athletes: tuple[tuple[str, str], ...]) -> str:
     if not demo_athletes:
         return (
-            '<details class="simulator"><summary>Test the WhatsApp workflow</summary>'
+            '<details class="simulator"><summary>Test the messaging workflow</summary>'
             '<div style="padding:0 14px 14px" class="muted">Load the demo squad from '
             'Overview first. Simulations are restricted to fictional demo numbers.</div></details>'
         )
@@ -166,13 +170,13 @@ def _simulator(demo_athletes: tuple[tuple[str, str], ...]) -> str:
         for athlete_id, name in demo_athletes
     )
     return (
-        '<details class="simulator"><summary>Test the WhatsApp workflow</summary>'
+        '<details class="simulator"><summary>Test the messaging workflow</summary>'
         '<form method="post" action="/coach/whatsapp/simulate">'
         f'<select name="athlete_id">{options}</select>'
         '<textarea name="body" required maxlength="800" '
         'placeholder="Try: slept 5h, readiness 4, knee feels sore"></textarea>'
         '<button type="submit">Simulate message</button>'
-        '<p>This writes a real demo conversation and approval draft, but sends no external WhatsApp message.</p>'
+        '<p>This writes a real demo conversation and approval draft, but sends no external message.</p>'
         '</form></details>'
     )
 
@@ -207,7 +211,7 @@ def render_whatsapp_desk(
     transport = (
         f'<div class="msg ok"><strong>Real WhatsApp connected.</strong> Approved messages are sent through {escape(transport_name)}.</div>'
         if transport_ready else
-        '<div class="msg warn"><strong>Demo simulator is ready.</strong> Add the Vonage Sandbox credentials to enable real WhatsApp. The full inbox, approval and audit workflow already works here.</div>'
+        '<div class="msg warn"><strong>Demo simulator is ready.</strong> Add a Telegram bot token to enable permanent real messaging. The full inbox, approval and audit workflow already works here.</div>'
     )
     stats = (
         '<div class="desk-stats">'
@@ -250,7 +254,7 @@ field.addEventListener('input',()=>{{bulk.disabled=safeEligible===0||[...documen
         )
     body = f'{banner}{transport}{stats}{_tabs(tab, counts)}{content}'
     return coach_frame(
-        body, active="whatsapp", coach=coach, title="WhatsApp Desk",
-        subtitle="Review athlete feedback, approve today’s messages, and verify delivery.",
+        body, active="whatsapp", coach=coach, title="Messaging Desk",
+        subtitle="Review WhatsApp or Telegram feedback, approve messages, and verify delivery.",
         today=today.isoformat(), pending_count=len(pending), extra_style=_DESK_CSS,
     )

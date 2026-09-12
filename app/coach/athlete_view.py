@@ -508,6 +508,8 @@ def render_athlete(
     coach: str,
     suggested: str,
     message: tuple[str, str] | None = None,
+    telegram_pairing_url: str | None = None,
+    telegram_linked: bool = False,
 ) -> str:
     banner = ""
     if message:
@@ -579,6 +581,24 @@ def render_athlete(
         "The exact approved wording is what will be sent.</p>"
         "</form></div>"
     )
+    telegram_panel = ""
+    if telegram_linked:
+        telegram_panel = (
+            '<div class="context-card"><h2>Telegram connected</h2>'
+            '<p>This athlete receives approved messages through the permanent '
+            'Telegram channel.</p><form method="post" action="/coach/athlete/'
+            f'{escape(detail.athlete_id)}/telegram/unlink">'
+            '<button class="danger" type="submit">Disconnect Telegram</button>'
+            '</form></div>'
+        )
+    elif telegram_pairing_url:
+        telegram_panel = (
+            '<div class="context-card"><h2>Connect Telegram</h2>'
+            '<p>Send this signed link to the athlete. It can connect only one '
+            'private Telegram chat to this profile.</p>'
+            f'<a class="approve" href="{escape(telegram_pairing_url)}" '
+            'target="_blank" rel="noopener">Open secure pairing link</a></div>'
+        )
 
     def facts(items: list[tuple[str, object]]) -> str:
         usable = [(label, value) for label, value in items if value not in (None, "", ())]
@@ -644,7 +664,7 @@ def render_athlete(
         f'{_injury_clearance_panel(detail)}{_injury_pivot_panel(detail)}'
         f'<div class="grid">{tile_html}</div>'
         '<div class="profile-grid"><div>'
-        f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
+        f'<div class="context-grid">{telegram_panel}{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
         f"{verdict_table}{charts}{log}</div>{compose}</div>"
     )
     bucket_tints = {

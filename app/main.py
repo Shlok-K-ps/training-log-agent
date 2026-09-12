@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
-from app.channels import vonage, whatsapp
+from app.channels import telegram, vonage, whatsapp
 from app.decision.injury_pivot import injury_pivot_options
 from app.coach import auth as coach_auth
 from app.coach.athlete import athlete_detail, suggest_message
@@ -91,6 +91,12 @@ async def lifespan(app: FastAPI):
     db.init_db(conn)
     conn.close()
     log.info("database ready at %s", settings.db_file)
+    if settings.telegram_configured:
+        try:
+            await run_in_threadpool(telegram.configure_webhook)
+            log.info("Telegram webhook connected")
+        except Exception:  # noqa: BLE001 - service and simulator must still boot
+            log.exception("Telegram webhook setup failed")
     task = None
     if settings.enable_morning_scheduler:
         task = asyncio.create_task(_morning_scheduler_loop())
@@ -122,10 +128,18 @@ def _send_morning_prompts() -> int:
         if drafted:
             log.info("queued %d morning message(s) for coach review", len(drafted))
         def recorded_sender(athlete_id: str, body: str) -> None:
-            provider_sid = whatsapp.send_outbound(athlete_id, body)
+            telegram_chat = db.telegram_chat_id(conn, athlete_id)
+            if settings.telegram_configured and telegram_chat:
+                provider_sid = telegram.send_outbound(telegram_chat, body)
+                channel = "telegram"
+            else:
+                provider_sid = whatsapp.send_outbound(athlete_id, body)
+                channel = "whatsapp"
             db.record_whatsapp_message(
                 conn, athlete_id=athlete_id, direction="outbound", body=body,
-                status="queued", provider_sid=provider_sid, message_kind="scheduled",
+                status="sent" if channel == "telegram" else "queued",
+                provider_sid=provider_sid, message_kind="scheduled",
+                channel=channel,
             )
 
         sent = send_approved_prompts(conn, recorded_sender)
@@ -489,6 +503,8 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
             return None
         today = date.today()
         detail = athlete_detail(conn, athlete_id, today=today)
+        telegram_chat = db.telegram_chat_id(conn, athlete_id)
+        telegram_pairing_version = db.telegram_pairing_version(conn, athlete_id)
     finally:
         conn.close()
     return render_athlete(
@@ -496,7 +512,33 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
         coach=settings.coach_name,
         suggested=suggest_message(detail, coach=settings.coach_name),
         message=message,
+        telegram_pairing_url=telegram.pairing_url(
+            athlete_id, telegram_pairing_version
+        ),
+        telegram_linked=telegram_chat is not None,
     )
+
+
+@app.post("/coach/athlete/{athlete_id}/telegram/unlink", response_class=HTMLResponse)
+async def coach_unlink_telegram(athlete_id: str, request: Request) -> Response:
+    token = request.cookies.get(COOKIE_NAME, "").strip()
+    try:
+        coach_auth.check(token)
+    except coach_auth.CoachAuthError as exc:
+        return HTMLResponse(render_login(error=str(exc)), status_code=403)
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        removed = db.unlink_telegram_chat(conn, athlete_id)
+    finally:
+        conn.close()
+    message = (
+        ("ok", "Telegram was disconnected. The next pairing link can bind a new chat.")
+        if removed
+        else ("err", "This athlete did not have a Telegram chat connected.")
+    )
+    html = await run_in_threadpool(_render_athlete, athlete_id, message)
+    return HTMLResponse(html or "<h1>Not found</h1>", status_code=200 if html else 404)
 
 
 def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
@@ -760,8 +802,8 @@ def _render_whatsapp(
         scheduled=scheduled, sent=sent, selected_athlete=selected,
         selected_name=selected_name, tab=tab, coach=settings.coach_name,
         demo_athletes=demo_athletes, today=date.today(), message=message,
-        transport_ready=settings.whatsapp_configured,
-        transport_name=settings.whatsapp_transport_name,
+        transport_ready=settings.messaging_configured,
+        transport_name=settings.messaging_transport_name,
     )
 
 
@@ -841,6 +883,8 @@ async def health() -> dict[str, object]:
         ),
         "whatsapp_integration": settings.whatsapp_configured,
         "whatsapp_transport": settings.whatsapp_transport_name,
+        "telegram_integration": settings.telegram_configured,
+        "messaging_transport": settings.messaging_transport_name,
         "morning_scheduler": settings.enable_morning_scheduler,
         "calendar_integration": settings.calendar_configured,
     }
@@ -909,7 +953,12 @@ async def whatsapp_webhook(request: Request) -> Response:
     )
 
 
-def _process(athlete_id: str, body: str, provider_sid: str = "") -> str:
+def _process(
+    athlete_id: str,
+    body: str,
+    provider_sid: str = "",
+    channel: str = "whatsapp",
+) -> str:
     """Blocking work — one SQLite connection per request keeps threads honest."""
     conn = db.connect()
     try:
@@ -921,6 +970,7 @@ def _process(athlete_id: str, body: str, provider_sid: str = "") -> str:
             conn, athlete_id=athlete_id, direction="inbound", body=body,
             status="received", provider_sid=provider_sid or None,
             message_kind="athlete_feedback",
+            channel=channel,
         )
         reply = handle_message(conn, athlete_id, body, get_model_client())
         identity = provider_sid or hashlib.sha256(
@@ -936,6 +986,7 @@ def _process(athlete_id: str, body: str, provider_sid: str = "") -> str:
             conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
             status="queued", message_kind="receipt",
             reply_to_sid=provider_sid or None,
+            channel=channel,
         )
         return acknowledgement
     except Exception:  # noqa: BLE001
@@ -1022,4 +1073,106 @@ async def vonage_status_webhook(request: Request) -> Response:
             db.update_whatsapp_status(conn, sid, status, error_code=error_code)
         finally:
             conn.close()
+    return Response(status_code=200, content="ok")
+
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request) -> Response:
+    """Receive a private Telegram message through a signed Bot API webhook."""
+    supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    if not telegram.valid_webhook_secret(supplied_secret):
+        log.warning("rejected request with a bad Telegram webhook secret")
+        return Response(status_code=403, content="invalid webhook secret")
+    try:
+        payload = await request.json()
+    except ValueError:
+        return Response(status_code=400, content="invalid JSON")
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        return Response(status_code=200, content="ignored")
+    chat = message.get("chat")
+    if not isinstance(chat, dict) or chat.get("type") != "private":
+        return Response(status_code=200, content="private chats only")
+    chat_id = str(chat.get("id", "")).strip()
+    message_id = str(message.get("message_id", "")).strip()
+    body = str(message.get("text", "")).strip()
+    if not chat_id or not message_id or not body:
+        return Response(status_code=200, content="unsupported message")
+    inbound_sid = telegram.provider_sid(chat_id, message_id)
+
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        if body.startswith("/start"):
+            pieces = body.split(maxsplit=1)
+            pairing = (
+                telegram.athlete_from_pairing_token(pieces[1])
+                if len(pieces) == 2
+                else None
+            )
+            athlete_id = pairing[0] if pairing is not None else None
+            if pairing is None:
+                reply = "This pairing link is invalid. Ask your coach for a fresh link."
+            else:
+                try:
+                    db.link_telegram_chat(
+                        conn, chat_id=chat_id, athlete_id=athlete_id,
+                        pairing_version=pairing[1],
+                    )
+                    name = db.athlete_name(conn, athlete_id) or "your athlete profile"
+                    reply = (
+                        f"Connected to Power AI as {name}. Send your training, sleep, "
+                        "readiness or nutrition update whenever you're ready."
+                    )
+                    db.record_whatsapp_message(
+                        conn, athlete_id=athlete_id, direction="inbound",
+                        body="Telegram pairing accepted", status="received",
+                        provider_sid=inbound_sid, message_kind="channel_pairing",
+                        channel="telegram",
+                    )
+                except ValueError as exc:
+                    reply = f"Telegram could not be connected: {exc}."
+            try:
+                outbound_sid = await run_in_threadpool(
+                    telegram.send_outbound, chat_id, reply
+                )
+                if athlete_id is not None and db.telegram_athlete_id(conn, chat_id):
+                    db.record_whatsapp_message(
+                        conn, athlete_id=athlete_id, direction="outbound", body=reply,
+                        status="sent", provider_sid=outbound_sid,
+                        message_kind="channel_pairing", reply_to_sid=inbound_sid,
+                        channel="telegram",
+                    )
+            except Exception:  # noqa: BLE001
+                log.exception("failed to answer Telegram pairing request")
+                return Response(status_code=502, content="send failed")
+            return Response(status_code=200, content="ok")
+
+        athlete_id = db.telegram_athlete_id(conn, chat_id)
+    finally:
+        conn.close()
+
+    if athlete_id is None:
+        await run_in_threadpool(
+            telegram.send_outbound,
+            chat_id,
+            "This chat is not paired. Ask your coach to open your athlete page and "
+            "send you the secure Telegram pairing link.",
+        )
+        return Response(status_code=200, content="not paired")
+
+    reply = await run_in_threadpool(
+        _process, athlete_id, body, inbound_sid, "telegram"
+    )
+    try:
+        outbound_sid = await run_in_threadpool(telegram.send_outbound, chat_id, reply)
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            db.attach_whatsapp_reply_sid(conn, inbound_sid, outbound_sid)
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - Telegram retries non-2xx webhook responses
+        log.exception("failed to send Telegram acknowledgement")
+        return Response(status_code=502, content="send failed")
     return Response(status_code=200, content="ok")

@@ -28,6 +28,17 @@ services:
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
 
+      # --- Permanent demo channel: Telegram --------------------------------
+      # Create the bot in @BotFather. Startup registers the webhook automatically.
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      - key: TELEGRAM_LINK_SECRET
+        generateValue: true
+
       # --- Channel: Vonage WhatsApp Sandbox -------------------------------
       # Configure once and the real WhatsApp transport activates automatically.
       - key: VONAGE_API_KEY

@@ -174,7 +174,7 @@ def test_whatsapp_desk_is_a_separate_authenticated_workspace():
         client.cookies.set(COOKIE_NAME, TOKEN)
         resp = client.get("/coach/whatsapp")
         assert resp.status_code == 200
-        assert "WhatsApp Desk" in resp.text
+        assert "Messaging Desk" in resp.text
         assert "New feedback" in resp.text
         assert "Needs approval" in resp.text
         assert "Scheduled" in resp.text

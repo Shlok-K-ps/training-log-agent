@@ -158,7 +158,7 @@ def seed_demo_squad(conn: sqlite3.Connection, *, today: date | None = None) -> i
             goal_date=deadline if goal_lift else None,
         )
 
-    # Conversation, approval, schedule and failure examples for WhatsApp Desk.
+    # Conversation, approval, schedule and failure examples for Messaging Desk.
     db.record_whatsapp_message(
         conn, athlete_id=f"{DEMO_PREFIX}002", direction="inbound",
         body="Slept 5 hours, readiness 4. Squat felt unusually heavy yesterday.",

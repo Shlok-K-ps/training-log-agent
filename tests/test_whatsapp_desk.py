@@ -1,4 +1,4 @@
-"""WhatsApp Desk persistence and the guarded unchanged-message shortcut."""
+"""Messaging Desk persistence and the guarded unchanged-message shortcut."""
 
 from __future__ import annotations
 

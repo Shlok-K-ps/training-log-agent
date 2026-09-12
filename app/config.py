@@ -37,6 +37,13 @@ class Settings:
     vonage_sandbox_number: str = os.getenv("VONAGE_SANDBOX_NUMBER", "")
     vonage_webhook_secret: str = os.getenv("VONAGE_WEBHOOK_SECRET", "")
 
+    # Permanent, low-volume portfolio channel. BotFather supplies the first two
+    # values; Render can generate the independent webhook and pairing secrets.
+    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "")
+    telegram_webhook_secret: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    telegram_link_secret: str = os.getenv("TELEGRAM_LINK_SECRET", "")
+
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "")
     validate_twilio_signature: bool = _flag("VALIDATE_TWILIO_SIGNATURE", True)
     enable_morning_scheduler: bool = _flag("ENABLE_MORNING_SCHEDULER", False)
@@ -126,6 +133,36 @@ class Settings:
         if self.twilio_configured:
             return "Twilio"
         return "Simulator"
+
+    def require_telegram(self) -> tuple[str, str]:
+        if not self.telegram_bot_token or not self.telegram_webhook_secret:
+            raise RuntimeError(
+                "TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET are required"
+            )
+        return self.telegram_bot_token, self.telegram_webhook_secret
+
+    @property
+    def telegram_configured(self) -> bool:
+        return bool(
+            self.telegram_bot_token
+            and self.telegram_bot_username
+            and self.telegram_webhook_secret
+            and self.telegram_link_secret
+            and self.public_base_url
+        )
+
+    @property
+    def messaging_transport_name(self) -> str:
+        names: list[str] = []
+        if self.telegram_configured:
+            names.append("Telegram")
+        if self.whatsapp_configured:
+            names.append(self.whatsapp_transport_name)
+        return " + ".join(names) if names else "Simulator"
+
+    @property
+    def messaging_configured(self) -> bool:
+        return self.telegram_configured or self.whatsapp_configured
 
     @property
     def calendar_configured(self) -> bool:

@@ -70,7 +70,7 @@ athlete                                                        agent
 Three layers, and the split is the whole point.
 
 ```
-   WhatsApp ──▶ Vonage Sandbox ──▶ POST /webhook/vonage/inbound
+   Telegram / WhatsApp ──▶ signed webhook
                                    │
    ┌───────────────────────────────┼───────────────────────────────┐
    │                               ▼                               │
@@ -299,10 +299,35 @@ Now the messy half works — "squats felt awful today, ground out the last two a
 one forty" parses, and so does "tweaked my left shoulder on the last set", which
 logs the set *and* raises the injury flag.
 
-### 4. Connect real WhatsApp for a judge (Vonage Sandbox)
+### 4. Connect permanent real messaging (Telegram)
+
+Telegram is the always-available portfolio channel. It has no provider trial,
+uses Telegram's official Bot API, and runs through the same parser, deterministic
+rules, coach approval queue and message ledger as WhatsApp.
+
+1. Open <https://t.me/BotFather>, send `/newbot`, and choose a name and username.
+2. In Render, add the token as `TELEGRAM_BOT_TOKEN` and the username without `@`
+   as `TELEGRAM_BOT_USERNAME`. The Blueprint generates independent webhook and
+   athlete-pairing secrets. Never commit or paste the bot token into a chat.
+3. Redeploy. The application registers
+   `https://training-log-agent.onrender.com/webhook/telegram` with Telegram on
+   startup. Confirm `/health` shows `"telegram_integration": true`.
+4. Open an athlete in **Athletes / Roster** and select **Open secure pairing
+   link**. The athlete taps Start once. The signed link is single-use, cannot be
+   edited to claim another athlete, and each private chat can pair with only one athlete.
+5. The athlete sends a training, recovery or nutrition update. They receive a
+   neutral receipt immediately; the actual coaching recommendation waits in
+   **Messaging Desk → Needs approval**. Once approved, the next worker tick sends
+   the coach's exact wording through Telegram.
+
+The coach can disconnect a Telegram chat from the athlete page before passing a
+demo profile to another reviewer. Unknown chats receive no athlete information
+and are instructed to request a pairing link.
+
+#### Optional real WhatsApp demo (Vonage Sandbox)
 
 Vonage is integrated directly — there is no provider picker in the product.
-When its four environment values are present, the WhatsApp Desk automatically
+When its four environment values are present, the Messaging Desk automatically
 changes from **Demo simulator** to **Real WhatsApp connected**. The simulator
 remains available so the portfolio can always be reviewed without an account.
 
@@ -328,7 +353,7 @@ remains available so the portfolio can always be reviewed without an account.
    `"whatsapp_integration": true` and `"whatsapp_transport": "Vonage Sandbox"`.
 5. Send `squat 3x5 at 140kg rpe 8` from the joined phone. The phone receives a
    neutral acknowledgement immediately; the coaching recommendation appears in
-   **WhatsApp Desk → Needs approval**. Approve it and the audited delivery status
+   **Messaging Desk → Needs approval**. Approve it and the audited delivery status
    appears in the Sent tab.
 
 The API credentials remain only in Render. The public inbound and status URLs
@@ -363,7 +388,7 @@ an athlete by posting arbitrary JSON.
    the one Twilio signed, and the signature check will fail on a mismatch.
 
 Text the sandbox number. It acknowledges the log immediately; the coaching
-response appears in the coach's WhatsApp Desk for approval.
+response appears in the coach's Messaging Desk for approval.
 
 ### 5. Deploy
 
@@ -418,7 +443,7 @@ the log but do not grant scheduling authority.
 ## Tests
 
 ```bash
-pytest -q          # 349 tests, no network
+pytest -q          # 357 tests, no network
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -434,6 +459,9 @@ the suite never makes a network call.
 - The webhook is a public URL that writes to a database. Vonage endpoints
   require an independent high-entropy webhook secret; the legacy Twilio route
   verifies Twilio's HMAC signature. Unauthenticated requests get a 403.
+- Telegram verifies its dedicated Bot API secret header before reading a
+  message. Athlete pairing links are HMAC-signed, single-use, private-chat-only
+  and cannot be edited to claim another athlete. Bot tokens are never written to logs.
 - Athlete data is keyed by phone number and never crosses between athletes; the
   isolation is tested.
 - Calendar tokens and saved places are encrypted at rest. Event titles, descriptions, attendees
@@ -471,7 +499,7 @@ trustworthy:
                     │        graded return-to-load protocols are not built yet
         │
   coach console    built: overview, searchable squad directory, athlete history,
-                    readiness/program/nutrition context, and WhatsApp Desk
+                    readiness/program/nutrition context, and Messaging Desk
         │
   nutrition        food-access timing built; targets still need athlete/pro approval
 ```
@@ -490,7 +518,8 @@ workspace then has four persistent sections:
 - **Athletes** — searchable status/readiness directory. Each athlete opens into
   training history and charts plus recovery, programming, scheduling, nutrition,
   supplements, and an evidence-based message draft.
-- **WhatsApp Desk** — Inbox, Needs approval, Scheduled, and Sent views with the
+- **Messaging Desk** — Telegram and WhatsApp Inbox, Needs approval, Scheduled,
+  and Sent views with the
   athlete conversation, unread feedback, exact drafts and delivery status.
 - **Analytics** — dated goal pacing across the squad: ahead, on track, or
   lagging against a visible starting-1RM-to-target checkpoint.
@@ -568,8 +597,8 @@ safe batch. New readiness data, an injury, a schedule update, an edit, or any
 other newer athlete fact forces individual review. If evidence changes after
 approval but before sending, the approval is invalidated automatically.
 
-To test the workflow without an external WhatsApp account, load the fictional demo squad from
-Overview, open **WhatsApp → Inbox → Test the WhatsApp workflow**, and submit a
+To test the workflow without an external messaging account, load the fictional demo squad from
+Overview, open **Messaging Desk → Inbox → Test the messaging workflow**, and submit a
 check-in such as `slept 5h, readiness 4, soreness 6, stress 7`. The simulator
 uses the real parser, storage and approval queue but is restricted to reserved
 non-dialable demo numbers, so it cannot message a real athlete.
@@ -610,7 +639,7 @@ app/
   decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
                guardian.py — the injury gate; issues the only SafetyClearance
   programming/ Pure Python — five methods, selector, session structure
-  channels/    Vonage/Twilio WhatsApp adapters: identity, auth, delivery status
+  channels/    Telegram and WhatsApp adapters: identity, auth, delivery status
   integrations/ Google Calendar OAuth/API and Google Routes travel facts
   scheduling/   slot search, sleep/travel gates, and the outbox review gate
   router.py    the seam: parse → store → decide → reply
@@ -621,5 +650,5 @@ docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       clear_injury.py — COACH TOOL: list flagged athletes, close a flag
                check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         349 tests, no network
+tests/         357 tests, no network
 ```
