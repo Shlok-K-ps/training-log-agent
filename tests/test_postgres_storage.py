@@ -1,15 +1,10 @@
-"""Durable Postgres storage behind the SQLite interface.
+"""SQL translation for the Postgres storage path.
 
-The translation tests always run. The live test runs the training-day agent
-against a real Postgres when TEST_DATABASE_URL points at a disposable database.
+These run everywhere. The end-to-end run against a real Postgres lives in
+test_postgres_live.py.
 """
 
 from __future__ import annotations
-
-import os
-from datetime import datetime, timezone
-
-import pytest
 
 from app.storage import db, pg
 
@@ -60,49 +55,3 @@ def test_rows_behave_like_sqlite_rows():
     row = pg.Row(["id", "name"], [7, "Priya"])
     assert row["name"] == "Priya" and row[0] == 7 and dict(row) == {"id": 7, "name": "Priya"}
     assert pg._params([True, False, 3]) == (1, 0, 3)
-
-
-@pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="set TEST_DATABASE_URL to a disposable Postgres")
-def test_the_agent_runs_on_live_postgres(monkeypatch):
-    from app.casework import engine, store
-    from app.config import settings
-
-    url = os.environ["TEST_DATABASE_URL"]
-    monkeypatch.setattr(settings, "database_url", url)
-    conn = db.connect()
-    try:
-        for table in ("agent_events", "agent_cases", "agent_adaptations", "agent_settings",
-                      "plan_sessions", "agent_lease", "coach_channel", "entries"):
-            conn.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-        conn.commit()
-        pg._ready_urls.discard(url)
-        db.init_db(conn)
-        athlete = "+919812349999"
-        now = datetime(2026, 9, 14, 2, 1, tzinfo=timezone.utc)
-        db.register_athlete(conn, athlete, "Test Athlete", on="2026-09-01")
-        db.insert_entry(conn, db.Entry(athlete_id=athlete, kind="status", timezone="Asia/Kolkata",
-                                       morning_checkin_time="07:30", session_date="2026-09-01"))
-        store.add_plan_session(conn, athlete_id=athlete, weekday=0, lift="squat", sets=4, reps=5,
-                               rpe=7, approved_by="Coach", now=now)
-        store.set_autopilot(conn, athlete, True, updated_by="Coach", now=now)
-
-        sent = []
-
-        class Transport:
-            def send_athlete(self, conn, athlete_id, body, *, kind):
-                sent.append(kind)
-                return "fake"
-
-            def notify_coach(self, conn, **_):
-                return None
-
-        engine.tick(conn, now=now, transport=Transport(), coach_name="Coach")
-        engine.tick(conn, now=now, transport=Transport(), coach_name="Coach")
-        assert sent == ["checkin_sent"]
-        actions = [engine.LogCheckIn(checked_on="2026-09-14", sleep_hours=8, readiness=8)]
-        assert engine.observe_message(conn, athlete, actions, raw_text="slept 8h readiness 8",
-                                      now=now, transport=Transport(), coach_name="Coach")
-        assert sent[-1] == "session_delivered"
-        assert store.case_for_day(conn, athlete, "2026-09-14")["state"] == "awaiting_outcome"
-    finally:
-        conn.close()

@@ -180,7 +180,7 @@ def test_clearance_review_rejects_self_clearance_and_records_source(tmp_path, mo
         conn.close()
 
 
-def test_whatsapp_desk_is_a_separate_workspace():
+def test_whatsapp_desk_is_a_separate_workspace(monkeypatch):
     with TestClient(app) as client:
         resp = client.get("/coach/whatsapp")
         assert resp.status_code == 200
@@ -189,6 +189,12 @@ def test_whatsapp_desk_is_a_separate_workspace():
         assert "Needs approval" in resp.text
         assert "Scheduled" in resp.text
         assert "Sent" in resp.text
+        assert "/coach/whatsapp/bulk-approve" not in client.get(
+            "/coach/whatsapp?tab=approval"
+        ).text, "bulk approval only exists for the legacy morning scheduler"
+
+    monkeypatch.setattr(settings, "enable_agent_loop", False)
+    with TestClient(app) as client:
         assert "/coach/whatsapp/bulk-approve" in client.get(
             "/coach/whatsapp?tab=approval"
         ).text

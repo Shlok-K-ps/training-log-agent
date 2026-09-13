@@ -140,8 +140,13 @@ def render_whatsapp_desk(
     transport_name: str = "Simulator",
     message: tuple[str, str] | None = None,
     names: dict[str, str] | None = None,
+    legacy_checkins: bool = True,
 ) -> str:
-    """Render inbox, approval, schedule and delivery states in one daily desk."""
+    """Render inbox, approval, schedule and delivery states in one daily desk.
+
+    `legacy_checkins` is False when the training-day agent owns check-ins: there
+    are then no morning drafts, so there is nothing to bulk approve.
+    """
     names = names or {}
     counts = {
         "inbox": sum(int(row["unread_count"] or 0) for row in conversations),
@@ -165,6 +170,7 @@ def render_whatsapp_desk(
             '<form method="post" action="/coach/whatsapp/bulk-approve">'
             f'<button id="bulk-approve" class="approve" type="submit" data-bulk-approve data-eligible="{eligible}"'
             f'{"" if eligible else " disabled"}>Approve unchanged ({eligible})</button></form></div>'
+            if legacy_checkins else ""
         )
         content = bulk + (
             '<div class="draft-stack">' + "".join(approval_card(item) for item in pending) + "</div>"

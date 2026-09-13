@@ -148,20 +148,33 @@ def _session_summary(case) -> str:
 # --- Waking up on the clock ---------------------------------------------------------
 
 
-def tick(conn, *, now: datetime, transport: Transport, coach_name: str) -> TickReport:
-    """Advance every training day whose next step is due. Safe to call repeatedly."""
+def tick(
+    conn, *, now: datetime, transport: Transport, coach_name: str,
+    athlete_ids: list[str] | None = None, simulated: bool = False,
+) -> TickReport:
+    """Advance every training day whose next step is due. Safe to call repeatedly.
+
+    `simulated` runs the scripted demo day on its own clock. It sees only
+    simulated cases for the given athletes and can never advance a real case;
+    a real tick likewise never sees simulated cases.
+    """
     report = TickReport()
     holder = uuid.uuid4().hex
-    if not store.acquire_lease(conn, "agent-tick", holder, now=now, ttl_seconds=120):
+    lease = "agent-demo-day" if simulated else "agent-tick"
+    lease_now = datetime.now(timezone.utc) if simulated else now
+    if not store.acquire_lease(conn, lease, holder, now=lease_now, ttl_seconds=120):
         report.skipped = True
         return report
     try:
-        report.recovered = _recover_interrupted_sends(conn, now)
-        _open_training_days(conn, now, report)
-        for case in store.due_cases(conn, store.iso(now)):
+        if not simulated:
+            report.recovered = _recover_interrupted_sends(conn, now)
+        _open_training_days(conn, now, report, athlete_ids=athlete_ids, simulated=simulated)
+        for case in store.due_cases(
+            conn, store.iso(now), simulated=simulated, athlete_ids=athlete_ids
+        ):
             _advance(conn, case, now=now, transport=transport, coach_name=coach_name, report=report)
     finally:
-        store.release_lease(conn, "agent-tick", holder)
+        store.release_lease(conn, lease, holder)
     return report
 
 
@@ -181,8 +194,11 @@ def _recover_interrupted_sends(conn, now: datetime) -> int:
     return len(rows)
 
 
-def _open_training_days(conn, now: datetime, report: TickReport) -> None:
-    for athlete_id in store.planned_athletes(conn):
+def _open_training_days(
+    conn, now: datetime, report: TickReport, *, athlete_ids: list[str] | None, simulated: bool
+) -> None:
+    candidates = athlete_ids if athlete_ids is not None else store.planned_athletes(conn)
+    for athlete_id in candidates:
         schedule = db.latest_schedule_settings(conn, athlete_id)
         tz_name = str(schedule.get("timezone") or "UTC")
         local_now = now.astimezone(_zone(tz_name))
@@ -198,7 +214,8 @@ def _open_training_days(conn, now: datetime, report: TickReport) -> None:
         latest_opening = min(training, policy.LAST_CASE_OPENING.strftime("%H:%M"))
         if local_now.strftime("%H:%M") >= latest_opening:
             continue
-        adaptation = maybe_adapt_checkin_time(
+        # A simulated day is a demonstration, never evidence for adapting real behaviour.
+        adaptation = None if simulated else maybe_adapt_checkin_time(
             conn, athlete_id, now=now, base_time=base, training_time=training,
             first_name=_first_name(conn, athlete_id),
         )
@@ -208,6 +225,7 @@ def _open_training_days(conn, now: datetime, report: TickReport) -> None:
             conn, athlete_id=athlete_id, local_date=local_date, timezone_name=tz_name,
             checkin_time=checkin_time, training_time=training,
             plan=[item.as_dict() for item in plan], next_action_at=store.iso(due), now=now,
+            simulated=simulated,
         )
         if case_id is None:
             continue
@@ -388,7 +406,10 @@ def _escalate(conn, case, code, *, now, transport, coach_name, report, evidence,
 
 def _close_without_checkin(conn, case, *, now, transport, coach_name, report) -> None:
     streak = policy.SILENT_STREAK_DAYS - 1
-    previous = store.previous_outcomes(conn, str(case["athlete_id"]), str(case["local_date"]), streak)
+    previous = store.previous_outcomes(
+        conn, str(case["athlete_id"]), str(case["local_date"]), streak,
+        simulated=bool(case["simulated"]),
+    )
     evidence = [
         f"No check-in reply on {case['local_date']} after the check-in and "
         f"{case['follow_ups']} follow-ups."

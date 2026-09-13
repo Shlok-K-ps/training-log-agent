@@ -171,7 +171,42 @@ def _learned_card(item: dict) -> str:
     )
 
 
-def agent_board(board: Board, *, return_to: str = "/coach") -> str:
+def demo_day_panel(board: Board, *, return_to: str = "/coach#demo-day") -> str:
+    """The scripted demo day: clearly a simulation, separate from the real agent."""
+
+    def step(action: str, label: str, style: str) -> str:
+        return (
+            f'<form method="post" action="/coach/demo/day/{action}">'
+            f'<input type="hidden" name="return_to" value="{escape(return_to)}">'
+            f'<button class="btn {style} btn-sm" type="submit">{escape(label)}</button></form>'
+        )
+
+    rows = []
+    for case in board.simulated:
+        if case["state"] == "needs_coach":
+            rows.append(_needs_card(case, return_to=return_to))
+        elif case["state"] == "closed":
+            rows.append(_completed_row(case))
+        else:
+            rows.append(_open_row(case))
+    cases = "".join(rows) or (
+        '<div class="empty-card"><span>Not started. Play the morning to watch the agent run a '
+        "whole training day.</span></div>"
+    )
+    return (
+        '<section class="today-section" id="demo-day"><div class="section-head-row">'
+        '<h2>Simulated demo day <span class="state-pill">Simulation</span></h2></div>'
+        f'<p class="section-note">A scripted <b>{escape(board.demo_label)}</b> for the fictional '
+        "demo squad. The simulation moves its own clock, so it works at any hour. It never touches "
+        "real cases, real athletes or the real-time rules, and its messages go only to the in-app "
+        "simulator. Play the morning, decide its exceptions below, then play the evening.</p>"
+        f'<div class="option-row">{step("morning", "1. Play the morning", "btn-primary")}'
+        f'{step("evening", "2. Play the evening", "btn-ghost")}'
+        f'{step("reset", "Reset simulation", "btn-ghost")}</div>{cases}</section>'
+    )
+
+
+def agent_board(board: Board, *, return_to: str = "/coach", blocker: str | None = None) -> str:
     stats = (
         ("Needs you", len(board.needs_coach)),
         ("In progress", len(board.open_cases)),
@@ -229,12 +264,19 @@ def agent_board(board: Board, *, return_to: str = "/coach") -> str:
         '<section class="today-section"><div class="section-head-row"><h2>Agent timeline</h2>'
         '<form method="post" action="/coach/agent/run">'
         f'<input type="hidden" name="return_to" value="{escape(return_to)}">'
-        '<button class="btn btn-ghost btn-sm" type="submit">Run agent now</button></form></div>'
+        '<button class="btn btn-ghost btn-sm" type="submit">Run agent now (real time)</button></form></div>'
         + (f'<div class="list-card">{timeline_items(board.timeline, with_names=True)}</div>'
            if board.timeline else '<div class="empty-card"><span>No agent activity yet.</span></div>')
         + "</section>"
     )
-    return f"{strip}{coach_notice}{intro}{needs}{waiting}{done}{timeline}{learned}"
+    blocked = (
+        f'<div class="msg err" role="alert"><b>Agent blocked.</b> {escape(blocker)}</div>'
+        if blocker else ""
+    )
+    return (
+        f"{blocked}{strip}{coach_notice}{intro}{needs}{waiting}{done}{timeline}{learned}"
+        f"{demo_day_panel(board)}"
+    )
 
 
 def render_case_body(case, events, *, athlete_name: str, message_banner: str) -> str:

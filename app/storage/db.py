@@ -298,6 +298,7 @@ CREATE TABLE IF NOT EXISTS agent_cases (
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
     closed_at           TEXT,
+    simulated           INTEGER NOT NULL DEFAULT 0,
     UNIQUE (athlete_id, local_date)
 );
 
@@ -601,6 +602,9 @@ def init_db(conn: sqlite3.Connection) -> None:
     for name, column_type in WHATSAPP_MESSAGE_COLUMNS.items():
         if name not in message_columns:
             conn.execute(f"ALTER TABLE whatsapp_messages ADD COLUMN {name} {column_type}")
+    case_columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_cases)")}
+    if "simulated" not in case_columns:
+        conn.execute("ALTER TABLE agent_cases ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     getattr(conn, "mark_schema_ready", lambda: None)()
 

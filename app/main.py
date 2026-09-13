@@ -31,10 +31,10 @@ from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
-from app import access
+from app import access, deployment
 from app.agent.schemas import LOOP_TOOL_NAMES
 from app.casework import board as agent_board
-from app.casework import clock, engine
+from app.casework import clock, demo_day, engine
 from app.casework import store as case_store
 from app.coach import agent_view
 from app.coach.view import banner, coach_frame
@@ -102,7 +102,7 @@ async def lifespan(app: FastAPI):
     conn = db.connect()
     db.init_db(conn)
     conn.close()
-    log.info("database ready at %s", settings.db_file)
+    log.info("database ready (%s)", deployment.storage_backend())
     app.state.telegram_webhook_ready = False
     app.state.telegram_webhook_error = None
     if settings.telegram_configured:
@@ -115,12 +115,18 @@ async def lifespan(app: FastAPI):
             app.state.telegram_webhook_error = str(exc)
             log.exception("Telegram webhook setup failed")
     tasks = []
-    if settings.enable_agent_loop and settings.agent_background_ticks:
-        tasks.append(asyncio.create_task(_agent_loop()))
-        log.info("training-day agent enabled")
-    if settings.enable_morning_scheduler:
+    blocker = deployment.agent_blocker()
+    if blocker:
+        log.error(blocker)
+    if settings.enable_agent_loop:
+        # The case engine is the only owner of proactive check-ins: the legacy
+        # morning scheduler is never started alongside it.
+        if settings.agent_background_ticks:
+            tasks.append(asyncio.create_task(_agent_loop()))
+            log.info("training-day agent loop started (%s)", deployment.status()["agent_loop"])
+    elif settings.enable_morning_scheduler:
         tasks.append(asyncio.create_task(_morning_scheduler_loop()))
-        log.info("coach-approved message sender enabled")
+        log.info("legacy morning scheduler enabled because the training-day agent is off")
     try:
         yield
     finally:
@@ -139,12 +145,16 @@ async def _agent_loop() -> None:
     while True:
         try:
             await run_in_threadpool(_run_agent_tick)
+            await run_in_threadpool(_send_approved_coach_messages)
         except Exception:  # noqa: BLE001 - keep the web service alive and retry later
             log.exception("training-day agent tick failed")
         await asyncio.sleep(60)
 
 
 def _run_agent_tick() -> dict[str, object]:
+    blocker = deployment.agent_blocker()
+    if not settings.enable_agent_loop or blocker:
+        return {"skipped": True, "blocked": blocker or "The training-day agent is disabled."}
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -167,32 +177,52 @@ async def _morning_scheduler_loop() -> None:
         await asyncio.sleep(60)
 
 
+def _recorded_sender(conn):
+    def recorded_sender(athlete_id: str, body: str) -> None:
+        telegram_chat = db.telegram_chat_id(conn, athlete_id)
+        if settings.telegram_configured and telegram_chat:
+            provider_sid = telegram.send_outbound(telegram_chat, body)
+            channel = "telegram"
+        else:
+            provider_sid = whatsapp.send_outbound(athlete_id, body)
+            channel = "whatsapp"
+        db.record_whatsapp_message(
+            conn, athlete_id=athlete_id, direction="outbound", body=body,
+            status="sent" if channel == "telegram" else "queued",
+            provider_sid=provider_sid, message_kind="scheduled",
+            channel=channel,
+        )
+
+    return recorded_sender
+
+
+def _send_approved_coach_messages() -> int:
+    """Send notes the coach wrote and replies the coach approved. Never check-ins."""
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        sender = _recorded_sender(conn)
+        return send_approved_notes(conn, sender) + send_approved_feedback(conn, sender)
+    finally:
+        conn.close()
+
+
 def _send_morning_prompts() -> int:
-    """One tick: draft tomorrow's messages, then send the ones already approved."""
+    """Legacy morning scheduler: draft tomorrow's check-ins, send approved messages.
+
+    Dormant whenever ENABLE_AGENT_LOOP is on; the training-day agent then owns
+    every proactive check-in and this is never scheduled or called by a tick.
+    """
     conn = db.connect()
     try:
         db.init_db(conn)
         drafted = draft_upcoming_prompts(conn)
         if drafted:
             log.info("queued %d morning message(s) for coach review", len(drafted))
-        def recorded_sender(athlete_id: str, body: str) -> None:
-            telegram_chat = db.telegram_chat_id(conn, athlete_id)
-            if settings.telegram_configured and telegram_chat:
-                provider_sid = telegram.send_outbound(telegram_chat, body)
-                channel = "telegram"
-            else:
-                provider_sid = whatsapp.send_outbound(athlete_id, body)
-                channel = "whatsapp"
-            db.record_whatsapp_message(
-                conn, athlete_id=athlete_id, direction="outbound", body=body,
-                status="sent" if channel == "telegram" else "queued",
-                provider_sid=provider_sid, message_kind="scheduled",
-                channel=channel,
-            )
-
-        sent = send_approved_prompts(conn, recorded_sender)
-        sent += send_approved_notes(conn, recorded_sender)
-        return sent + send_approved_feedback(conn, recorded_sender)
+        sender = _recorded_sender(conn)
+        sent = send_approved_prompts(conn, sender)
+        sent += send_approved_notes(conn, sender)
+        return sent + send_approved_feedback(conn, sender)
     finally:
         conn.close()
 
@@ -329,8 +359,10 @@ async def agent_tick(request: Request) -> Response:
     ):
         return Response(status_code=403, content="invalid tick signature")
     report = await run_in_threadpool(_run_agent_tick)
+    if report.get("blocked"):
+        return Response(status_code=503, content=json.dumps(report), media_type="application/json")
     try:
-        await run_in_threadpool(_send_morning_prompts)
+        await run_in_threadpool(_send_approved_coach_messages)
     except Exception:  # noqa: BLE001 - the agent tick already ran; approved sends retry next time
         log.exception("sending coach-approved messages failed during tick")
     return Response(content=json.dumps(report), media_type="application/json")
@@ -340,7 +372,9 @@ async def agent_tick(request: Request) -> Response:
 async def coach_run_agent(request: Request) -> Response:
     form = dict(await request.form())
     report = await run_in_threadpool(_run_agent_tick)
-    if report.get("skipped"):
+    if report.get("blocked"):
+        message = ("err", str(report["blocked"]))
+    elif report.get("skipped"):
         message = ("warn", "The agent is already running; try again in a moment.")
     else:
         message = (
@@ -355,6 +389,13 @@ def _decide_case(case_id: int, option: str) -> tuple[bool, str]:
     conn = db.connect()
     try:
         db.init_db(conn)
+        case = case_store.case_by_id(conn, case_id)
+        if case is not None and case["simulated"]:
+            # A simulated demo day keeps its own clock and only reaches the simulator.
+            return engine.apply_coach_decision(
+                conn, case_id, option, coach_name=settings.coach_name,
+                now=demo_day.decision_time(case), transport=demo_day.SimulatorTransport(),
+            )
         return engine.apply_coach_decision(
             conn, case_id, option, coach_name=settings.coach_name, now=clock.utcnow(),
             transport=LiveTransport(),
@@ -370,6 +411,30 @@ async def coach_decide_case(case_id: int, request: Request) -> Response:
     form = dict(await request.form())
     ok, text = await run_in_threadpool(_decide_case, case_id, str(form.get("option", "")))
     return _redirect(_return_to(form, f"/coach/case/{case_id}"), ("ok" if ok else "err", text))
+
+
+def _demo_day(phase: str) -> tuple[str, str]:
+    if not settings.enable_agent_loop:
+        return ("err", "The training-day agent is disabled on this deployment.")
+    if phase not in {"morning", "evening", "reset"}:
+        return ("err", "Unknown demo step.")
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        if phase == "reset":
+            removed = demo_day.reset(conn)
+            return ("ok", f"Simulated demo day reset ({removed} case(s) removed).")
+        return demo_day.play(conn, phase, coach_name=settings.coach_name)
+    finally:
+        conn.close()
+
+
+@app.post("/coach/demo/day/{phase}", response_class=HTMLResponse)
+async def coach_demo_day(phase: str, request: Request) -> Response:
+    """The scripted, simulated demo day. Separate from the real-time agent."""
+    form = dict(await request.form())
+    result = await run_in_threadpool(_demo_day, phase)
+    return _redirect(_return_to(form, "/coach#demo-day"), result)
 
 
 @app.get("/coach", response_class=HTMLResponse)
@@ -399,7 +464,7 @@ def _render_console(message: tuple[str, str] | None) -> str:
         today = date.today()
         roster = build_roster(conn, today=today)
         roster_ids = db.list_athletes(conn)
-        pending = pending_reviews(conn, today=today)
+        pending = _reviewable(conn, today)
         injury_plans = tuple(
             (entry, _current_injury_plan_title(conn, entry.athlete_id))
             for entry in roster.entries
@@ -412,7 +477,8 @@ def _render_console(message: tuple[str, str] | None) -> str:
         roster, coach=settings.coach_name, message=message,
         has_demo=any(is_demo(a) for a in roster_ids),
         pending_count=len(pending), pending=pending, injury_plans=injury_plans,
-        agent_board=agent_view.agent_board(board), extra_style=agent_view.AGENT_STYLE,
+        agent_board=agent_view.agent_board(board, blocker=deployment.agent_blocker()),
+        extra_style=agent_view.AGENT_STYLE,
     )
 
 
@@ -431,7 +497,7 @@ def _render_case(case_id: int, message: tuple[str, str] | None) -> str | None:
             return None
         events = case_store.case_events(conn, case_id)
         athlete_name = db.athlete_name(conn, str(case["athlete_id"])) or str(case["athlete_id"])
-        pending_count = len(db.pending_drafts(conn))
+        pending_count = _pending_count(conn)
     finally:
         conn.close()
     body = agent_view.render_case_body(
@@ -583,7 +649,7 @@ def _render_athlete_directory(message: tuple[str, str] | None) -> str:
         roster = build_roster(conn, today=date.today())
         roster_ids = db.list_athletes(conn)
         telegram_linked_ids = db.telegram_linked_athletes(conn)
-        pending_count = len(db.pending_drafts(conn))
+        pending_count = _pending_count(conn)
     finally:
         conn.close()
     return render_athletes(
@@ -730,12 +796,36 @@ async def coach_register_athlete(request: Request) -> Response:
 
 def _approved_outbound(conn) -> list:
     """Every coach-approved message still waiting for its send, soonest first."""
+    legacy_checkins = db.approved_drafts(conn, MORNING) if _legacy_checkins_visible() else []
     rows = (
-        db.approved_drafts(conn, MORNING)
+        legacy_checkins
         + db.approved_drafts_with_prefix(conn, COACH_NOTE)
         + db.approved_drafts_with_prefix(conn, FEEDBACK_REPLY)
     )
     return sorted(rows, key=lambda row: (str(row["local_date"]), str(row["athlete_id"])))
+
+
+def _legacy_checkins_visible() -> bool:
+    """Morning-check-in drafts belong to the legacy scheduler, dormant under the agent."""
+    return not settings.enable_agent_loop
+
+
+def _visible_drafts(conn) -> list:
+    rows = db.pending_drafts(conn)
+    if _legacy_checkins_visible():
+        return rows
+    return [row for row in rows if str(row["message_kind"]) != MORNING]
+
+
+def _pending_count(conn) -> int:
+    return len(_visible_drafts(conn))
+
+
+def _reviewable(conn, today: date) -> tuple:
+    items = pending_reviews(conn, today=today)
+    if _legacy_checkins_visible():
+        return items
+    return tuple(item for item in items if item.message_kind != MORNING)
 
 
 def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | None:
@@ -749,7 +839,7 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
         telegram_chat = db.telegram_chat_id(conn, athlete_id)
         telegram_pairing_version = db.telegram_pairing_version(conn, athlete_id)
         conversation = db.whatsapp_messages(conn, athlete_id, limit=40)
-        pending = db.pending_drafts(conn)
+        pending = _visible_drafts(conn)
         scheduled = [
             row for row in _approved_outbound(conn) if str(row["athlete_id"]) == athlete_id
         ]
@@ -902,7 +992,7 @@ def _render_analytics() -> str:
     try:
         db.init_db(conn)
         paces = squad_goal_paces(conn, today=date.today())
-        pending_count = len(db.pending_drafts(conn))
+        pending_count = _pending_count(conn)
     finally:
         conn.close()
     return render_analytics(
@@ -961,6 +1051,8 @@ async def coach_whatsapp_simulate(request: Request) -> Response:
 
 
 def _bulk_approve_unchanged() -> tuple[str, str]:
+    if not _legacy_checkins_visible():
+        return ("err", "Check-ins are sent by the training-day agent; there are no morning drafts to approve.")
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -990,7 +1082,7 @@ def _render_whatsapp(
     conn = db.connect()
     try:
         db.init_db(conn)
-        pending = pending_reviews(conn, today=date.today())
+        pending = _reviewable(conn, date.today())
         conversations = db.whatsapp_conversations(conn)
         selected = athlete_id or (
             str(conversations[0]["athlete_id"]) if conversations else ""
@@ -1022,6 +1114,7 @@ def _render_whatsapp(
         ),
         transport_name=settings.messaging_transport_name,
         names=names,
+        legacy_checkins=_legacy_checkins_visible(),
     )
 
 
@@ -1056,10 +1149,16 @@ async def terms() -> str:
 
 @app.get("/health")
 async def health() -> dict[str, object]:
+    storage = deployment.status()
     return {
-        "status": "ok",
+        # Degraded, not down: the site and webhooks still work, the agent does not.
+        "status": "degraded" if storage["agent_blocker"] else "ok",
+        **storage,
         "model": settings.gemini_model if settings.gemini_api_key else "offline-stub",
-        "database": str(settings.db_file),
+        "database": (
+            "postgres (DATABASE_URL)" if storage["storage_backend"] == "postgres"
+            else str(settings.db_file)
+        ),
         "signature_validation": (
             bool(settings.vonage_webhook_secret)
             if settings.vonage_configured
@@ -1075,7 +1174,7 @@ async def health() -> dict[str, object]:
             app.state, "telegram_webhook_error", None
         ),
         "messaging_transport": settings.messaging_transport_name,
-        "morning_scheduler": settings.enable_morning_scheduler,
+        "morning_scheduler": settings.enable_morning_scheduler and not settings.enable_agent_loop,
         "calendar_integration": settings.calendar_configured,
     }
 
@@ -1169,7 +1268,7 @@ def _process(
             channel=channel,
         )
         now = clock.utcnow()
-        agent_owned = settings.enable_agent_loop and channel in AGENT_CHANNELS
+        agent_owned = deployment.agent_loop_active() and channel in AGENT_CHANNELS
         reply, actions = handle_message_with_actions(
             conn, athlete_id, body, get_model_client(),
             today=engine.local_today(conn, athlete_id, now) if agent_owned else None,

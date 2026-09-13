@@ -20,6 +20,8 @@ class Board:
     messages_sent: int = 0
     planned_athletes: int = 0
     coach_linked: bool = False
+    simulated: list[dict] = field(default_factory=list)
+    demo_label: str = ""
 
 
 def _case(conn, row) -> dict:
@@ -41,7 +43,11 @@ def snapshot(conn, now: datetime) -> Board:
         messages_sent=store.sent_actions_since(conn, since),
         planned_athletes=len(store.planned_athletes(conn)),
         coach_linked=store.coach_chat_id(conn) is not None,
+        simulated=[_case(conn, row) for row in store.simulated_cases(conn)],
     )
+    from app.casework.demo_day import DEMO_LABEL
+
+    board.demo_label = DEMO_LABEL
     zones: dict[int, str] = {}
     for row in store.recent_events(conn, 25):
         item = dict(row)

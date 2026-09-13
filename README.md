@@ -428,18 +428,28 @@ response appears in the coach's Messaging Desk for approval.
 Blueprint, fill in the secrets Render asks for, and the coach console is live at
 `https://<your-service>.onrender.com/coach`.
 
-> **No sign-in.** This is a personal project, so the coach console is open to
-> anyone who has the URL — including athlete data and the ability to approve
-> and send messages. Keep the service URL private.
+> **No password.** On a deployment with a public URL the console is locked. The
+> coach links their Telegram once with `/coach <COACH_SETUP_CODE>` and opens the
+> console from the 15-minute signed link the bot sends for `/console`.
 
-Two free-plan limits, neither of which affects the rules or the console itself:
+What the free plan needs:
 
-- **No persistent disk.** Training history lives on a temporary filesystem and
-  is lost on every deploy and restart. Fine for a demo; not fine for real
-  athletes. Move to a paid instance type and uncomment the `disk:` block to fix.
-- **The service sleeps** after 15 minutes without traffic. Proactive morning
-  check-ins cannot fire while it is asleep, so they are unreliable until the
-  service is always on.
+- **Durable memory: `DATABASE_URL` is required.** The web instance's filesystem
+  is temporary, so the agent's cases would be erased on every restart or deploy.
+  Set `DATABASE_URL` to a Postgres database (Neon's free tier works). Without it
+  the training-day agent stays **blocked**: `/health` reports `"status":
+  "degraded"` with the reason, the tick endpoint returns 503, and the console
+  shows the block. Local development without a public URL may use SQLite.
+- **The service sleeps** after 15 minutes without traffic. GitHub Actions calls
+  the signed `/internal/agent/tick` endpoint every ten minutes (set the
+  `AGENT_TICK_URL` and `AGENT_TICK_SECRET` repository secrets), so check-ins and
+  follow-ups still happen while it is asleep.
+- **One owner of check-ins.** With `ENABLE_AGENT_LOOP=true` the legacy morning
+  scheduler never starts, and its morning drafts are hidden from the console.
+
+For a demo at any hour, use **Simulated demo day** on Today: it plays a scripted
+Monday for the fictional demo squad on its own clock, separate from real cases
+and from the real-time **Run agent now** button.
 
 Netlify, Vercel and similar static/serverless hosts cannot run this service:
 it is a long-lived Python process with a background scheduler, not a set of

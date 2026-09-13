@@ -67,8 +67,11 @@ def test_a_deployed_console_is_locked_until_a_signed_link_is_opened(deployed):
         assert client.get("/").status_code == 200, "the public landing page stays public"
 
 
-def test_the_tick_endpoint_requires_a_fresh_signature(deployed):
+def test_the_tick_endpoint_requires_a_fresh_signature(deployed, monkeypatch):
+    from app import deployment
+
     main, _, _ = deployed
+    monkeypatch.setattr(deployment, "durable_storage_configured", lambda: True)
     with TestClient(main.app) as client:
         assert client.post("/internal/agent/tick").status_code == 403
         stale = str(int(time.time()) - 3600)

@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from fastapi.testclient import TestClient
 
-from app import access
+from app import access, deployment
 from app.casework import clock, store
 from app.storage import db
 
@@ -97,6 +97,9 @@ def world(tmp_path, monkeypatch):
     }.items():
         monkeypatch.setattr(settings, name, value)
     monkeypatch.setattr(main.telegram, "configure_webhook", lambda: None)
+    # Stands in for durable Postgres so the week runs on a local file; the live
+    # Postgres test runs the same path against a real database.
+    monkeypatch.setattr(deployment, "durable_storage_configured", lambda: True)
     main.get_model_client.cache_clear()
 
     conn = db.connect(settings.database_path)

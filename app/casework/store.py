@@ -159,16 +159,17 @@ def set_checkin_time(conn, athlete_id: str, value: str | None, *, updated_by: st
 def create_case(
     conn, *, athlete_id: str, local_date: str, timezone_name: str, checkin_time: str,
     training_time: str, plan: list[dict[str, object]], next_action_at: str, now: datetime,
+    simulated: bool = False,
 ) -> int | None:
     """Open the case for one training day. Returns None when it already exists."""
     stamp = iso(now)
     cur = conn.execute(
         "INSERT INTO agent_cases (athlete_id, local_date, timezone, checkin_time, training_time, "
-        "state, next_action_at, plan_json, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?) "
+        "state, next_action_at, plan_json, created_at, updated_at, simulated) "
+        "VALUES (?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, ?, ?) "
         "ON CONFLICT (athlete_id, local_date) DO NOTHING",
         (athlete_id, local_date, timezone_name, checkin_time, training_time, next_action_at,
-         _dumps(plan), stamp, stamp),
+         _dumps(plan), stamp, stamp, int(simulated)),
     )
     conn.commit()
     if cur.rowcount != 1:
@@ -194,12 +195,20 @@ def open_case_for_day(conn, athlete_id: str, local_date: str):
     ).fetchone()
 
 
-def due_cases(conn, now_iso: str) -> list:
-    return list(conn.execute(
-        f"SELECT * FROM agent_cases WHERE state IN ({_in(TIMED_STATES)}) "
+def due_cases(
+    conn, now_iso: str, *, simulated: bool = False, athlete_ids: list[str] | None = None
+) -> list:
+    """Cases whose next step is due. Real and simulated cases never mix."""
+    rows = conn.execute(
+        f"SELECT * FROM agent_cases WHERE simulated = ? AND state IN ({_in(TIMED_STATES)}) "
         "AND next_action_at IS NOT NULL AND next_action_at <= ? ORDER BY next_action_at, id",
-        (*TIMED_STATES, now_iso),
-    ))
+        (int(simulated), *TIMED_STATES, now_iso),
+    )
+    return [row for row in rows if athlete_ids is None or row["athlete_id"] in athlete_ids]
+
+
+def simulated_cases(conn) -> list:
+    return list(conn.execute("SELECT * FROM agent_cases WHERE simulated = 1 ORDER BY athlete_id"))
 
 
 def update_case(conn, case, *, now: datetime, **fields: Any) -> bool:
@@ -217,34 +226,39 @@ def update_case(conn, case, *, now: datetime, **fields: Any) -> bool:
     return cur.rowcount == 1
 
 
-def previous_outcomes(conn, athlete_id: str, before_date: str, limit: int) -> list[str | None]:
+def previous_outcomes(
+    conn, athlete_id: str, before_date: str, limit: int, *, simulated: bool = False
+) -> list[str | None]:
     return [
         row["outcome"]
         for row in conn.execute(
             "SELECT outcome FROM agent_cases WHERE athlete_id = ? AND local_date < ? "
-            "ORDER BY local_date DESC LIMIT ?",
-            (athlete_id, before_date, int(limit)),
+            "AND simulated = ? ORDER BY local_date DESC LIMIT ?",
+            (athlete_id, before_date, int(simulated), int(limit)),
         )
     ]
 
 
-def cases_in_states(conn, states: tuple[str, ...]) -> list:
+def cases_in_states(conn, states: tuple[str, ...], *, simulated: bool = False) -> list:
     return list(conn.execute(
-        f"SELECT * FROM agent_cases WHERE state IN ({_in(states)}) ORDER BY next_action_at, id",
-        states,
+        f"SELECT * FROM agent_cases WHERE simulated = ? AND state IN ({_in(states)}) "
+        "ORDER BY next_action_at, id",
+        (int(simulated), *states),
     ))
 
 
 def closed_since(conn, since_iso: str) -> list:
     return list(conn.execute(
-        "SELECT * FROM agent_cases WHERE state = 'closed' AND closed_at >= ? ORDER BY closed_at DESC",
+        "SELECT * FROM agent_cases WHERE simulated = 0 AND state = 'closed' AND closed_at >= ? "
+        "ORDER BY closed_at DESC",
         (since_iso,),
     ))
 
 
 def recent_cases(conn, athlete_id: str, limit: int = 10) -> list:
     return list(conn.execute(
-        "SELECT * FROM agent_cases WHERE athlete_id = ? ORDER BY local_date DESC LIMIT ?",
+        "SELECT * FROM agent_cases WHERE athlete_id = ? AND simulated = 0 "
+        "ORDER BY local_date DESC LIMIT ?",
         (athlete_id, int(limit)),
     ))
 
@@ -255,7 +269,8 @@ def checkin_latencies(
     """Minutes from check-in sent to first reply, for days that used this check-in time."""
     sql = (
         "SELECT checkin_sent_at, checkin_received_at FROM agent_cases WHERE athlete_id = ? "
-        "AND checkin_time = ? AND checkin_sent_at IS NOT NULL AND checkin_received_at IS NOT NULL"
+        "AND checkin_time = ? AND checkin_sent_at IS NOT NULL AND checkin_received_at IS NOT NULL "
+        "AND simulated = 0"
     )
     params: list[Any] = [athlete_id, checkin_time]
     if since:
@@ -338,16 +353,20 @@ def case_events(conn, case_id: int) -> list:
     ))
 
 
+_REAL_EVENTS = "(case_id IS NULL OR case_id IN (SELECT id FROM agent_cases WHERE simulated = 0))"
+
+
 def recent_events(conn, limit: int = 20) -> list:
+    """The real agent's latest events; the simulated demo day is shown separately."""
     return list(conn.execute(
-        "SELECT * FROM agent_events ORDER BY id DESC LIMIT ?", (int(limit),)
+        f"SELECT * FROM agent_events WHERE {_REAL_EVENTS} ORDER BY id DESC LIMIT ?", (int(limit),)
     ))
 
 
 def sent_actions_since(conn, since_iso: str) -> int:
     row = conn.execute(
         "SELECT COUNT(*) AS n FROM agent_events WHERE kind = 'action' AND status = 'sent' "
-        "AND occurred_at >= ?",
+        f"AND occurred_at >= ? AND {_REAL_EVENTS}",
         (since_iso,),
     ).fetchone()
     return int(row["n"])
