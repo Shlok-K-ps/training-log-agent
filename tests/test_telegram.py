@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi.testclient import TestClient
 
 from app.channels import telegram
@@ -74,6 +76,14 @@ def test_startup_webhook_configuration_uses_telegram_secret_header(monkeypatch):
     assert seen["url"].endswith("/bot123456:test-token/setWebhook")
     assert seen["json"]["url"] == "https://agent.example.com/webhook/telegram"
     assert seen["json"]["secret_token"] == "webhook_secret-123"
+
+
+def test_render_generated_webhook_secret_is_hashed_to_telegram_safe_token(monkeypatch):
+    settings = _telegram_settings(monkeypatch)
+    monkeypatch.setattr(settings, "telegram_webhook_secret", "render/value+with=chars")
+    expected = hashlib.sha256(b"render/value+with=chars").hexdigest()
+    assert telegram.webhook_secret_token() == expected
+    assert telegram.valid_webhook_secret(expected) is True
 
 
 def test_one_chat_can_pair_to_one_enrolled_athlete(conn):

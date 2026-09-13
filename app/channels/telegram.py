@@ -18,8 +18,18 @@ def _api_url(method: str) -> str:
     return f"https://api.telegram.org/bot{token}/{method}"
 
 
+def webhook_secret_token() -> str:
+    """Return a Telegram-safe token without weakening generated secret entropy."""
+    raw = settings.telegram_webhook_secret
+    if not raw:
+        return ""
+    if re.fullmatch(r"[A-Za-z0-9_-]{1,256}", raw):
+        return raw
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def valid_webhook_secret(candidate: str | None) -> bool:
-    expected = settings.telegram_webhook_secret
+    expected = webhook_secret_token()
     return bool(expected and candidate and hmac.compare_digest(expected, candidate))
 
 
@@ -97,11 +107,8 @@ def send_outbound(chat_id: str | int, body: str) -> str:
 
 def configure_webhook() -> None:
     """Point Telegram at this deployment. Safe to call again on every startup."""
-    _, secret = settings.require_telegram()
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", secret):
-        raise RuntimeError(
-            "TELEGRAM_WEBHOOK_SECRET may contain only letters, numbers, _ and -"
-        )
+    settings.require_telegram()
+    secret = webhook_secret_token()
     try:
         response = httpx.post(
             _api_url("setWebhook"),
