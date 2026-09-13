@@ -9,17 +9,6 @@ from app.coach.progress import GoalPace
 from app.coach.view import coach_frame
 
 
-_STYLE = """
-.pace-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
-.pace-stat{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:15px}
-.pace-stat strong{font-size:26px;display:block}.pace-stat span{color:var(--ink-faint);font-size:12px}
-.pace-table{background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:auto}
-.pace-table table{margin:0;min-width:680px}.pace-ahead{color:var(--plate-green-text)}
-.pace-on_track{color:var(--plate-blue-text)}.pace-lagging{color:var(--plate-red-text)}
-.pace-note{padding:12px 14px;background:var(--plate-blue-bg);border:1px solid var(--plate-blue-border);border-radius:5px;margin-bottom:18px;color:var(--plate-blue-text);font-size:13px}
-"""
-
-
 def render_analytics(
     paces: tuple[GoalPace, ...], *, coach: str, today: date, pending_count: int
 ) -> str:
@@ -54,5 +43,5 @@ def render_analytics(
     return coach_frame(
         stats + note + table, active="analytics", coach=coach, title="Goal Analytics",
         subtitle="Who is ahead, on track, or lagging for the current block or meet goal.",
-        today=today.isoformat(), pending_count=pending_count, extra_style=_STYLE,
+        today=today.isoformat(), pending_count=pending_count,
     )

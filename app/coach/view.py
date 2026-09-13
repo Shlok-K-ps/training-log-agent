@@ -75,46 +75,88 @@ def _card(entry) -> str:
     )
 
 
+# Line glyphs drawn on a 24px grid in the manner of SF Symbols.
+_NAV_ICONS = {
+    "overview": '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/>'
+                '<rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+    "athletes": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 19.5c.6-3.3 3.2-5.5 6.5-5.5s5.9 2.2 6.5 5.5"/>'
+                '<path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4"/><path d="M18 14.4c1.9.7 3.2 2.5 3.5 5.1"/>',
+    "whatsapp": '<path d="M20.5 11.5c0 4.1-3.8 7.5-8.5 7.5a9.6 9.6 0 0 1-3.3-.6L4 19.8l1.3-3.6a7 7 0 0 1-1.8-4.7'
+                'C3.5 7.4 7.3 4 12 4s8.5 3.4 8.5 7.5Z"/>',
+    "analytics": '<path d="M3.5 17.5 9 12l3.5 3.5 8-8"/><path d="M15 7.5h5.5V13"/>',
+    "outbox": '<path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21l-4-7.5L3 9.5Z"/>',
+}
+
+_BOLT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 2 4 13.5h7L10 22l10-12h-7z"/></svg>'
+
+_HEAD_ASSETS = (
+    "<meta name='color-scheme' content='light dark'>"
+    "<meta name='theme-color' content='#F2F2F7' media='(prefers-color-scheme: light)'>"
+    "<meta name='theme-color' content='#000000' media='(prefers-color-scheme: dark)'>"
+    "<link rel='preconnect' href='https://fonts.googleapis.com'>"
+    "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>"
+    "<link href='https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap' rel='stylesheet'>"
+    "<link rel='stylesheet' href='/static/tokens.css'>"
+    "<link rel='stylesheet' href='/static/app.css'>"
+)
+
+
+def _long_date(today) -> str:
+    """The dateline iOS sets above a large title, e.g. 'Sunday 13 September'."""
+    try:
+        day = today if isinstance(today, date) else date.fromisoformat(str(today))
+    except ValueError:
+        return str(today)
+    return f"{day:%A} {day.day} {day:%B}"
+
+
 def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
-    """Stable product navigation shared by every authenticated coach page."""
+    """Stable product navigation shared by every authenticated coach page.
+
+    A sidebar on wide screens and a tab bar on phones. The tab bar carries short
+    labels so all five destinations fit without wrapping.
+    """
     links = (
-        ("overview", "/coach", "Overview"),
-        ("athletes", "/coach/athletes", "Athletes"),
-        ("whatsapp", "/coach/whatsapp", "Messaging Desk"),
-        ("analytics", "/coach/analytics", "Goal Analytics"),
-        ("outbox", "/coach/outbox", "Outbox"),
+        ("overview", "/coach", "Overview", "Overview"),
+        ("athletes", "/coach/athletes", "Athletes", "Athletes"),
+        ("whatsapp", "/coach/whatsapp", "Messaging Desk", "Messages"),
+        ("analytics", "/coach/analytics", "Goal Analytics", "Goals"),
+        ("outbox", "/coach/outbox", "Outbox", "Outbox"),
     )
     side_nav = []
     bottom_nav = []
-    for key, href, label in links:
+    for key, href, label, short_label in links:
         is_active = key == active
-        active_cls = " active" if is_active else ""
+        active_attrs = ' active" aria-current="page' if is_active else ""
+        icon = f'<svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">{_NAV_ICONS[key]}</svg>'
+        # One badge for one queue: approvals are worked from the Messaging Desk.
         badge = (
             f'<span class="nav-count">{pending_count}</span>'
-            if (key == "whatsapp" or key == "outbox") and pending_count else ""
+            if key == "whatsapp" and pending_count else ""
         )
         side_nav.append(
-            f'<a class="nav-item{active_cls}" href="{href}">'
-            f'<span>{label}</span>{badge}</a>'
+            f'<a class="nav-item{active_attrs}" href="{href}">'
+            f'{icon}<span class="nav-label">{label}</span>{badge}</a>'
         )
         bottom_nav.append(
-            f'<a class="bottom-item{active_cls}" href="{href}">'
-            f'<span>{label}</span>{badge}</a>'
+            f'<a class="bottom-item{active_attrs}" href="{href}">'
+            f'{icon}<span>{short_label}</span>{badge}</a>'
         )
+    initial = escape((coach.strip()[:1] or "C").upper())
     return (
         '<aside class="side-nav">'
         '<div class="side-brand-wrap">'
         '<a class="side-brand" href="/coach">'
-        '<div class="mac-app-icon" aria-hidden="true" style="width:24px;height:24px;border-radius:6px;">'
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>'
-        '</div>'
-        '<span class="brand-name">Power AI</span> <span class="brand-badge">Coach Desk</span>'
+        f'<span class="mac-app-icon" aria-hidden="true">{_BOLT}</span>'
+        '<span class="brand-name">Power AI</span><span class="brand-badge">Coach Desk</span>'
         '</a>'
         '</div>'
+        '<div class="side-section-label">Workspace</div>'
         f'<nav class="side-links" aria-label="Roster navigation">{"".join(side_nav)}</nav>'
-        f'<div class="side-meta">'
-        f'<div class="coach-profile">Signed in as <strong>{escape(coach)}</strong></div>'
-        '<a class="signout-link" href="/coach/logout">&times; Sign out</a>'
+        '<div class="side-meta">'
+        f'<div class="coach-profile"><span class="avatar" aria-hidden="true">{initial}</span>'
+        f'<div>Signed in as<strong>{escape(coach)}</strong></div></div>'
+        '<a class="signout-link" href="/coach/logout">Sign out</a>'
         '</div>'
         '</aside>'
         f'<nav class="bottom-bar" aria-label="Mobile navigation">{"".join(bottom_nav)}</nav>'
@@ -132,31 +174,33 @@ def coach_frame(
     pending_count: int = 0,
     extra_style: str = "",
     athlete_id: str | None = None,
+    back: tuple[str, str] | None = None,
 ) -> str:
     """The application shell: navigation stays put while the work changes."""
     vt_name = _vt_athlete(athlete_id) if athlete_id else "page-title"
     h1_style = f"style='view-transition-name: {vt_name};'" if vt_name else ""
+    back_link = (
+        f'<p class="back"><a href="{escape(back[0])}">'
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>'
+        f'{escape(back[1])}</a></p>'
+        if back else ""
+    )
+    style = f"<style>{extra_style}</style>" if extra_style else ""
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>"
         f"<title>{escape(title)} — Power AI Coach Desk</title>"
         "<link rel='icon' href='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>'>"
-        "<link rel='preconnect' href='https://fonts.googleapis.com'>"
-        "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin>"
-        "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap' rel='stylesheet'>"
-        "<link rel='stylesheet' href='/static/tokens.css'>"
-        "<link rel='stylesheet' href='/static/app.css'>"
-        f"<style>{extra_style}</style>"
+        f"{_HEAD_ASSETS}{style}"
         "<script src='/static/motion.js' defer></script>"
         "</head><body>"
-        "<canvas id='hero-canvas' class='mesh-canvas mesh-band' aria-hidden='true'></canvas>"
-        "<div class='noise-overlay' aria-hidden='true'></div>"
+        f"<header class='compact-bar' aria-hidden='true'><span class='compact-title'>{escape(title)}</span></header>"
         "<div class='app-shell'>"
         f"{_coach_nav(active=active, coach=coach, pending_count=pending_count)}"
-        "<main class='workspace'><div class='workspace-head'><div>"
-        f"<div class='workspace-eyebrow'>Power AI &middot; Coach Workspace</div><h1 {h1_style}>{escape(title)}</h1>"
+        "<main class='workspace'><div class='workspace-head'>"
+        f"{back_link}<div class='workspace-eyebrow'>{escape(_long_date(today))}</div>"
+        f"<h1 {h1_style}>{escape(title)}</h1>"
         f"<p class='workspace-sub'>{escape(subtitle)}</p></div>"
-        f"<span class='workspace-date'>{escape(str(today))}</span></div>"
         f"{body}<footer>Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
         "record and deterministic coaching rules. The coach remains the approval gate."
         "</footer></main></div></body></html>"
@@ -224,7 +268,7 @@ def _tutorial() -> str:
   <p class="section-note">Take a two-minute tour of the coach approval loop.</p>
   <button class="skip" type="button" onclick="document.getElementById('tutorial').showModal()">Open tutorial</button>
 </div>
-<dialog id="tutorial" style="max-width:620px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--ink);padding:22px">
+<dialog id="tutorial">
   <h1>How to use Coach Desk</h1>
   <ol>
     <li><strong>Add athletes:</strong> record bodyweight, 1RMs, training frequency, current injuries and a dated goal.</li>
@@ -260,14 +304,19 @@ def render(
     meet_prep_count = sum(1 for e in roster.entries if e.bucket is Bucket.MEET_PREP)
     fine_count = sum(1 for e in roster.entries if e.bucket is Bucket.FINE)
 
-    counts_sentence = (
-        f'<div class="counts-sentence">'
-        f'<span class="dot-count act">● <span data-counter data-target="{needs_you_count}">{needs_you_count}</span> need attention</span> · '
-        f'<span class="dot-count watch">● <span data-counter data-target="{watch_count}">{watch_count}</span> on watch</span> · '
-        f'<span class="dot-count meet">● <span data-counter data-target="{meet_prep_count}">{meet_prep_count}</span> in meet prep</span> · '
-        f'<span class="dot-count fine">● <span data-counter data-target="{fine_count}">{fine_count}</span> on track</span>'
-        f'</div>'
+    summary = (
+        ("act", "Need attention", needs_you_count),
+        ("watch", "On watch", watch_count),
+        ("meet", "Meet prep", meet_prep_count),
+        ("fine", "On track", fine_count),
     )
+    summary_tiles = '<div class="summary-tiles">' + "".join(
+        f'<a class="summary-tile {cls}" href="/coach/athletes">'
+        f'<span class="summary-label">{label}</span>'
+        f'<span class="summary-num" data-counter data-target="{count}">{count}</span>'
+        f'<span class="summary-caption">{"athlete" if count == 1 else "athletes"}</span></a>'
+        for cls, label, count in summary
+    ) + '</div>'
 
     # 2. One Big Thing panel: single most urgent Needs You athlete
     most_urgent = next((e for e in roster.entries if e.bucket is Bucket.NEEDS_YOU), None)
@@ -292,7 +341,9 @@ def render(
         one_big_thing = (
             f'<section class="one-big-thing" aria-label="Most urgent exception">'
             f'<div class="obt-header">'
-            f'<span class="tag-mono" style="color:var(--plate-red-text)">PRIORITY 01 // IMMEDIATE ATTENTION</span>'
+            '<span class="obt-kicker"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9"/>'
+            '<path d="M10 5.5v5.5M10 14.3v.2" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>'
+            'Needs your attention</span>'
             f'{obt_badge}'
             f'</div>'
             f'<div class="obt-body">'
@@ -379,13 +430,13 @@ def render(
     squad_panel = (
         '<div class="panel"><div class="panel-head"><h2>Squad directory</h2>'
         '<a href="/coach/athletes">Open directory &rarr;</a></div>'
-        f'<p style="font-size:13px;line-height:1.8;margin:0">{squad_links}</p></div>'
+        f'<p class="squad-links">{squad_links}</p></div>'
     )
 
     body = (
         f"{banner}"
+        f"{summary_tiles}"
         f"{one_big_thing}"
-        f"{counts_sentence}"
         '<div class="dashboard-grid">'
         '<div>'
         '<div class="panel"><div class="panel-head"><h2>Roster priorities</h2>'
@@ -395,7 +446,7 @@ def render(
         '<div>'
         '<div class="panel"><div class="panel-head"><h2>Approval queue</h2>'
         '<a href="/coach/whatsapp?tab=approval">Open queue &rarr;</a></div>'
-        f'<p style="font-size:32px;font-weight:800;letter-spacing:-0.02em;margin:2px 0"><span data-counter data-target="{pending_count}">{pending_count}</span></p>'
+        f'<p class="big-number"><span data-counter data-target="{pending_count}">{pending_count}</span></p>'
         '<p class="section-note">Prepared messages waiting for a human decision.</p></div>'
         f'{workflow}{_tutorial()}{squad_panel}'
         '</div>'
@@ -446,15 +497,16 @@ def render_athletes(
         elif telegram_configured:
             channel = '<span class="channel-mini warning">Telegram webhook not ready</span>'
         else:
-            channel = '<span class="channel-mini muted">Telegram not configured</span>'
+            channel = ""
         rows.append(
             f'<div class="directory-row athlete-record" data-bucket="{entry.bucket.value}" '
             f'data-search="{escape(haystack)}">'
             f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" style="view-transition-name: { _vt_athlete(entry.athlete_id) };" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
             f'<div class="muted">{escape(entry.athlete_id)}</div>{channel}</div>'
-            f'<div><strong style="font-size:13px">{escape(entry.training_summary or "No training baseline")}</strong>'
+            f'<div><strong>{escape(entry.training_summary or "No training baseline")}</strong>'
             f'<div class="muted">{escape(status)}</div></div>{readiness}'
-            f'<div class="muted">{escape(entry.last_activity or "Never")}</div></div>'
+            f'<div class="muted row-last"><span class="mobile-label">Last log </span>'
+            f'{escape(entry.last_activity or "Never")}</div></div>'
         )
     directory = (
         '<div class="directory"><div class="directory-row directory-head">'
@@ -528,11 +580,11 @@ def _outbox_card(item: PendingMessage) -> str:
         f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
         '<label class="draft-label">Message the athlete will receive (editable in place)</label>'
         f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
-        '<div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">'
-        '<button class="btn btn-primary" type="submit" name="decision" value="approved">&check; '
+        '<div class="card-actions">'
+        '<button class="btn btn-primary" type="submit" name="decision" value="approved">'
         f'Approve for {escape(item.local_date)}</button>'
         '<button class="btn btn-ghost" type="submit" name="decision" value="skipped">'
-        "&times; Hold / Don’t send</button></div></form></div>"
+        "Hold / Don’t send</button></div></form></div>"
     )
 
 
@@ -558,7 +610,7 @@ def render_outbox(
     else:
         cards = [_outbox_card(item) for item in pending]
         body = (
-            f"<section><h2>Queued for tomorrow <span class='n'>{len(pending)}</span></h2>"
+            f"<section><h2 class='list-title'>Queued for tomorrow <span class='n'>{len(pending)}</span></h2>"
             + "".join(cards)
             + "</section>"
         )
@@ -589,37 +641,28 @@ def render_login(error: str | None = None, message: str | None = None) -> str:
   <title>Power AI — Coach Sign In</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="color-scheme" content="light dark">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/motion.js" defer></script>
 </head>
 <body>
-  <canvas id="hero-canvas" class="mesh-canvas" aria-hidden="true"></canvas>
-  <div class="noise-overlay" aria-hidden="true"></div>
-  <div class="wrapper" style="min-height: 100vh; display: flex; align-items: center; justify-content: center;">
+  <main class="login-screen">
     <div class="login-box">
-      <div class="brand-link" style="margin-bottom: 20px;">
-        <div class="mac-app-icon" aria-hidden="true" style="width:28px;height:28px;border-radius:7px;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-        </div>
-        <span class="brand-name">Power AI</span>
-        <span class="brand-badge">Coach Access</span>
-      </div>
+      <span class="mac-app-icon icon-lg" aria-hidden="true">{_BOLT}</span>
       <h1>Coach Sign In</h1>
-      <p>Enter your coach access token. Authenticating sets a secure HTTP-only cookie so your token is never exposed in page URLs.</p>
+      <p>Enter your coach access token. It is kept in a secure, HTTP-only cookie and never appears in page URLs.</p>
       {error_markup}
       {msg_markup}
       <form method="post" action="/coach/login">
-        <label class="mac-eyebrow" for="token" style="margin-bottom: 8px; display: block;">Coach Access Token</label>
-        <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste coach token here">
-        <button type="submit" class="btn btn-mac-primary" style="margin-top: 12px; width: 100%; padding: 10px 18px;">Authenticate &rarr;</button>
+        <label class="field-label" for="token">Coach access token</label>
+        <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste coach token">
+        <button type="submit">Sign In</button>
       </form>
-      <div style="margin-top: 24px; text-align: center;">
-        <a class="back-link" href="/">&larr; Back to Public Overview</a>
-      </div>
+      <a class="back-link" href="/">Back to overview</a>
     </div>
-  </div>
+  </main>
 </body>
 </html>"""
 
@@ -644,16 +687,13 @@ def render_landing(*, is_logged_in: bool = False) -> str:
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="color-scheme" content="light dark">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/motion.js" defer></script>
 </head>
 <body>
-  <!-- Fixed WebGL Mesh Canvas & Noise Grain -->
-  <canvas id="hero-canvas" class="mesh-canvas" aria-hidden="true"></canvas>
-  <div class="noise-overlay" aria-hidden="true"></div>
-
   <!-- Header Navigation -->
   <header class="site-header">
     <div class="site-header-inner">
@@ -729,14 +769,9 @@ def render_landing(*, is_logged_in: bool = False) -> str:
 
       <!-- WhatsApp Simulation Showcase (macOS Window with traffic lights & segmented control) -->
       <div id="protocols" class="showcase-container">
-        <div class="mac-window-titlebar">
-          <div class="mac-traffic-lights" aria-hidden="true">
-            <span class="mac-light mac-close"></span>
-            <span class="mac-light mac-min"></span>
-            <span class="mac-light mac-max"></span>
-          </div>
-          <span class="mac-window-title">WhatsApp Lifter Console</span>
-          <div class="mac-window-dummy"></div>
+        <div class="messages-header">
+          <span class="avatar" aria-hidden="true">{_BOLT}</span>
+          <span class="messages-contact">Power AI Coach</span>
         </div>
         <div class="showcase-body">
           <div class="showcase-header">
@@ -973,7 +1008,8 @@ def render_privacy() -> str:
   <title>Power AI — Privacy Policy</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="color-scheme" content="light dark">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -1005,7 +1041,7 @@ def render_privacy() -> str:
       <p>OAuth tokens and saved places are encrypted at rest with Fernet cryptography when the calendar integration is configured. Confirmed workout references are stored until the athlete asks to delete them. Calendar data is never sold and is never sent to the language model.</p>
       <p>Training, sleep, readiness and nutrition messages may be sent to the configured language-model provider for structured parsing. Coaching decisions are made by deterministic application rules in pure Python, not by that model.</p>
       <p>Athletes can send <em>“disconnect calendar”</em> through Telegram or WhatsApp to delete stored calendar tokens, or <em>“forget my locations”</em> to erase saved home, office and gym places.</p>
-      <div style="margin-top:32px;padding-top:20px;border-top:1px solid var(--border);">
+      <div class="legal-actions">
         <a href="/" class="btn btn-ghost">&larr; Return to Home</a>
       </div>
     </div>
@@ -1024,7 +1060,8 @@ def render_terms() -> str:
   <title>Power AI — Terms of Service</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <meta name="color-scheme" content="light dark">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
@@ -1054,7 +1091,7 @@ def render_terms() -> str:
       <h1>Terms of Service</h1>
       <p>This service is a training-log and planning aid, not medical care or clinical diagnostic software. Athletes remain responsible for confirming calendar changes and following medical advice from their coach, clinician, or registered dietitian.</p>
       <p>Injury flags immediately suppress all load progression advice. The agent never prescribes load to an injured athlete; clearance requires explicit authorization by a named human coach or medical practitioner.</p>
-      <div style="margin-top:32px;padding-top:20px;border-top:1px solid var(--border);">
+      <div class="legal-actions">
         <a href="/" class="btn btn-ghost">&larr; Return to Home</a>
       </div>
     </div>

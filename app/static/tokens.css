@@ -1,96 +1,179 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* ==========================================================================
+   Power AI — design tokens
+   iOS system materials, colours and type. Light and dark follow the device.
+   ========================================================================== */
 
 @view-transition {
   navigation: auto;
 }
 
 :root {
-  /* Colour, dark base */
-  --canvas: #07080B;
-  --level-1: #0E1014;
-  --level-2: #15171C;
-  --level-3: #1D2027;
+  color-scheme: light dark;
 
-  /* Aliases for semantic surfaces */
-  --bg: #07080B;
-  --surface: #0E1014;
-  --surface-raised: #15171C;
-  --surface-inset: #07080B;
-  --card: #15171C;
-  --card-hover: #1D2027;
+  /* Grouped backgrounds and surfaces */
+  --bg: #F2F2F7;
+  --card: #FFFFFF;
+  --card-2: #F2F2F7;
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-2: rgba(118, 118, 128, 0.07);
+  --fill-strong: rgba(118, 118, 128, 0.20);
+  --segment-active: #FFFFFF;
 
-  --text: #F4F5F7;
-  --text-2: #BCC2CB;
-  --text-3: #7B818C;
-  --ink: #F4F5F7;
-  --ink-secondary: #BCC2CB;
-  --ink-soft: #7B818C;
-  --ink-faint: #4E535E;
-  --faint: #7B818C;
-  --soft: #BCC2CB;
+  /* Translucent bars (navigation, tab bar, sidebar) */
+  --bar: rgba(249, 249, 251, 0.80);
+  --sidebar: rgba(255, 255, 255, 0.72);
 
-  --border: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-strong: rgba(255, 255, 255, 0.16);
+  /* Labels */
+  --text: #1D1D1F;
+  --text-2: #6E6E73;
+  --text-3: #8E8E93;
 
-  --highlight-top: inset 0 1px 0 0 rgba(255, 255, 255, 0.10);
-  --highlight-top-raised: inset 0 1px 0 0 rgba(255, 255, 255, 0.16);
+  /* Separators */
+  --separator: rgba(60, 60, 67, 0.13);
+  --separator-strong: rgba(60, 60, 67, 0.24);
 
-  /* Mesh gradient: #1D3FA8 (plate blue), #5B2A86 (violet), #B8323A (plate red ember), #0E1014 (keeps it dark) */
-  --gradient-color-1: #1D3FA8;
-  --gradient-color-2: #5B2A86;
-  --gradient-color-3: #B8323A;
-  --gradient-color-4: #0E1014;
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.04);
+  --shadow-raised: 0 18px 50px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-segment: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
 
-  /* Status: Needs you #FF6B6B, Watch #F5C451, Meet prep #6AA8FF, Fine #58D39A */
-  --status-needs-you: #FF6B6B;
-  --status-watch: #F5C451;
-  --status-meet-prep: #6AA8FF;
-  --status-fine: #58D39A;
+  /* System colours: fill, tinted background, accessible text */
+  --tint: #007AFF;
+  --tint-soft: rgba(0, 122, 255, 0.11);
+  --tint-text: #0066D6;
+  --red: #FF3B30;
+  --red-soft: rgba(255, 59, 48, 0.11);
+  --red-text: #D70015;
+  --orange: #FF9500;
+  --orange-soft: rgba(255, 149, 0, 0.14);
+  --orange-text: #B25000;
+  --green: #34C759;
+  --green-soft: rgba(52, 199, 89, 0.14);
+  --green-text: #1F7A36;
+  --indigo: #5856D6;
+  --indigo-soft: rgba(88, 86, 214, 0.12);
+  --pink: #FF2D55;
 
-  /* Plate accents */
-  --plate-red: #FF6B6B;
-  --plate-red-bg: rgba(255, 107, 107, 0.12);
-  --plate-red-border: rgba(255, 107, 107, 0.30);
-  --plate-red-text: #FF9B9B;
-  --act: #FF6B6B;
+  /* Messages */
+  --bubble-in: #E9E9EB;
+  --bubble-out: #007AFF;
 
-  --plate-yellow: #F5C451;
-  --plate-yellow-bg: rgba(245, 196, 81, 0.12);
-  --plate-yellow-border: rgba(245, 196, 81, 0.30);
-  --plate-yellow-text: #FDE68A;
-  --watch: #F5C451;
+  /* Typography — San Francisco on Apple devices, Inter (optical sizes) elsewhere */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --font-serif: var(--font-sans);
 
-  --plate-blue: #6AA8FF;
-  --plate-blue-bg: rgba(106, 168, 255, 0.12);
-  --plate-blue-border: rgba(106, 168, 255, 0.30);
-  --plate-blue-text: #BAE6FD;
-  --meet: #6AA8FF;
-
-  --plate-green: #58D39A;
-  --plate-green-bg: rgba(88, 211, 154, 0.12);
-  --plate-green-border: rgba(88, 211, 154, 0.30);
-  --plate-green-text: #A7F3D0;
-  --fine: #58D39A;
-
-  --accent-cyan: #6AA8FF;
-  --unseen-blush: #6AA8FF;
-  --unseen-sand: #F4F5F7;
-
-  /* Typography: Apple San Francisco typography with Inter fallback for non-Mac browsers */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "SF Pro", "Inter", -system-ui, sans-serif;
-  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
-  --font-serif: "New York", -apple-system-ui-serif, Georgia, serif;
+  /* Shape */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 18px;
+  --r-xl: 24px;
 
   /* Motion */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --duration-press: 120ms;
-  --duration-hover: 240ms;
-  --duration-panel: 480ms;
-  --duration-hero: 700ms;
+  --duration-press: 160ms;
+  --duration-hover: 220ms;
+  --duration-panel: 420ms;
+  --duration-hero: 640ms;
+
+  /* Aliases kept for markup that predates this system */
+  --canvas: var(--bg);
+  --level-1: var(--card);
+  --level-2: var(--card-2);
+  --level-3: var(--card-2);
+  --surface: var(--card);
+  --surface-raised: var(--card-2);
+  --surface-inset: var(--fill-2);
+  --card-hover: var(--card-2);
+  --ink: var(--text);
+  --ink-secondary: var(--text-2);
+  --ink-soft: var(--text-2);
+  --ink-faint: var(--text-3);
+  --faint: var(--text-3);
+  --soft: var(--text-2);
+  --border: var(--separator);
+  --border-strong: var(--separator-strong);
+  --border-subtle: var(--separator);
+  --line: var(--separator);
+  --line-strong: var(--separator-strong);
+  --highlight-top: none;
+  --highlight-top-raised: none;
+  --gradient-color-1: var(--tint);
+  --gradient-color-2: var(--indigo);
+  --gradient-color-3: var(--pink);
+  --gradient-color-4: var(--card);
+  --status-needs-you: var(--red);
+  --status-watch: var(--orange);
+  --status-meet-prep: var(--tint);
+  --status-fine: var(--green);
+  --plate-red: var(--red);
+  --plate-red-bg: var(--red-soft);
+  --plate-red-border: transparent;
+  --plate-red-text: var(--red-text);
+  --plate-yellow: var(--orange);
+  --plate-yellow-bg: var(--orange-soft);
+  --plate-yellow-border: transparent;
+  --plate-yellow-text: var(--orange-text);
+  --plate-blue: var(--tint);
+  --plate-blue-bg: var(--tint-soft);
+  --plate-blue-border: transparent;
+  --plate-blue-text: var(--tint-text);
+  --plate-green: var(--green);
+  --plate-green-bg: var(--green-soft);
+  --plate-green-border: transparent;
+  --plate-green-text: var(--green-text);
+  --act: var(--red);
+  --watch: var(--orange);
+  --meet: var(--tint);
+  --fine: var(--green);
+  --accent-cyan: var(--tint);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1C1C1E;
+    --card-2: #2C2C2E;
+    --fill: rgba(118, 118, 128, 0.24);
+    --fill-2: rgba(118, 118, 128, 0.14);
+    --fill-strong: rgba(118, 118, 128, 0.34);
+    --segment-active: #636366;
+
+    --bar: rgba(22, 22, 24, 0.78);
+    --sidebar: rgba(28, 28, 30, 0.72);
+
+    --text: #F5F5F7;
+    --text-2: #98989F;
+    --text-3: #6E6E73;
+
+    --separator: rgba(84, 84, 88, 0.50);
+    --separator-strong: rgba(84, 84, 88, 0.80);
+
+    --shadow-card: none;
+    --shadow-raised: 0 18px 60px rgba(0, 0, 0, 0.55);
+    --shadow-segment: 0 3px 8px rgba(0, 0, 0, 0.35);
+
+    --tint: #0A84FF;
+    --tint-soft: rgba(10, 132, 255, 0.18);
+    --tint-text: #409CFF;
+    --red: #FF453A;
+    --red-soft: rgba(255, 69, 58, 0.18);
+    --red-text: #FF6961;
+    --orange: #FF9F0A;
+    --orange-soft: rgba(255, 159, 10, 0.18);
+    --orange-text: #FFB340;
+    --green: #30D158;
+    --green-soft: rgba(48, 209, 88, 0.18);
+    --green-text: #30DB5B;
+    --indigo: #5E5CE6;
+    --indigo-soft: rgba(94, 92, 230, 0.2);
+    --pink: #FF375F;
+
+    --bubble-in: #26252A;
+    --bubble-out: #0A84FF;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
