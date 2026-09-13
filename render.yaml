@@ -70,8 +70,22 @@ services:
       - key: COACH_SILENT_AFTER_DAYS
         value: "7"
 
-      # --- Proactive sending ----------------------------------------------
-      # Unreliable on the free plan; see note 2 above.
+      # --- The training-day agent -----------------------------------------
+      # It ticks every minute while awake. GitHub Actions calls the signed
+      # /internal/agent/tick endpoint every ten minutes so the free service's
+      # sleep never stops a check-in (see .github/workflows/agent-tick.yml).
+      - key: ENABLE_AGENT_LOOP
+        value: "true"
+      - key: AGENT_TICK_SECRET
+        generateValue: true
+      # Signs the 15-minute console links the bot sends to the coach chat.
+      - key: COACH_LINK_SECRET
+        generateValue: true
+      # One-time code the coach sends as "/coach <code>" to link Telegram.
+      - key: COACH_SETUP_CODE
+        generateValue: true
+
+      # --- Coach-approved messages ----------------------------------------
       - key: ENABLE_MORNING_SCHEDULER
         value: "true"
 

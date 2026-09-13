@@ -67,6 +67,22 @@ class Settings:
     injury_stale_after_days: int = int(os.getenv("INJURY_STALE_AFTER_DAYS", "21"))
 
     database_path: str = os.getenv("DATABASE_PATH", "data/training_log.db")
+    # Postgres connection string. When set it replaces the SQLite file.
+    database_url: str = os.getenv("DATABASE_URL", "")
+
+    # --- The training-day agent -----------------------------------------------
+    enable_agent_loop: bool = _flag("ENABLE_AGENT_LOOP", True)
+    # Tick once a minute inside the web process while it is awake. The signed
+    # tick endpoint covers the time a free instance spends asleep.
+    agent_background_ticks: bool = _flag("AGENT_BACKGROUND_TICKS", True)
+    # Shrinks every interval between agent steps for live demonstrations (1 = real time).
+    agent_time_scale: float = float(os.getenv("AGENT_TIME_SCALE", "1") or "1")
+    # HMAC secret shared with the external scheduler that calls the tick endpoint.
+    agent_tick_secret: str = os.getenv("AGENT_TICK_SECRET", "")
+    # Signs console links and sessions sent to the coach's Telegram chat.
+    coach_link_secret: str = os.getenv("COACH_LINK_SECRET", "")
+    # One-time code the coach sends to the bot to link their Telegram account.
+    coach_setup_code: str = os.getenv("COACH_SETUP_CODE", "")
 
     @property
     def db_file(self) -> Path:

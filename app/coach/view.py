@@ -341,8 +341,10 @@ def render(
     pending_count: int = 0,
     pending: tuple[PendingMessage, ...] = (),
     injury_plans: tuple[tuple[RosterEntry, str | None], ...] = (),
+    agent_board: str = "",
+    extra_style: str = "",
 ) -> str:
-    """Today: everything waiting on the coach, in the order to handle it."""
+    """Today: the agent's work and exceptions first, then the legacy approvals."""
     counts = {bucket: len(roster.bucket(bucket)) for bucket in BUCKET_ORDER}
     tiles = (
         ("act", "Needs you", Bucket.NEEDS_YOU),
@@ -448,15 +450,20 @@ def render(
 
     workflow = (
         '<div class="panel"><div class="panel-head"><h2>Daily agent loop</h2></div>'
-        '<div class="flow-step"><b>01</b><div><strong>Observe</strong><p>Sessions, sleep, readiness and injuries arrive through Telegram or WhatsApp.</p></div></div>'
-        '<div class="flow-step"><b>02</b><div><strong>Prepare</strong><p>Deterministic rules turn the evidence into a drafted message or a decision.</p></div></div>'
-        '<div class="flow-step"><b>03</b><div><strong>Approve</strong><p>You edit, approve or hold. Only your approved wording is sent.</p></div></div>'
+        '<div class="flow-step"><b>01</b><div><strong>Check in</strong><p>On each planned training day the agent sends the check-in and follows up twice at most.</p></div></div>'
+        '<div class="flow-step"><b>02</b><div><strong>Decide</strong><p>Fixed rules hold or reduce your approved session. Injuries, red recovery and autopilot-off days come to you.</p></div></div>'
+        '<div class="flow-step"><b>03</b><div><strong>Close</strong><p>It asks whether training happened and closes the day only when the outcome is known.</p></div></div>'
         '</div>'
+    )
+    legacy_title = (
+        '<div class="section-head-row"><h2>Roster signals and manual approvals</h2></div>'
+        if agent_board else ""
     )
 
     body = (
-        f"{banner(message)}{summary_tiles}"
+        f"{banner(message)}"
         '<div class="today-grid"><div class="today-main">'
+        f"{agent_board}{legacy_title}{summary_tiles}"
         f"{empty_roster}{all_clear}{decision_section}{approval_section}"
         f'{listed("Watch", watch, "watch")}{listed("Meet prep", meet, "meet_prep")}{fine_section}'
         '</div><aside class="today-side">'
@@ -465,8 +472,9 @@ def render(
     )
     return coach_frame(
         body, active="overview", coach=coach, title="Today",
-        subtitle="Decisions first, then the messages waiting for your approval.",
+        subtitle="What the agent needs from you, what it is waiting for, and what it has already done.",
         today=roster.reviewed_on.isoformat(), pending_count=pending_count or len(pending),
+        extra_style=extra_style,
     )
 
 

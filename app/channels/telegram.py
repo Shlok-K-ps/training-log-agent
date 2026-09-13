@@ -81,17 +81,18 @@ def provider_sid(chat_id: str | int, message_id: str | int) -> str:
     return f"telegram:{chat_id}:{message_id}"
 
 
-def send_outbound(chat_id: str | int, body: str) -> str:
+def send_outbound(
+    chat_id: str | int, body: str, *, reply_markup: dict | None = None
+) -> str:
+    payload: dict[str, object] = {
+        "chat_id": str(chat_id),
+        "text": body,
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
-        response = httpx.post(
-            _api_url("sendMessage"),
-            json={
-                "chat_id": str(chat_id),
-                "text": body,
-                "disable_web_page_preview": True,
-            },
-            timeout=15.0,
-        )
+        response = httpx.post(_api_url("sendMessage"), json=payload, timeout=15.0)
         response.raise_for_status()
     except httpx.HTTPError:
         # HTTPStatusError includes the request URL, which contains the bot token.
@@ -105,6 +106,18 @@ def send_outbound(chat_id: str | int, body: str) -> str:
     return provider_sid(chat_id, message_id)
 
 
+def answer_callback_query(callback_query_id: str, text: str) -> None:
+    """Close the loading state on a pressed inline button. Failures are not fatal."""
+    try:
+        httpx.post(
+            _api_url("answerCallbackQuery"),
+            json={"callback_query_id": str(callback_query_id), "text": text[:200]},
+            timeout=10.0,
+        )
+    except httpx.HTTPError:
+        return
+
+
 def configure_webhook() -> None:
     """Point Telegram at this deployment. Safe to call again on every startup."""
     settings.require_telegram()
@@ -115,7 +128,7 @@ def configure_webhook() -> None:
             json={
                 "url": settings.public_base_url.rstrip("/") + "/webhook/telegram",
                 "secret_token": secret,
-                "allowed_updates": ["message"],
+                "allowed_updates": ["message", "callback_query"],
                 "drop_pending_updates": False,
             },
             timeout=15.0,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from html import escape
 
+from app.coach.agent_view import AGENT_STYLE
 from app.coach.athlete import AthleteDetail, progress_series
 from app.coach.view import coach_frame, conversation_bubbles, initials
 from app.decision.injury_pivot import InjuryPivot, pivot_message
@@ -302,6 +303,7 @@ def render_athlete(
     scheduled=(),
     awaiting: int = 0,
     pending_count: int = 0,
+    agent_panel: str = "",
 ) -> str:
     banner = ""
     if message:
@@ -452,10 +454,12 @@ def render_athlete(
     body = (
         f"{banner}{_hero(detail, plan=plan, awaiting=awaiting)}"
         '<nav class="section-nav" aria-label="Athlete sections">'
-        '<a href="#evidence">Evidence</a><a href="#plan">Plan</a><a href="#messages">Messages</a></nav>'
+        '<a href="#agent-plan">Agent</a><a href="#evidence">Evidence</a><a href="#plan">Plan</a>'
+        '<a href="#messages">Messages</a></nav>'
         f"{_telegram_panel(detail, telegram_pairing_url, telegram_linked, telegram_ready)}"
         f"{_injury_clearance_panel(detail)}"
         f"{'' if detail.clearance_requested else _injury_plan_panel(detail, coach=coach, plan=plan)}"
+        f"{agent_panel}"
         '<div class="profile-grid">'
         f'<div class="profile-main">{evidence}{plan_section}</div>'
         f'<aside id="messages" class="profile-side">{thread}{compose}</aside>'
@@ -466,4 +470,5 @@ def render_athlete(
         subtitle=f"{detail.athlete_id} · evidence, plan and conversation",
         today=detail.reviewed_on.isoformat(), back=("/coach/athletes", "Athletes"),
         athlete_id=detail.athlete_id, pending_count=pending_count,
+        extra_style=AGENT_STYLE if agent_panel else "",
     )

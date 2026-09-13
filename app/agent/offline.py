@@ -65,7 +65,12 @@ CONFIRM_SCHEDULE_RE = re.compile(r"^\s*(?:confirm|book)\s+([a-f0-9]{4,20})\s*$",
 PLACE_RE = re.compile(
     r"^\s*(?:my\s+)?(gym|home|office)(?:\s+location)?\s+is\s+(.{4,500})\s*$", re.I
 )
-FORGET_PLACES_RE = re.compile(r"\b(forget|delete|clear)\s+(?:my\s+)?(?:saved\s+)?(places|locations)\b", re.I)
+OUTCOME_RE = re.compile(
+    r"^\s*(?P<word>done|trained|finished|completed|did it|skipped|skip|missed|"
+    r"didn'?t train|rest day|partly done|half done|only did half)\b",
+    re.I,
+)
+FORGET_PLACES_RE =re.compile(r"\b(forget|delete|clear)\s+(?:my\s+)?(?:saved\s+)?(places|locations)\b", re.I)
 
 
 class OfflineClient:
@@ -149,6 +154,16 @@ class OfflineClient:
 
         if NUTRITION_PLAN_RE.search(lowered):
             calls.append(("ask_nutrition_plan", {}))
+
+        outcome = OUTCOME_RE.match(text)
+        if outcome:
+            word = outcome.group("word").lower()
+            status = (
+                "partial" if word in {"partly done", "half done", "only did half"}
+                else "skipped" if word.startswith(("skip", "miss", "didn", "rest"))
+                else "done"
+            )
+            calls.append(("report_session_outcome", {"status": status}))
 
         if not calls:
             calls.append(

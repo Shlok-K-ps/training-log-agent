@@ -31,6 +31,14 @@ from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
+from app import access
+from app.agent.schemas import LOOP_TOOL_NAMES
+from app.casework import board as agent_board
+from app.casework import clock, engine
+from app.casework import store as case_store
+from app.coach import agent_view
+from app.coach.view import banner, coach_frame
+from app.casework.transport import DeliveryFailed, LiveTransport
 from app.channels import telegram, vonage, whatsapp
 from app.decision.injury_pivot import injury_pivot_options, pivot_message
 from app.coach.athlete import athlete_detail, suggest_message
@@ -60,7 +68,7 @@ from app.coach import (
 from app.config import settings
 from app.integrations.factory import calendar_client, calendar_oauth, state_signer
 from app.integrations.google_calendar import CalendarIntegrationError
-from app.router import handle_message
+from app.router import handle_message_with_actions
 from app.scheduling import draft_upcoming_prompts, send_approved_prompts
 from app.storage import db
 
@@ -70,6 +78,8 @@ logging.basicConfig(
 log = logging.getLogger("power-agent")
 
 FEEDBACK_ACK = "Got it — I’ve logged your update and sent it to your coach for review."
+# Channels where the training-day agent reads the message and may answer itself.
+AGENT_CHANNELS = frozenset({"telegram", "simulator"})
 INJURY_ACK = "Your injury update is logged. Training guidance is paused and your coach has been notified."
 
 
@@ -104,17 +114,48 @@ async def lifespan(app: FastAPI):
             # Telegram transport exceptions deliberately contain no credentials.
             app.state.telegram_webhook_error = str(exc)
             log.exception("Telegram webhook setup failed")
-    task = None
+    tasks = []
+    if settings.enable_agent_loop and settings.agent_background_ticks:
+        tasks.append(asyncio.create_task(_agent_loop()))
+        log.info("training-day agent enabled")
     if settings.enable_morning_scheduler:
-        task = asyncio.create_task(_morning_scheduler_loop())
-        log.info("proactive morning check-in scheduler enabled")
+        tasks.append(asyncio.create_task(_morning_scheduler_loop()))
+        log.info("coach-approved message sender enabled")
     try:
         yield
     finally:
-        if task is not None:
+        for task in tasks:
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+
+
+async def _agent_loop() -> None:
+    """Wake the agent every minute while the process is awake.
+
+    A free web service sleeps when idle, so an external scheduler also calls the
+    signed tick endpoint. The lease and idempotency keys make both safe at once.
+    """
+    while True:
+        try:
+            await run_in_threadpool(_run_agent_tick)
+        except Exception:  # noqa: BLE001 - keep the web service alive and retry later
+            log.exception("training-day agent tick failed")
+        await asyncio.sleep(60)
+
+
+def _run_agent_tick() -> dict[str, object]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        report = engine.tick(
+            conn, now=clock.utcnow(), transport=LiveTransport(), coach_name=settings.coach_name
+        )
+        if report.actions or report.opened or report.escalated or report.closed:
+            log.info("agent tick: %s", report.as_dict())
+        return report.as_dict()
+    finally:
+        conn.close()
 
 
 async def _morning_scheduler_loop() -> None:
@@ -227,11 +268,108 @@ def _athlete_url(athlete_id: str, anchor: str = "") -> str:
     return f"/coach/athlete/{quote(athlete_id)}" + (f"#{anchor}" if anchor else "")
 
 
+LOCKED_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Coach console · Power AI</title>
+<link rel="stylesheet" href="/static/tokens.css"><link rel="stylesheet" href="/static/app.css">
+</head><body><main style="max-width:32rem;margin:12vh auto;padding:0 1.5rem">
+<h1 style="font-size:1.75rem;letter-spacing:-.02em">Open the console from Telegram</h1>
+<p>The coach console has no password. Send <b>/console</b> to the Power AI bot from the
+coach's linked Telegram account and open the link it replies with. Links expire after
+15 minutes.</p>
+<p style="color:var(--text-2,#6b6b70)">First time? Send <b>/coach</b> followed by the
+deployment's setup code to link your Telegram account.</p>
+<p><a href="/">About Power AI</a></p></main></body></html>"""
+
+
+@app.middleware("http")
+async def coach_console_guard(request: Request, call_next):
+    """Every /coach page needs a session started from a signed Telegram link."""
+    path = request.url.path
+    if path.startswith("/coach") and path != "/coach/enter" and not access.request_is_coach(request):
+        return HTMLResponse(LOCKED_PAGE, status_code=401)
+    return await call_next(request)
+
+
+@app.get("/coach/enter", include_in_schema=False)
+async def coach_enter(token: str = "") -> Response:
+    target = access.verify_console_token(token)
+    if target is None:
+        return HTMLResponse(LOCKED_PAGE, status_code=401)
+    response = RedirectResponse(url=target, status_code=303)
+    response.set_cookie(
+        access.SESSION_COOKIE, access.session_value(),
+        max_age=access.SESSION_TTL_SECONDS, httponly=True, samesite="lax",
+        secure=access.session_cookie_secure(), path="/",
+    )
+    return response
+
+
 @app.get("/coach/login", include_in_schema=False)
-@app.get("/coach/logout", include_in_schema=False)
 async def coach_sign_in_retired() -> Response:
-    """The desk no longer has a sign-in; old bookmarks land on it directly."""
+    """The desk has no password; old bookmarks land on it directly."""
     return RedirectResponse(url="/coach", status_code=303)
+
+
+@app.get("/coach/logout", include_in_schema=False)
+async def coach_sign_out() -> Response:
+    response = RedirectResponse(url="/", status_code=303)
+    response.delete_cookie(access.SESSION_COOKIE, path="/")
+    return response
+
+
+# --- The training-day agent's clock and the coach's decisions -----------------------
+
+
+@app.post("/internal/agent/tick", include_in_schema=False)
+async def agent_tick(request: Request) -> Response:
+    """Signed, idempotent wake-up for the agent, called by an external scheduler."""
+    if not access.valid_tick_request(
+        request.headers.get("X-Agent-Timestamp"), request.headers.get("X-Agent-Signature")
+    ):
+        return Response(status_code=403, content="invalid tick signature")
+    report = await run_in_threadpool(_run_agent_tick)
+    try:
+        await run_in_threadpool(_send_morning_prompts)
+    except Exception:  # noqa: BLE001 - the agent tick already ran; approved sends retry next time
+        log.exception("sending coach-approved messages failed during tick")
+    return Response(content=json.dumps(report), media_type="application/json")
+
+
+@app.post("/coach/agent/run", response_class=HTMLResponse)
+async def coach_run_agent(request: Request) -> Response:
+    form = dict(await request.form())
+    report = await run_in_threadpool(_run_agent_tick)
+    if report.get("skipped"):
+        message = ("warn", "The agent is already running; try again in a moment.")
+    else:
+        message = (
+            "ok",
+            f"Agent ran: {report['opened']} day(s) opened, {report['actions']} message(s) sent, "
+            f"{report['escalated']} escalation(s), {report['closed']} case(s) closed.",
+        )
+    return _redirect(_return_to(form, "/coach"), message)
+
+
+def _decide_case(case_id: int, option: str) -> tuple[bool, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        return engine.apply_coach_decision(
+            conn, case_id, option, coach_name=settings.coach_name, now=clock.utcnow(),
+            transport=LiveTransport(),
+        )
+    except DeliveryFailed as exc:
+        return False, f"The decision was saved but the message could not be sent: {exc}"
+    finally:
+        conn.close()
+
+
+@app.post("/coach/case/{case_id}/decide", response_class=HTMLResponse)
+async def coach_decide_case(case_id: int, request: Request) -> Response:
+    form = dict(await request.form())
+    ok, text = await run_in_threadpool(_decide_case, case_id, str(form.get("option", "")))
+    return _redirect(_return_to(form, f"/coach/case/{case_id}"), ("ok" if ok else "err", text))
 
 
 @app.get("/coach", response_class=HTMLResponse)
@@ -267,13 +405,118 @@ def _render_console(message: tuple[str, str] | None) -> str:
             for entry in roster.entries
             if any(flag.kind == "injured" for flag in entry.flags)
         )
+        board = agent_board.snapshot(conn, clock.utcnow())
     finally:
         conn.close()
     return render_roster(
         roster, coach=settings.coach_name, message=message,
         has_demo=any(is_demo(a) for a in roster_ids),
         pending_count=len(pending), pending=pending, injury_plans=injury_plans,
+        agent_board=agent_view.agent_board(board), extra_style=agent_view.AGENT_STYLE,
     )
+
+
+@app.get("/coach/case/{case_id}", response_class=HTMLResponse)
+async def coach_case(case_id: int, request: Request) -> Response:
+    """One training day: every observation, decision, action and outcome."""
+    return _page(request, await run_in_threadpool(_render_case, case_id, _take_flash(request)))
+
+
+def _render_case(case_id: int, message: tuple[str, str] | None) -> str | None:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        case = case_store.case_by_id(conn, case_id)
+        if case is None:
+            return None
+        events = case_store.case_events(conn, case_id)
+        athlete_name = db.athlete_name(conn, str(case["athlete_id"])) or str(case["athlete_id"])
+        pending_count = len(db.pending_drafts(conn))
+    finally:
+        conn.close()
+    body = agent_view.render_case_body(
+        case, events, athlete_name=athlete_name, message_banner=banner(message)
+    )
+    return coach_frame(
+        body, active="overview", coach=settings.coach_name,
+        title=f"{athlete_name} · {case['local_date']}",
+        subtitle="The agent's reasoning and actions for this training day, in order.",
+        today=case["local_date"], pending_count=pending_count,
+        extra_style=agent_view.AGENT_STYLE, athlete_id=str(case["athlete_id"]),
+        back=("/coach", "Today"),
+    )
+
+
+def _plan_change(athlete_id: str, form: dict) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        if athlete_id not in db.list_athletes(conn):
+            return ("err", "No such athlete.")
+        case_store.add_plan_session(
+            conn, athlete_id=athlete_id, weekday=int(str(form.get("weekday", ""))),
+            lift=str(form.get("lift", "")), sets=int(str(form.get("sets", ""))),
+            reps=int(str(form.get("reps", ""))), rpe=float(str(form.get("rpe", ""))),
+            approved_by=settings.coach_name, now=clock.utcnow(),
+        )
+    except ValueError as exc:
+        return ("err", f"Plan not changed: {exc}")
+    finally:
+        conn.close()
+    return ("ok", "Lift approved. The agent will use it from the next training day it opens.")
+
+
+@app.post("/coach/athlete/{athlete_id}/plan", response_class=HTMLResponse)
+async def coach_add_plan_lift(athlete_id: str, request: Request) -> Response:
+    form = dict(await request.form())
+    result = await run_in_threadpool(_plan_change, athlete_id, form)
+    return _redirect(_athlete_url(athlete_id, "agent-plan"), result)
+
+
+def _retire_plan_lift(athlete_id: str, session_id: str) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        removed = session_id.isdigit() and case_store.retire_plan_session(
+            conn, athlete_id, int(session_id), now=clock.utcnow()
+        )
+    finally:
+        conn.close()
+    return ("ok", "Lift removed from the plan.") if removed else ("err", "That lift was not in the plan.")
+
+
+@app.post("/coach/athlete/{athlete_id}/plan/retire", response_class=HTMLResponse)
+async def coach_retire_plan_lift(athlete_id: str, request: Request) -> Response:
+    form = dict(await request.form())
+    result = await run_in_threadpool(_retire_plan_lift, athlete_id, str(form.get("session_id", "")))
+    return _redirect(_athlete_url(athlete_id, "agent-plan"), result)
+
+
+def _toggle_autopilot(athlete_id: str, enabled: bool) -> tuple[str, str]:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        if athlete_id not in db.list_athletes(conn):
+            return ("err", "No such athlete.")
+        case_store.set_autopilot(
+            conn, athlete_id, enabled, updated_by=settings.coach_name, now=clock.utcnow()
+        )
+    finally:
+        conn.close()
+    return (
+        "ok",
+        "Autopilot on: routine days go out without you, held or reduced only."
+        if enabled else "Autopilot off: every session now waits for your approval.",
+    )
+
+
+@app.post("/coach/athlete/{athlete_id}/autopilot", response_class=HTMLResponse)
+async def coach_autopilot(athlete_id: str, request: Request) -> Response:
+    form = dict(await request.form())
+    result = await run_in_threadpool(
+        _toggle_autopilot, athlete_id, str(form.get("enabled", "")) == "on"
+    )
+    return _redirect(_athlete_url(athlete_id, "agent-plan"), result)
 
 
 @app.post("/coach/clear-injury", response_class=HTMLResponse)
@@ -510,10 +753,12 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
         scheduled = [
             row for row in _approved_outbound(conn) if str(row["athlete_id"]) == athlete_id
         ]
+        agent_state = agent_board.athlete_agent_state(conn, athlete_id)
     finally:
         conn.close()
     return render_athlete(
         detail,
+        agent_panel=agent_view.athlete_agent_panel(athlete_id, agent_state),
         coach=settings.coach_name,
         suggested=suggest_message(detail, coach=settings.coach_name),
         message=message,
@@ -704,10 +949,14 @@ async def coach_whatsapp_simulate(request: Request) -> Response:
     if not is_demo(athlete_id) or not body:
         result = ("err", "Simulations require a demo athlete and a message.")
     else:
-        await run_in_threadpool(
-            _process, athlete_id, body, "SIM" + secrets.token_hex(12)
+        answered = await run_in_threadpool(
+            _process, athlete_id, body, "SIM" + secrets.token_hex(12), "simulator"
         )
-        result = ("ok", "Simulated athlete message received and processed.")
+        result = (
+            ("ok", "Simulated athlete message received; the agent replied on today's case.")
+            if answered is None
+            else ("ok", "Simulated athlete message received and processed.")
+        )
     return _redirect(f"/coach/whatsapp?tab=inbox&athlete={quote(athlete_id)}", result)
 
 
@@ -899,21 +1148,38 @@ def _process(
     body: str,
     provider_sid: str = "",
     channel: str = "whatsapp",
-) -> str:
-    """Blocking work — one SQLite connection per request keeps threads honest."""
+) -> str | None:
+    """Blocking work — one SQLite connection per request keeps threads honest.
+
+    Returns the receipt to send, or None when the training-day agent has already
+    answered the athlete itself.
+    """
     conn = db.connect()
     try:
         db.init_db(conn)
         if provider_sid and db.whatsapp_message_by_sid(conn, provider_sid) is not None:
             previous = db.whatsapp_reply_to(conn, provider_sid)
-            return str(previous["body"]) if previous is not None else "Message received."
+            if previous is not None:
+                return str(previous["body"])
+            return None if channel in AGENT_CHANNELS else "Message received."
         db.record_whatsapp_message(
             conn, athlete_id=athlete_id, direction="inbound", body=body,
             status="received", provider_sid=provider_sid or None,
             message_kind="athlete_feedback",
             channel=channel,
         )
-        reply = handle_message(conn, athlete_id, body, get_model_client())
+        now = clock.utcnow()
+        agent_owned = settings.enable_agent_loop and channel in AGENT_CHANNELS
+        reply, actions = handle_message_with_actions(
+            conn, athlete_id, body, get_model_client(),
+            today=engine.local_today(conn, athlete_id, now) if agent_owned else None,
+            allowed=LOOP_TOOL_NAMES if agent_owned else None,
+        )
+        if agent_owned and engine.observe_message(
+            conn, athlete_id, actions, raw_text=body, now=now,
+            transport=LiveTransport(), coach_name=settings.coach_name,
+        ):
+            return None
         identity = provider_sid or hashlib.sha256(
             f"{athlete_id}|{date.today().isoformat()}|{body}".encode("utf-8")
         ).hexdigest()[:20]
@@ -1017,6 +1283,71 @@ async def vonage_status_webhook(request: Request) -> Response:
     return Response(status_code=200, content="ok")
 
 
+def _console_link_text(path: str = "/coach") -> str:
+    if not (settings.coach_link_secret and settings.public_base_url):
+        return "The console link secret is not configured on this deployment yet."
+    return (
+        "Your coach console (link valid for 15 minutes):\n" + access.console_link(path)
+    )
+
+
+def _coach_command(conn, chat_id: str, body: str) -> str | None:
+    """Coach-only Telegram commands. None means the message is not one of them."""
+    command, _, argument = body.partition(" ")
+    command = command.split("@", 1)[0].lower()
+    coach_chat = case_store.coach_chat_id(conn)
+    if command == "/coach":
+        if not argument.strip() or not access.setup_code_matches(argument):
+            return "That setup code is not valid for this deployment."
+        outcome = case_store.link_coach_chat(
+            conn, chat_id, code_fingerprint=access.setup_code_fingerprint(), now=clock.utcnow()
+        )
+        if outcome == "taken":
+            return "This setup code has already linked another Telegram account. Rotate the code to relink."
+        return (
+            ("Linked. Escalations from the training-day agent will arrive here with decision buttons.\n\n"
+             if outcome == "linked" else "This chat is already the coach chat.\n\n")
+            + _console_link_text()
+        )
+    if chat_id == coach_chat:
+        if command == "/console":
+            return _console_link_text()
+        return (
+            "This is the coach chat. Use the buttons on an escalation to decide, or send /console "
+            "for a console link."
+        )
+    return None
+
+
+def _telegram_coach_decision(callback: dict) -> Response:
+    callback_id = str(callback.get("id", ""))
+    message = callback.get("message") if isinstance(callback.get("message"), dict) else {}
+    chat = message.get("chat") if isinstance(message.get("chat"), dict) else {}
+    chat_id = str(chat.get("id", "")).strip()
+    data = str(callback.get("data", ""))
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        coach_chat = case_store.coach_chat_id(conn)
+    finally:
+        conn.close()
+    if not coach_chat or chat_id != coach_chat:
+        telegram.answer_callback_query(callback_id, "Only the linked coach chat can decide.")
+        return Response(status_code=200, content="not the coach chat")
+    match = re.fullmatch(r"d:(\d{1,12}):([a-z_]{1,40})", data)
+    if match is None:
+        telegram.answer_callback_query(callback_id, "That button is no longer valid.")
+        return Response(status_code=200, content="bad decision")
+    ok, text = _decide_case(int(match.group(1)), match.group(2))
+    telegram.answer_callback_query(callback_id, text)
+    if ok:
+        try:
+            telegram.send_outbound(chat_id, f"Done: {text}")
+        except RuntimeError:
+            log.warning("could not confirm a coach decision in Telegram")
+    return Response(status_code=200, content="decided" if ok else "refused")
+
+
 @app.post("/webhook/telegram")
 async def telegram_webhook(request: Request) -> Response:
     """Receive a private Telegram message through a signed Bot API webhook."""
@@ -1028,6 +1359,9 @@ async def telegram_webhook(request: Request) -> Response:
         payload = await request.json()
     except ValueError:
         return Response(status_code=400, content="invalid JSON")
+    callback = payload.get("callback_query")
+    if isinstance(callback, dict):
+        return await run_in_threadpool(_telegram_coach_decision, callback)
     message = payload.get("message")
     if not isinstance(message, dict):
         return Response(status_code=200, content="ignored")
@@ -1044,6 +1378,14 @@ async def telegram_webhook(request: Request) -> Response:
     conn = db.connect()
     try:
         db.init_db(conn)
+        coach_reply = _coach_command(conn, chat_id, body)
+        if coach_reply is not None:
+            try:
+                await run_in_threadpool(telegram.send_outbound, chat_id, coach_reply)
+            except Exception:  # noqa: BLE001
+                log.exception("failed to answer a coach command")
+                return Response(status_code=502, content="send failed")
+            return Response(status_code=200, content="coach command")
         if body.startswith("/start"):
             pieces = body.split(maxsplit=1)
             pairing = telegram.athlete_from_pairing_token(pieces[1]) if len(pieces) == 2 else None
@@ -1107,6 +1449,8 @@ async def telegram_webhook(request: Request) -> Response:
     reply = await run_in_threadpool(
         _process, athlete_id, body, inbound_sid, "telegram"
     )
+    if reply is None:
+        return Response(status_code=200, content="handled by the training-day agent")
     try:
         outbound_sid = await run_in_threadpool(telegram.send_outbound, chat_id, reply)
         conn = db.connect()

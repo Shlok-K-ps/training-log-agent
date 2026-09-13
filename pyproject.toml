@@ -11,6 +11,9 @@ include = ["app*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-q --basetemp=.pytest_tmp"
+markers = [
+    "console_locked: run with the real coach console guard instead of the test bypass",
+]
 
 [tool.ruff]
 line-length = 100
