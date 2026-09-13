@@ -190,10 +190,14 @@ def _open_training_days(conn, now: datetime, report: TickReport) -> None:
         if store.case_for_day(conn, athlete_id, local_date) is not None:
             continue
         plan = store.plan_for_weekday(conn, athlete_id, local_now.weekday())
-        if not plan or local_now.time() >= policy.LAST_CASE_OPENING:
+        if not plan:
             continue
         base = str(schedule.get("morning_checkin_time") or policy.DEFAULT_CHECKIN_TIME)
         training = str(schedule.get("training_time") or policy.DEFAULT_TRAINING_TIME)
+        # A morning check-in after training has started would only be noise.
+        latest_opening = min(training, policy.LAST_CASE_OPENING.strftime("%H:%M"))
+        if local_now.strftime("%H:%M") >= latest_opening:
+            continue
         adaptation = maybe_adapt_checkin_time(
             conn, athlete_id, now=now, base_time=base, training_time=training,
             first_name=_first_name(conn, athlete_id),

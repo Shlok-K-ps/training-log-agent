@@ -313,3 +313,12 @@ def test_the_checkin_time_adapts_to_late_replies_and_explains_why(world):
     sixth = day + timedelta(days=5)
     tick(conn, transport, at(sixth, "07:00"))
     assert case_for(conn, sixth)["checkin_time"] == "08:00", "new evidence is needed before moving again"
+
+
+def test_no_training_day_is_opened_once_training_time_has_passed(world):
+    conn, transport = world
+    report = tick(conn, transport, at(MONDAY, "18:05"))
+    assert report.opened == 0 and transport.athlete == []
+    assert case_for(conn) is None
+    tomorrow = MONDAY + timedelta(days=1)
+    assert tick(conn, transport, at(tomorrow, "07:31")).opened == 2, "the next day opens normally"
