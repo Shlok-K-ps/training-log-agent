@@ -163,23 +163,8 @@ def coach_frame(
     )
 
 def _register_form(today: date) -> str:
-    days = '<option value="">Day</option>' + "".join(
-        f'<option value="{value}">{value:02d}</option>' for value in range(1, 32)
-    )
-    months = (
-        '<option value="">Month</option>' + "".join(
-            f'<option value="{number}">{name}</option>'
-            for number, name in enumerate(
-                ("January", "February", "March", "April", "May", "June",
-                 "July", "August", "September", "October", "November", "December"),
-                start=1,
-            )
-        )
-    )
-    years = '<option value="">Year</option>' + "".join(
-        f'<option value="{value}">{value}</option>'
-        for value in range(today.year, today.year + 11)
-    )
+    earliest_goal = today.isoformat()
+    latest_goal = date(today.year + 10, 12, 31).isoformat()
     return f"""
 <section class="register"><h2>Add an athlete</h2>
 <details class="onboarding" open><summary>Initial coaching profile</summary>
@@ -195,11 +180,8 @@ def _register_form(today: date) -> str:
     <label>Experience<select name="experience" required><option value="novice">Novice</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
     <label>Goal lift<select name="goal_lift"><option value="">No numeric goal yet</option><option value="squat">Squat</option><option value="bench press">Bench press</option><option value="deadlift">Deadlift</option></select></label>
     <label>Goal 1RM (kg)<input type="number" name="goal_target_kg" min="1" max="700" step="0.5"></label>
-    <label>Goal / meet date<span class="date-fields">
-      <select name="goal_day" aria-label="Goal day">{days}</select>
-      <select name="goal_month" aria-label="Goal month">{months}</select>
-      <select name="goal_year" aria-label="Goal year">{years}</select>
-    </span></label>
+    <label>Goal / meet date<input type="date" name="goal_target_date"
+      min="{earliest_goal}" max="{latest_goal}" aria-label="Goal or meet date"></label>
     <label class="onboarding-wide">Current injury or restriction<input type="text" name="injury_note" maxlength="240" placeholder="Leave blank if none; any entry opens the injury safety gate"></label>
   </div>
   <button type="submit">Create athlete profile</button>

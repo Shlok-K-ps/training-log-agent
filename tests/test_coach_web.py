@@ -102,12 +102,13 @@ def test_athlete_directory_is_a_separate_authenticated_workspace():
         assert 'name="bench_1rm_kg"' in resp.text
         assert 'name="deadlift_1rm_kg"' in resp.text
         assert 'name="bodyweight_kg"' in resp.text
-        assert 'name="goal_day"' in resp.text
-        assert 'name="goal_month"' in resp.text
-        assert 'name="goal_year"' in resp.text
+        assert 'type="date" name="goal_target_date"' in resp.text
+        assert 'min="' in resp.text
+        assert 'max="' in resp.text
 
 
 def test_goal_date_controls_build_a_real_calendar_date():
+    assert _goal_date_from_form({"goal_target_date": "2028-02-29"}) == "2028-02-29"
     assert _goal_date_from_form({
         "goal_day": "29", "goal_month": "2", "goal_year": "2028",
     }) == "2028-02-29"

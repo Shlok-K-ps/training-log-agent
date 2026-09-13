@@ -158,6 +158,43 @@ _ATHLETE_STYLE = """
   gap: 7px;
 }
 
+.channel-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  margin: 0 0 22px;
+  border: 1px solid rgba(40, 189, 125, 0.38);
+  border-radius: 14px;
+  background: linear-gradient(120deg, rgba(40, 189, 125, 0.13), rgba(34, 158, 217, 0.08));
+}
+
+.channel-callout h2 {
+  margin: 3px 0 5px;
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.channel-callout p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.channel-label {
+  color: var(--plate-green-text);
+  font: 700 10px var(--font-mono);
+  letter-spacing: .1em;
+}
+
+.channel-callout form { margin: 0; }
+
+@media (max-width: 620px) {
+  .channel-callout { align-items: stretch; flex-direction: column; }
+  .channel-callout .approve, .channel-callout button { width: 100%; text-align: center; }
+}
+
 .context-card h2 .sym {
   color: var(--accent-cyan);
   font-size: 13px;
@@ -573,7 +610,7 @@ def render_athlete(
         f'<textarea name="body" id="draft-composer" maxlength="1400" '
         f'oninput="document.getElementById(\'live-preview-bubble\').textContent=this.value">{escape(suggested)}</textarea>'
         '<div class="draft-preview-wrap" style="margin: 12px 0;">'
-        '<div class="tag-mono" style="font-size:10px;margin-bottom:6px;">LIVE WHATSAPP PREVIEW</div>'
+        '<div class="tag-mono" style="font-size:10px;margin-bottom:6px;">LIVE APPROVED MESSAGE PREVIEW</div>'
         f'<div id="live-preview-bubble" class="chat-bubble chat-agent" style="max-width:100%;">{escape(suggested)}</div>'
         '</div>'
         '<div class="btns"><button class="btn btn-primary" style="width:100%;" type="submit">Approve and queue</button></div>'
@@ -584,20 +621,21 @@ def render_athlete(
     telegram_panel = ""
     if telegram_linked:
         telegram_panel = (
-            '<div class="context-card"><h2>Telegram connected</h2>'
-            '<p>This athlete receives approved messages through the permanent '
-            'Telegram channel.</p><form method="post" action="/coach/athlete/'
+            '<section class="channel-callout"><div><span class="channel-label">ATHLETE CHANNEL · CONNECTED</span>'
+            '<h2>Telegram connected</h2><p>This athlete receives approved messages '
+            'through the permanent Telegram channel.</p></div><form method="post" action="/coach/athlete/'
             f'{escape(detail.athlete_id)}/telegram/unlink">'
             '<button class="danger" type="submit">Disconnect Telegram</button>'
-            '</form></div>'
+            '</form></section>'
         )
     elif telegram_pairing_url:
         telegram_panel = (
-            '<div class="context-card"><h2>Connect Telegram</h2>'
-            '<p>Send this signed link to the athlete. It can connect only one '
-            'private Telegram chat to this profile.</p>'
+            '<section class="channel-callout"><div><span class="channel-label">ATHLETE CHANNEL · ACTION NEEDED</span>'
+            '<h2>Connect this athlete to Telegram</h2>'
+            '<p>Open the signed link, press Start in Telegram, and this private chat '
+            'will be paired to the athlete profile.</p></div>'
             f'<a class="approve" href="{escape(telegram_pairing_url)}" '
-            'target="_blank" rel="noopener">Open secure pairing link</a></div>'
+            'target="_blank" rel="noopener">Connect Telegram</a></section>'
         )
 
     def facts(items: list[tuple[str, object]]) -> str:
@@ -661,10 +699,11 @@ def render_athlete(
     body = (
         f"{banner}<p class='back'><a href='/coach/athletes'>← All athletes / Roster</a></p>"
         f'<div class="status-strip"><strong>Current status:</strong> {escape(status)}</div>'
+        f'{telegram_panel}'
         f'{_injury_clearance_panel(detail)}{_injury_pivot_panel(detail)}'
         f'<div class="grid">{tile_html}</div>'
         '<div class="profile-grid"><div>'
-        f'<div class="context-grid">{telegram_panel}{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
+        f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
         f"{verdict_table}{charts}{log}</div>{compose}</div>"
     )
     bucket_tints = {

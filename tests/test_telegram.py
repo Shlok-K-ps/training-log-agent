@@ -138,7 +138,8 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         conn.close()
     token = telegram.pairing_token("+919812340001")
     athlete_page = main._render_athlete("+919812340001", None)
-    assert "Open secure pairing link" in athlete_page
+    assert "Connect this athlete to Telegram" in athlete_page
+    assert ">Connect Telegram</a>" in athlete_page
     assert token in athlete_page
     headers = {"X-Telegram-Bot-Api-Secret-Token": "webhook_secret-123"}
     with client as c:
@@ -161,6 +162,13 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         assert health["telegram_integration"] is True
         assert "Telegram" in health["messaging_transport"]
         assert "Telegram connected" in main._render_athlete("+919812340001", None)
+
+        from app.coach import COOKIE_NAME
+        monkeypatch.setattr(settings, "coach_access_token", "coach-test-token")
+        c.cookies.set(COOKIE_NAME, "coach-test-token")
+        desk = c.get("/coach/whatsapp")
+        assert "Telegram is active" in desk.text
+        assert "Open an athlete profile to connect their Telegram chat" in desk.text
 
     conn = db.connect(settings.database_path)
     try:

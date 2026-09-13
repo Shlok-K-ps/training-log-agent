@@ -208,11 +208,22 @@ def render_whatsapp_desk(
     banner = ""
     if message:
         banner = f'<div class="msg {escape(message[0])}">{escape(message[1])}</div>'
-    transport = (
-        f'<div class="msg ok"><strong>Real WhatsApp connected.</strong> Approved messages are sent through {escape(transport_name)}.</div>'
-        if transport_ready else
-        '<div class="msg warn"><strong>Demo simulator is ready.</strong> Add a Telegram bot token to enable permanent real messaging. The full inbox, approval and audit workflow already works here.</div>'
-    )
+    if transport_ready:
+        telegram_help = (
+            ' <a href="/coach/athletes">Open an athlete profile to connect their Telegram chat →</a>'
+            if "Telegram" in transport_name else ""
+        )
+        transport = (
+            f'<div class="msg ok"><strong>{escape(transport_name)} is active.</strong> '
+            'Approved messages use the athlete\'s connected channel.'
+            f'{telegram_help}</div>'
+        )
+    else:
+        transport = (
+            '<div class="msg warn"><strong>Demo simulator is ready.</strong> '
+            'Configure Telegram to enable permanent real messaging. The inbox, '
+            'approval and audit workflow already works here.</div>'
+        )
     stats = (
         '<div class="desk-stats">'
         f'<div class="desk-stat"><strong>{counts["inbox"]}</strong><span>New feedback</span></div>'

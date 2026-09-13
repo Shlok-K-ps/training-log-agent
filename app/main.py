@@ -572,11 +572,11 @@ def _optional_number(raw: str, *, integer: bool = False):
 
 
 def _goal_date_from_form(form: dict[str, str]) -> str | None:
-    """Join the cross-browser day/month/year controls into one ISO date."""
-    legacy = form.get("goal_target_date", "").strip()
-    if legacy:
+    """Validate the native calendar value, retaining old form compatibility."""
+    calendar_value = form.get("goal_target_date", "").strip()
+    if calendar_value:
         try:
-            return date.fromisoformat(legacy).isoformat()
+            return date.fromisoformat(calendar_value).isoformat()
         except ValueError as exc:
             raise ValueError("goal date must be a valid date") from exc
     pieces = tuple(form.get(key, "").strip() for key in (
