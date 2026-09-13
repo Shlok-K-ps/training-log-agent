@@ -34,6 +34,7 @@ from app.agent.schemas import (
     LogSet,
     LogStatus,
     QueryProgress,
+    ReportSessionOutcome,
     RequestInjuryClearance,
 )
 from app.decision.format import (
@@ -109,23 +110,41 @@ def handle_message(
     scheduling: SchedulingService | None = None,
 ) -> str:
     """One inbound WhatsApp message in, one reply out."""
+    reply, _ = handle_message_with_actions(
+        conn, athlete_id, text, client, today=today, scheduling=scheduling
+    )
+    return reply
+
+
+def handle_message_with_actions(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    text: str,
+    client: ModelClient,
+    *,
+    today: date | None = None,
+    scheduling: SchedulingService | None = None,
+    allowed: frozenset[str] | None = None,
+) -> tuple[str, list[Action]]:
+    """Log one message and return the reply plus the validated actions behind it."""
     today = today or date.today()
     text = (text or "").strip()
 
     if not text:
-        return FALLBACK
+        return FALLBACK, []
     if text.lower() in {"help", "/help", "?", "start", "hi", "hello"}:
-        return HELP
+        return HELP, []
 
     known = db.list_lifts(conn, athlete_id)
-    parsed = parse_message(text, client, today=today, known_lifts=known)
+    parsed = parse_message(text, client, today=today, known_lifts=known, allowed=allowed)
 
     if not parsed.actions:
         if parsed.rejected:
-            return FALLBACK + "\n\n_(rejected: " + parsed.rejected[0] + ")_"
-        return FALLBACK
+            return FALLBACK + "\n\n_(rejected: " + parsed.rejected[0] + ")_", []
+        return FALLBACK, []
 
-    return _apply(conn, athlete_id, text, parsed.actions, today, scheduling=scheduling)
+    reply = _apply(conn, athlete_id, text, parsed.actions, today, scheduling=scheduling)
+    return reply, parsed.actions
 
 
 def _apply(
@@ -592,6 +611,11 @@ def _apply(
 
         elif isinstance(action, Clarify):
             questions.append(f"❓ {action.question}")
+
+        elif isinstance(action, ReportSessionOutcome):
+            # The training-day agent closes the case from this; the log itself
+            # only needs the athlete's own words, which the ledger already holds.
+            confirmations.append(f"✅ Session on {action.session_date} noted as {action.status}.")
 
     schedule_blocks: list[str] = []
     if schedule_requests or schedule_confirmations:

@@ -41,12 +41,19 @@ def test_landing_page_renders_complete_product_story():
         assert "/coach/login" not in html
 
 
-@pytest.mark.parametrize("path", ["/coach/login", "/coach/logout"])
-def test_retired_sign_in_links_land_on_the_desk(path):
+def test_retired_sign_in_link_lands_on_the_desk():
     with TestClient(app) as client:
-        resp = client.get(path, follow_redirects=False)
+        resp = client.get("/coach/login", follow_redirects=False)
         assert resp.status_code == 303
         assert resp.headers["location"] == "/coach"
+
+
+def test_sign_out_ends_the_console_session():
+    with TestClient(app) as client:
+        resp = client.get("/coach/logout", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/"
+        assert "coach_session" in resp.headers.get("set-cookie", "")
 
 
 def test_coach_console_opens_without_signing_in():
@@ -173,7 +180,7 @@ def test_clearance_review_rejects_self_clearance_and_records_source(tmp_path, mo
         conn.close()
 
 
-def test_whatsapp_desk_is_a_separate_workspace():
+def test_whatsapp_desk_is_a_separate_workspace(monkeypatch):
     with TestClient(app) as client:
         resp = client.get("/coach/whatsapp")
         assert resp.status_code == 200
@@ -182,6 +189,12 @@ def test_whatsapp_desk_is_a_separate_workspace():
         assert "Needs approval" in resp.text
         assert "Scheduled" in resp.text
         assert "Sent" in resp.text
+        assert "/coach/whatsapp/bulk-approve" not in client.get(
+            "/coach/whatsapp?tab=approval"
+        ).text, "bulk approval only exists for the legacy morning scheduler"
+
+    monkeypatch.setattr(settings, "enable_agent_loop", False)
+    with TestClient(app) as client:
         assert "/coach/whatsapp/bulk-approve" in client.get(
             "/coach/whatsapp?tab=approval"
         ).text

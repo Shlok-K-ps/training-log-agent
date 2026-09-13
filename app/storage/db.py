@@ -246,6 +246,106 @@ CREATE TABLE IF NOT EXISTS schedule_proposals (
 
 CREATE INDEX IF NOT EXISTS idx_schedule_proposals_athlete_status
     ON schedule_proposals (athlete_id, status, created_at);
+
+-- The training-day agent -------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS plan_sessions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id    TEXT NOT NULL,
+    weekday       INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+    lift          TEXT NOT NULL,
+    sets          INTEGER NOT NULL CHECK (sets BETWEEN 1 AND 20),
+    reps          INTEGER NOT NULL CHECK (reps BETWEEN 1 AND 30),
+    rpe           REAL NOT NULL CHECK (rpe BETWEEN 5 AND 10),
+    approved_by   TEXT NOT NULL,
+    approved_at   TEXT NOT NULL,
+    retired_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_sessions_athlete
+    ON plan_sessions (athlete_id, weekday, retired_at);
+
+CREATE TABLE IF NOT EXISTS agent_settings (
+    athlete_id    TEXT PRIMARY KEY,
+    autopilot     INTEGER NOT NULL DEFAULT 0,
+    checkin_time  TEXT,
+    updated_by    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_cases (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id          TEXT NOT NULL,
+    local_date          TEXT NOT NULL,
+    timezone            TEXT NOT NULL,
+    checkin_time        TEXT NOT NULL,
+    training_time       TEXT NOT NULL,
+    state               TEXT NOT NULL CHECK (state IN
+                            ('scheduled','awaiting_checkin','awaiting_outcome','needs_coach','closed')),
+    waiting_for         TEXT,
+    next_action_at      TEXT,
+    follow_ups          INTEGER NOT NULL DEFAULT 0,
+    outcome_prompts     INTEGER NOT NULL DEFAULT 0,
+    clarified           INTEGER NOT NULL DEFAULT 0,
+    plan_json           TEXT NOT NULL,
+    session_json        TEXT,
+    readiness_json      TEXT,
+    escalation_json     TEXT,
+    outcome             TEXT,
+    checkin_sent_at     TEXT,
+    checkin_received_at TEXT,
+    version             INTEGER NOT NULL DEFAULT 0,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    closed_at           TEXT,
+    simulated           INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (athlete_id, local_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_cases_due
+    ON agent_cases (state, next_action_at);
+
+CREATE TABLE IF NOT EXISTS agent_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id         INTEGER,
+    athlete_id      TEXT NOT NULL,
+    occurred_at     TEXT NOT NULL,
+    kind            TEXT NOT NULL CHECK (kind IN ('observation','decision','action',
+                        'expectation','outcome','escalation','adaptation','coach')),
+    code            TEXT NOT NULL,
+    summary         TEXT NOT NULL,
+    detail_json     TEXT,
+    idempotency_key TEXT UNIQUE,
+    status          TEXT CHECK (status IS NULL OR status IN
+                        ('reserved','sent','failed','unconfirmed','skipped'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_case
+    ON agent_events (case_id, id);
+
+CREATE TABLE IF NOT EXISTS agent_adaptations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id    TEXT NOT NULL,
+    parameter     TEXT NOT NULL,
+    old_value     TEXT NOT NULL,
+    new_value     TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    explanation   TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS coach_channel (
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    chat_id          TEXT NOT NULL,
+    linked_at        TEXT NOT NULL,
+    code_fingerprint TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_lease (
+    name        TEXT PRIMARY KEY,
+    holder      TEXT NOT NULL,
+    expires_at  TEXT NOT NULL
+);
 """
 
 INJURY_COLUMNS = {
@@ -447,7 +547,15 @@ class Entry:
 
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
-    """Open the database, creating the file and schema if needed."""
+    """Open the database, creating the file and schema if needed.
+
+    With DATABASE_URL set (and no explicit path) this is durable Postgres behind
+    the same interface; otherwise the local SQLite file.
+    """
+    if db_path is None and settings.database_url:
+        from app.storage.pg import connect_postgres
+
+        return connect_postgres(settings.database_url, SCHEMA)  # type: ignore[return-value]
     path = Path(db_path) if db_path is not None else settings.db_file
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -459,6 +567,9 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    if getattr(conn, "schema_ready", False):
+        # Hosted Postgres: the schema was checked once in this process already.
+        return
     conn.executescript(SCHEMA)
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(entries)")}
     for name, column_type in (
@@ -491,7 +602,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     for name, column_type in WHATSAPP_MESSAGE_COLUMNS.items():
         if name not in message_columns:
             conn.execute(f"ALTER TABLE whatsapp_messages ADD COLUMN {name} {column_type}")
+    case_columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_cases)")}
+    if "simulated" not in case_columns:
+        conn.execute("ALTER TABLE agent_cases ADD COLUMN simulated INTEGER NOT NULL DEFAULT 0")
     conn.commit()
+    getattr(conn, "mark_schema_ready", lambda: None)()
 
 
 def insert_entry(conn: sqlite3.Connection, entry: Entry) -> int:
@@ -1276,7 +1391,7 @@ def record_whatsapp_message(
         raise ValueError("message direction must be inbound or outbound")
     if status not in {"received", "queued", "sent", "delivered", "read", "failed"}:
         raise ValueError("unsupported WhatsApp message status")
-    if channel not in {"whatsapp", "telegram"}:
+    if channel not in {"whatsapp", "telegram", "simulator"}:
         raise ValueError("unsupported messaging channel")
     body = (body or "").strip()
     if not body:

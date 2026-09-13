@@ -10,6 +10,19 @@ from app.storage import db
 from app.config import settings
 
 
+@pytest.fixture(autouse=True)
+def _console_and_agent_defaults(request, monkeypatch):
+    """Tests open the coach console directly and drive the agent explicitly.
+
+    Mark a test `console_locked` to exercise the real signed-link guard.
+    """
+    from app import access
+
+    monkeypatch.setattr(settings, "agent_background_ticks", False)
+    if request.node.get_closest_marker("console_locked") is None:
+        monkeypatch.setattr(access, "request_is_coach", lambda _request: True)
+
+
 @pytest.fixture()
 def conn(monkeypatch):
     monkeypatch.setattr(

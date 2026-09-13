@@ -1,0 +1,48 @@
+name: Agent tick
+
+# The training-day agent's clock. A free web service sleeps when idle, so this
+# wakes it every ten minutes with a signed, idempotent request. Running twice,
+# late or concurrently is safe: the service holds a lease and every message is
+# reserved under an idempotency key before it is sent.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: agent-tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call the signed tick endpoint
+        env:
+          AGENT_TICK_URL: ${{ secrets.AGENT_TICK_URL }}
+          AGENT_TICK_SECRET: ${{ secrets.AGENT_TICK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AGENT_TICK_URL}" ] || [ -z "${AGENT_TICK_SECRET}" ]; then
+            echo "AGENT_TICK_URL and AGENT_TICK_SECRET repository secrets are not set; skipping."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            timestamp="$(date +%s)"
+            signature="$(printf '%s' "${timestamp}" | openssl dgst -sha256 -hmac "${AGENT_TICK_SECRET}" -hex | sed 's/^.* //')"
+            status="$(curl --silent --show-error --max-time 90 --output response.json --write-out '%{http_code}' \
+              -X POST "${AGENT_TICK_URL}" \
+              -H "X-Agent-Timestamp: ${timestamp}" \
+              -H "X-Agent-Signature: ${signature}" || echo "000")"
+            if [ "${status}" = "200" ]; then
+              cat response.json
+              exit 0
+            fi
+            echo "Attempt ${attempt} returned HTTP ${status}; the service may be waking up."
+            sleep $((attempt * 20))
+          done
+          exit 1

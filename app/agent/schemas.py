@@ -222,6 +222,13 @@ class Clarify:
     question: str
 
 
+@dataclass(frozen=True)
+class ReportSessionOutcome:
+    status: Literal["done", "skipped", "partial"]
+    session_date: str
+    note: str | None = None
+
+
 Action = (
     LogSet
     | LogStatus
@@ -244,6 +251,7 @@ Action = (
     | AskTrainingSchedule
     | ConfirmTrainingSchedule
     | Clarify
+    | ReportSessionOutcome
 )
 
 
@@ -687,6 +695,34 @@ CLARIFY = types.FunctionDeclaration(
     ),
 )
 
+REPORT_SESSION_OUTCOME = types.FunctionDeclaration(
+    name="report_session_outcome",
+    description=(
+        "The athlete says whether today's planned session happened, with or without "
+        "numbers: 'done', 'trained', 'finished it', 'skipped', 'rest day', 'only did "
+        "half'. If they also give sets, reps or weights, call log_set as well."
+    ),
+    parameters=types.Schema(
+        type=types.Type.OBJECT,
+        properties={
+            "status": types.Schema(
+                type=types.Type.STRING,
+                enum=["done", "skipped", "partial"],
+                description="done = trained as planned, skipped = did not train, partial = trained some of it.",
+            ),
+            "session_date": types.Schema(
+                type=types.Type.STRING,
+                description="YYYY-MM-DD of the session. Default to today.",
+            ),
+            "note": types.Schema(
+                type=types.Type.STRING,
+                description="Short quote of any reason the athlete gave.",
+            ),
+        },
+        required=["status"],
+    ),
+)
+
 TOOL = types.Tool(
     function_declarations=[
         LOG_SET,
@@ -709,6 +745,7 @@ TOOL = types.Tool(
         ASK_TRAINING_SCHEDULE,
         CONFIRM_TRAINING_SCHEDULE,
         CLARIFY,
+        REPORT_SESSION_OUTCOME,
     ]
 )
 
@@ -733,7 +770,30 @@ TOOL_NAMES = (
     "ask_training_schedule",
     "confirm_training_schedule",
     "clarify",
+    "report_session_outcome",
 )
+
+# In production the model serves only the daily training loop: sets, check-ins,
+# injury reports, session outcomes, progress questions and clarification.
+LOOP_TOOL = types.Tool(
+    function_declarations=[
+        LOG_SET,
+        LOG_STATUS,
+        LOG_CHECKIN,
+        REPORT_SESSION_OUTCOME,
+        QUERY_PROGRESS,
+        CLARIFY,
+    ]
+)
+
+LOOP_TOOL_NAMES = frozenset({
+    "log_set",
+    "log_status",
+    "log_checkin",
+    "report_session_outcome",
+    "query_progress",
+    "clarify",
+})
 
 
 # --- Validation ---------------------------------------------------------------
@@ -1123,6 +1183,17 @@ def validate_call(name: str, args: dict[str, Any], today: date) -> Action:
         if not proposal_id or len(proposal_id) > 20:
             raise ValidationError("confirm_training_schedule requires a proposal ID")
         return ConfirmTrainingSchedule(proposal_id)
+
+    if name == "report_session_outcome":
+        status = str(args.get("status") or "").strip().lower()
+        if status not in {"done", "skipped", "partial"}:
+            raise ValidationError(f"session status must be done, skipped or partial: {status!r}")
+        note = str(args.get("note") or "").strip()[:200] or None
+        return ReportSessionOutcome(
+            status=status,
+            session_date=_resolve_date(args.get("session_date"), today),
+            note=note,
+        )
 
     if name == "clarify":
         question = str(args.get("question") or "").strip()

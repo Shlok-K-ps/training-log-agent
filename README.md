@@ -33,6 +33,38 @@ Nothing here replaces the coach's judgement. It removes the clerical work that
 stands between the coach and the two or three athletes who actually need
 attention today.
 
+> **Demonstration project.** Power AI is a student-built demonstration run with
+> consenting test users. It is not a production medical or health-data system and
+> gives no medical advice.
+
+## The training-day agent
+
+The core of the system is an agent that owns one athlete's scheduled training day
+from start to finish, over hours and across restarts:
+
+1. **Opens a case** for every day in the coach-approved weekly plan (sets, reps, RPE).
+2. **Sends the check-in** at the athlete's time, then **at most two follow-ups**. No
+   reply by the cut-off closes the day as *no response*; two silent days in a row go
+   to the coach.
+3. **Reads the reply** with Gemini, restricted to six loop actions and validated.
+4. **Decides** with fixed rules. A routine day, with autopilot on, gets the approved
+   session **held or reduced, never increased**. An injury, red recovery or autopilot
+   off goes to the coach, with the evidence and one-tap options in the coach's Telegram.
+5. **Asks whether training happened** and closes the case only on a known outcome: a
+   logged set, "done", "skipped", or a coach decision.
+6. **Records everything**: every observation, decision, action, expectation and
+   outcome, with timestamps (`agent_events`). Every send is reserved under an
+   idempotency key first, so a crash or restart never repeats a message.
+7. **Adapts one thing**: if an athlete consistently answers the check-in late, their
+   check-in moves later in capped 15–30 minute steps. It never moves earlier than the
+   coach's time or within three hours of training. The explanation and the before and
+   after reply times are shown on Today.
+
+What wakes it: a signed `/internal/agent/tick` called every ten minutes by GitHub
+Actions (plus a one-minute loop while the service is awake), athlete messages on
+Telegram, and coach button presses. The console is opened from a signed 15-minute
+link the bot sends to the coach's linked Telegram account; there is no password.
+
 ## Who is allowed to decide what
 
 | | Athlete | Agent | Coach |
@@ -396,18 +428,28 @@ response appears in the coach's Messaging Desk for approval.
 Blueprint, fill in the secrets Render asks for, and the coach console is live at
 `https://<your-service>.onrender.com/coach`.
 
-> **No sign-in.** This is a personal project, so the coach console is open to
-> anyone who has the URL — including athlete data and the ability to approve
-> and send messages. Keep the service URL private.
+> **No password.** On a deployment with a public URL the console is locked. The
+> coach links their Telegram once with `/coach <COACH_SETUP_CODE>` and opens the
+> console from the 15-minute signed link the bot sends for `/console`.
 
-Two free-plan limits, neither of which affects the rules or the console itself:
+What the free plan needs:
 
-- **No persistent disk.** Training history lives on a temporary filesystem and
-  is lost on every deploy and restart. Fine for a demo; not fine for real
-  athletes. Move to a paid instance type and uncomment the `disk:` block to fix.
-- **The service sleeps** after 15 minutes without traffic. Proactive morning
-  check-ins cannot fire while it is asleep, so they are unreliable until the
-  service is always on.
+- **Durable memory: `DATABASE_URL` is required.** The web instance's filesystem
+  is temporary, so the agent's cases would be erased on every restart or deploy.
+  Set `DATABASE_URL` to a Postgres database (Neon's free tier works). Without it
+  the training-day agent stays **blocked**: `/health` reports `"status":
+  "degraded"` with the reason, the tick endpoint returns 503, and the console
+  shows the block. Local development without a public URL may use SQLite.
+- **The service sleeps** after 15 minutes without traffic. GitHub Actions calls
+  the signed `/internal/agent/tick` endpoint every ten minutes (set the
+  `AGENT_TICK_URL` and `AGENT_TICK_SECRET` repository secrets), so check-ins and
+  follow-ups still happen while it is asleep.
+- **One owner of check-ins.** With `ENABLE_AGENT_LOOP=true` the legacy morning
+  scheduler never starts, and its morning drafts are hidden from the console.
+
+For a demo at any hour, use **Simulated demo day** on Today: it plays a scripted
+Monday for the fictional demo squad on its own clock, separate from real cases
+and from the real-time **Run agent now** button.
 
 Netlify, Vercel and similar static/serverless hosts cannot run this service:
 it is a long-lived Python process with a background scheduler, not a set of
@@ -561,13 +603,19 @@ holding a message, writing a direct note, and closing an injury flag. Injury
 clearance records the coach's name, reason and timestamp; nothing in the agent
 or athlete channel can perform that write.
 
-### Nothing proactive goes out unreviewed
+### What goes out without review, and what never does
 
 The agent messages first. That is the useful part and also the risky part — an
 outbound message is the one thing an athlete cannot ignore, and it arrives with
 the coach's authority attached whether or not the coach wrote it.
 
-So the send is split in two. The agent prepares morning prompts and responses to
+The training-day agent sends only fixed templates: check-ins, capped follow-ups,
+outcome questions and, when the coach has switched autopilot on for that athlete,
+a session taken from the coach's own plan and held or reduced by fixed rules. It
+never writes free prose, names a load, increases work, or advises through an
+injury. Everything else still waits for the coach.
+
+For free-text replies and coach notes, the send is split in two. The agent prepares morning prompts and responses to
 athlete feedback, then queues them at `/coach/whatsapp` with the supporting
 evidence:
 

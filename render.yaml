@@ -1,18 +1,19 @@
 # Render Blueprint.
 #
-# This file is set up for the FREE plan, which has two limits worth knowing
-# before you rely on it:
+# This file is set up for the FREE web plan. Two things make that work for an
+# autonomous agent:
 #
-#   1. No persistent disk. The SQLite file lives on a temporary filesystem, so
-#      training history is lost on every deploy and restart. Fine for a demo,
-#      not fine for real athletes. To fix it, move to a paid instance type and
-#      add back the `disk:` block at the bottom of this file.
-#   2. The service sleeps after 15 minutes without traffic and takes about a
-#      minute to wake. The morning scheduler cannot fire while it is asleep, so
-#      proactive check-ins are unreliable until the service is always on.
+#   1. Durable memory lives in Postgres (for example Neon's free tier), set as
+#      DATABASE_URL. The web instance's own filesystem is temporary, so the
+#      training-day agent refuses to run on a public deployment without
+#      DATABASE_URL: /health reports "degraded" with the reason, the tick
+#      endpoint returns 503, and the console shows the agent as blocked.
+#   2. The service sleeps after 15 minutes without traffic. GitHub Actions calls
+#      the signed /internal/agent/tick endpoint every ten minutes, so check-ins
+#      and follow-ups still happen on time (.github/workflows/agent-tick.yml).
 #
-# Neither limit affects the coach console, the webhook, or any of the rules —
-# those work exactly as they do locally.
+# The training-day agent is the only sender of proactive check-ins. The legacy
+# morning scheduler stays switched off.
 services:
   - type: web
     name: training-log-agent
@@ -70,10 +71,26 @@ services:
       - key: COACH_SILENT_AFTER_DAYS
         value: "7"
 
-      # --- Proactive sending ----------------------------------------------
-      # Unreliable on the free plan; see note 2 above.
-      - key: ENABLE_MORNING_SCHEDULER
+      # --- The training-day agent -----------------------------------------
+      # It ticks every minute while awake. GitHub Actions calls the signed
+      # /internal/agent/tick endpoint every ten minutes so the free service's
+      # sleep never stops a check-in (see .github/workflows/agent-tick.yml).
+      - key: ENABLE_AGENT_LOOP
         value: "true"
+      - key: AGENT_TICK_SECRET
+        generateValue: true
+      # Signs the 15-minute console links the bot sends to the coach chat.
+      - key: COACH_LINK_SECRET
+        generateValue: true
+      # One-time code the coach sends as "/coach <code>" to link Telegram.
+      - key: COACH_SETUP_CODE
+        generateValue: true
+
+      # --- Legacy morning scheduler ---------------------------------------
+      # Off: the training-day agent owns every proactive check-in. It is also
+      # never started while ENABLE_AGENT_LOOP is true, whatever this says.
+      - key: ENABLE_MORNING_SCHEDULER
+        value: "false"
 
       # --- Optional: calendar and travel planning -------------------------
       # Leave unset to run without them. Saved locations are refused entirely
@@ -89,16 +106,9 @@ services:
       - key: CALENDAR_TOKEN_ENCRYPTION_KEY
         sync: false
 
-      # --- Layer 2: storage -----------------------------------------------
-      # Temporary on the free plan. On a paid instance, change this to
-      # /var/data/training_log.db and uncomment the disk block below.
-      - key: DATABASE_PATH
-        value: /tmp/training_log.db
-
-# Persistent storage requires a paid instance type. Uncomment this and change
-# `plan` above to `starter` when training history needs to survive a restart.
-#
-#    disk:
-#      name: training-log-data
-#      mountPath: /var/data
-#      sizeGB: 1
+      # --- Layer 2: storage (REQUIRED) -------------------------------------
+      # Postgres connection string, e.g. from a Neon project:
+      #   postgresql://user:password@host/dbname?sslmode=require
+      # Without it the training-day agent stays blocked on this deployment.
+      - key: DATABASE_URL
+        sync: false

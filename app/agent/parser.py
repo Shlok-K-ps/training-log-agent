@@ -17,7 +17,7 @@ from typing import Any, Protocol, Sequence
 from google import genai
 from google.genai import types
 
-from app.agent.schemas import TOOL, Action, ValidationError, validate_call
+from app.agent.schemas import LOOP_TOOL, TOOL, Action, ValidationError, validate_call
 from app.config import settings
 
 log = logging.getLogger(__name__)
@@ -82,6 +82,30 @@ Rules:
 Today's date is {today}. Resolve "today", "yesterday", "Monday" against it.
 {known_lifts}"""
 
+LOOP_SYSTEM_INSTRUCTION = """\
+You are the parsing layer of a training-day agent for powerlifters. You do not
+coach, encourage, prescribe or judge progress. Deterministic rules and the
+athlete's coach decide everything; you only turn the athlete's message into
+tool calls.
+
+Rules:
+- Always respond with one or more tool calls. Never reply in prose.
+- Sleep hours, readiness, soreness, stress and similar morning numbers go to
+  log_checkin. Record only explicit numbers; never turn "slept badly" or
+  "feel great" into a score.
+- Pain, tweaks, niggles or injuries go to log_status with injured=true, even when
+  mentioned in passing. Never downplay them.
+- Sets, reps, weights and RPE the athlete actually did go to log_set, once per
+  lift. Never estimate a missing number.
+- Saying whether today's session happened ("done", "trained", "skipped",
+  "only did half") is report_session_outcome.
+- Questions about how a lift is progressing are query_progress.
+- If the message is not parseable without guessing, call clarify with one short
+  question.
+
+Today's date is {today}. Resolve "today", "yesterday", "Monday" against it.
+{known_lifts}"""
+
 
 @dataclass
 class ParseResult:
@@ -106,17 +130,22 @@ class ModelClient(Protocol):
 class GeminiClient:
     """Thin wrapper over google-genai, kept boring on purpose."""
 
+    # parse_message may narrow the declarations this client offers the model.
+    supports_tool_selection = True
+
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         self._client = genai.Client(api_key=api_key or settings.require_gemini())
         self._model = model or settings.gemini_model
 
-    def call(self, text: str, system_instruction: str) -> list[tuple[str, dict[str, Any]]]:
+    def call(
+        self, text: str, system_instruction: str, tool: types.Tool | None = None
+    ) -> list[tuple[str, dict[str, Any]]]:
         response = self._client.models.generate_content(
             model=self._model,
             contents=text,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                tools=[TOOL],
+                tools=[tool or TOOL],
                 tool_config=types.ToolConfig(
                     function_calling_config=types.FunctionCallingConfig(mode="ANY")
                 ),
@@ -142,7 +171,9 @@ def _extract_calls(response: Any) -> list[tuple[str, dict[str, Any]]]:
     return calls
 
 
-def build_system_instruction(today: date, known_lifts: Sequence[str] = ()) -> str:
+def build_system_instruction(
+    today: date, known_lifts: Sequence[str] = (), *, loop: bool = False
+) -> str:
     hint = ""
     if known_lifts:
         hint = (
@@ -150,7 +181,8 @@ def build_system_instruction(today: date, known_lifts: Sequence[str] = ()) -> st
             + ", ".join(known_lifts)
             + "."
         )
-    return SYSTEM_INSTRUCTION.format(today=today.isoformat(), known_lifts=hint)
+    template = LOOP_SYSTEM_INSTRUCTION if loop else SYSTEM_INSTRUCTION
+    return template.format(today=today.isoformat(), known_lifts=hint)
 
 
 def parse_message(
@@ -159,18 +191,29 @@ def parse_message(
     *,
     today: date | None = None,
     known_lifts: Sequence[str] = (),
+    allowed: frozenset[str] | None = None,
 ) -> ParseResult:
-    """Run one message through the model and validate everything it returns."""
+    """Run one message through the model and validate everything it returns.
+
+    `allowed` narrows the actions the model may take. Anything outside it is
+    rejected even if the model returns it.
+    """
     today = today or date.today()
-    instruction = build_system_instruction(today, known_lifts)
+    instruction = build_system_instruction(today, known_lifts, loop=allowed is not None)
     result = ParseResult()
 
     try:
-        # Keep common identity, token and precise-address commands local. They
-        # do not need probabilistic parsing and should not be sent to an LLM.
-        raw_calls = _private_local_calls(text)
-        if raw_calls is None:
-            raw_calls = client.call(text, instruction)
+        if allowed is not None:
+            if getattr(client, "supports_tool_selection", False):
+                raw_calls = client.call(text, instruction, LOOP_TOOL)
+            else:
+                raw_calls = client.call(text, instruction)
+        else:
+            # Keep common identity, token and precise-address commands local. They
+            # do not need probabilistic parsing and should not be sent to an LLM.
+            raw_calls = _private_local_calls(text)
+            if raw_calls is None:
+                raw_calls = client.call(text, instruction)
     except Exception as exc:  # noqa: BLE001 - surfaced to the athlete, not swallowed
         log.exception("model call failed")
         result.rejected.append(f"model call failed: {exc}")
@@ -178,6 +221,10 @@ def parse_message(
 
     result.raw_calls = raw_calls
     for name, args in raw_calls:
+        if allowed is not None and name not in allowed:
+            log.warning("rejected tool call %s outside the daily training loop", name)
+            result.rejected.append(f"{name} is not available in the daily training loop")
+            continue
         try:
             result.actions.append(validate_call(name, args, today))
         except ValidationError as exc:

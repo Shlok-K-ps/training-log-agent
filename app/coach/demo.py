@@ -199,7 +199,39 @@ def seed_demo_squad(conn: sqlite3.Connection, *, today: date | None = None) -> i
         reviewed_by="Demo coach",
     )
 
+    _seed_agent_plans(conn)
     return sum(1 for a in db.list_athletes(conn) if is_demo(a))
+
+
+def _seed_agent_plans(conn: sqlite3.Connection) -> None:
+    """Coach-approved weekly plans so the training-day agent has days to own.
+
+    Every weekday is planned so a live demo works on any day. Autopilot is on for
+    the routine athletes, off for one, and the injured athlete shows escalation.
+    """
+    from datetime import datetime, timezone
+
+    from app.casework import store
+
+    now = datetime.now(timezone.utc)
+    plans = {
+        "001": (("squat", 3, 5, 6.5),),
+        "002": (("squat", 4, 5, 7.5), ("bench press", 3, 6, 7.0)),
+        "003": (("squat", 3, 5, 7.0),),
+        "006": (("squat", 4, 5, 7.0), ("bench press", 4, 6, 7.5)),
+        "007": (("deadlift", 3, 3, 7.0),),
+        "008": (("bench press", 5, 5, 7.5),),
+    }
+    autopilot = {"001": True, "002": False, "003": True, "006": True, "007": True, "008": True}
+    for suffix, lifts in plans.items():
+        athlete_id = f"{DEMO_PREFIX}{suffix}"
+        for weekday in range(7):
+            for lift, sets, reps, rpe in lifts:
+                store.add_plan_session(
+                    conn, athlete_id=athlete_id, weekday=weekday, lift=lift, sets=sets,
+                    reps=reps, rpe=rpe, approved_by="Demo coach", now=now,
+                )
+        store.set_autopilot(conn, athlete_id, autopilot[suffix], updated_by="Demo coach", now=now)
 
 
 def clear_demo_squad(conn: sqlite3.Connection) -> int:
@@ -213,7 +245,8 @@ def clear_demo_squad(conn: sqlite3.Connection) -> int:
                   "saved_places", "schedule_proposals", "scheduling_preferences",
                   "oauth_connections", "whatsapp_messages",
                   "whatsapp_conversation_state", "athlete_profile_revisions",
-                  "injury_plan_decisions"):
+                  "injury_plan_decisions", "plan_sessions", "agent_settings",
+                  "agent_cases", "agent_events", "agent_adaptations"):
         conn.execute(f"DELETE FROM {table} WHERE athlete_id LIKE ?", (pattern,))
     conn.commit()
     return int(removed)
