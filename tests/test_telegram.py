@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app.channels import telegram
@@ -84,6 +85,23 @@ def test_render_generated_webhook_secret_is_hashed_to_telegram_safe_token(monkey
     expected = hashlib.sha256(b"render/value+with=chars").hexdigest()
     assert telegram.webhook_secret_token() == expected
     assert telegram.valid_webhook_secret(expected) is True
+
+
+def test_webhook_diagnostic_identifies_a_rejected_bot_token(monkeypatch):
+    settings = _telegram_settings(monkeypatch)
+    monkeypatch.setattr(settings, "telegram_bot_token", " 123456:test-token ")
+
+    def rejected(url, **kwargs):
+        assert "/bot123456:test-token/setWebhook" in url
+        return httpx.Response(401, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(telegram.httpx, "post", rejected)
+    try:
+        telegram.configure_webhook()
+    except RuntimeError as exc:
+        assert str(exc) == "Telegram rejected the bot token"
+    else:
+        raise AssertionError("an invalid Telegram token was reported as connected")
 
 
 def test_one_chat_can_pair_to_one_enrolled_athlete(conn):

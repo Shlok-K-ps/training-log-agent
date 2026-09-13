@@ -15,7 +15,7 @@ from app.config import settings
 
 def _api_url(method: str) -> str:
     token, _ = settings.require_telegram()
-    return f"https://api.telegram.org/bot{token}/{method}"
+    return f"https://api.telegram.org/bot{token.strip()}/{method}"
 
 
 def webhook_secret_token() -> str:
@@ -121,7 +121,12 @@ def configure_webhook() -> None:
             timeout=15.0,
         )
         response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        if status in {401, 404}:
+            raise RuntimeError("Telegram rejected the bot token") from None
+        raise RuntimeError(f"Telegram rejected the webhook request (HTTP {status})") from None
     except httpx.HTTPError:
-        raise RuntimeError("Telegram webhook request failed") from None
+        raise RuntimeError("Could not reach Telegram while registering the webhook") from None
     if not response.json().get("ok"):
         raise RuntimeError("Telegram rejected the webhook configuration")
