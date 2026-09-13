@@ -212,6 +212,32 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         conn.close()
 
 
+def test_plain_start_explains_that_an_athlete_pairing_link_is_required(
+    tmp_path, monkeypatch
+):
+    client, main, _ = _client(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(
+        main.telegram,
+        "send_outbound",
+        lambda chat_id, body: sent.append((chat_id, body)) or "telegram:7001:100",
+    )
+    headers = {"X-Telegram-Bot-Api-Secret-Token": "webhook_secret-123"}
+
+    with client as c:
+        response = c.post(
+            "/webhook/telegram",
+            headers=headers,
+            json={"message": {"message_id": 1, "text": "/start",
+                              "chat": {"id": 7001, "type": "private"}}},
+        )
+
+    assert response.status_code == 200
+    assert sent[0][0] == "7001"
+    assert "plain /start cannot identify your athlete profile" in sent[0][1]
+    assert "press Connect Telegram" in sent[0][1]
+
+
 def test_bad_telegram_webhook_secret_is_rejected(tmp_path, monkeypatch):
     client, _, _ = _client(tmp_path, monkeypatch)
     with client as c:

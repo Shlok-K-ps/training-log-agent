@@ -1046,14 +1046,16 @@ async def telegram_webhook(request: Request) -> Response:
         db.init_db(conn)
         if body.startswith("/start"):
             pieces = body.split(maxsplit=1)
-            pairing = (
-                telegram.athlete_from_pairing_token(pieces[1])
-                if len(pieces) == 2
-                else None
-            )
+            pairing = telegram.athlete_from_pairing_token(pieces[1]) if len(pieces) == 2 else None
             athlete_id = pairing[0] if pairing is not None else None
-            if pairing is None:
-                reply = "This pairing link is invalid. Ask your coach for a fresh link."
+            if len(pieces) == 1:
+                reply = (
+                    "Power AI is ready, but a plain /start cannot identify your athlete "
+                    "profile. Ask your coach to open your athlete page and press Connect "
+                    "Telegram, then use that secure link."
+                )
+            elif pairing is None:
+                reply = "This pairing link is invalid or expired. Ask your coach for a fresh link."
             else:
                 try:
                     db.link_telegram_chat(
