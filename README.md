@@ -394,8 +394,11 @@ response appears in the coach's Messaging Desk for approval.
 
 `render.yaml` is set up for Render's **free** plan. Connect the repo as a
 Blueprint, fill in the secrets Render asks for, and the coach console is live at
-`https://<your-service>.onrender.com/coach?token=<COACH_ACCESS_TOKEN>` — Render
-generates that token; read it from the dashboard.
+`https://<your-service>.onrender.com/coach`.
+
+> **No sign-in.** This is a personal project, so the coach console is open to
+> anyone who has the URL — including athlete data and the ability to approve
+> and send messages. Keep the service URL private.
 
 Two free-plan limits, neither of which affects the rules or the console itself:
 
@@ -510,8 +513,8 @@ late deliberately: highest harm when wrong, hardest to verify, and needing a
 dietitian or physio in the loop rather than a rule in a Python file.
 
 **The coach console** is what makes this a coaching tool rather than twenty
-separate athlete tools. Sign in once at `/coach/login`; the authenticated
-workspace then has four persistent sections:
+separate athlete tools. Open `/coach`; the workspace has four persistent
+sections:
 
 - **Overview** — squad totals, same-day check-ins, pending approvals, and the
   exceptions that need a coach first.
@@ -558,8 +561,6 @@ holding a message, writing a direct note, and closing an injury flag. Injury
 clearance records the coach's name, reason and timestamp; nothing in the agent
 or athlete channel can perform that write.
 
-Set `COACH_ACCESS_TOKEN` to open it. Unset means closed, never open.
-
 ### Nothing proactive goes out unreviewed
 
 The agent messages first. That is the useful part and also the risky part — an
@@ -588,8 +589,7 @@ the agent's**. Drafting runs in each athlete's own local evening, so a squad
 spread across timezones is still reviewed the night before *their* morning.
 
 Unreviewed means unsent. A coach who is asleep, busy or away produces silence,
-not an unsupervised broadcast — the same way an unset token closes the console
-rather than opening it. This cannot be disabled by deployment configuration.
+not an unsupervised broadcast. This cannot be disabled by deployment configuration.
 
 Every approval records who made it, when, and whether the wording was changed.
 Untouched morning prompts whose evidence has not changed can be approved as a

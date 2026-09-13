@@ -7,7 +7,6 @@ from datetime import date
 import pytest
 
 from app.coach import Bucket, build_roster, render, review_athlete
-from app.coach import auth as coach_auth
 from app.config import settings
 from app.storage import db
 
@@ -115,27 +114,9 @@ def test_the_console_never_invents_a_verdict_the_athlete_would_not_get(conn):
 # --- auth ----------------------------------------------------------------------
 
 
-def test_an_unset_token_closes_the_console_rather_than_opening_it(monkeypatch):
-    monkeypatch.setattr(settings, "coach_access_token", "")
-    with pytest.raises(coach_auth.CoachAuthError, match="not set"):
-        coach_auth.check("anything")
-
-
-def test_a_wrong_token_is_refused(monkeypatch):
-    monkeypatch.setattr(settings, "coach_access_token", "s3cret-token-value")
-    with pytest.raises(coach_auth.CoachAuthError, match="Invalid"):
-        coach_auth.check("wrong")
-    with pytest.raises(coach_auth.CoachAuthError):
-        coach_auth.check(None)
-    coach_auth.check("s3cret-token-value")
-
-
-# --- rendering -----------------------------------------------------------------
-
-
 def test_the_page_renders_and_escapes_athlete_supplied_text(conn):
     _log(conn, "+940", "<script>alert(1)</script>", [140], start="2026-09-09")
-    html = render(build_roster(conn, today=TODAY), token="t", coach="Coach Rao")
+    html = render(build_roster(conn, today=TODAY), coach="Coach Rao")
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
     assert "Coach Rao" in html
@@ -147,10 +128,10 @@ def test_the_clearance_review_link_appears_only_when_requested(conn):
                                    injury_note="knee", session_date="2026-08-20"))
     _log(conn, "+951", "Fine Fred", [140, 145, 150], start="2026-09-05")
 
-    html = render(build_roster(conn, today=date(2026, 9, 12)), token="t", coach="Coach")
+    html = render(build_roster(conn, today=date(2026, 9, 12)), coach="Coach")
     assert html.count("#clearance-review") == 0, "no clearance requested yet"
 
     db.request_injury_clearance(conn, "+950", note="better", on="2026-09-11")
-    html = render(build_roster(conn, today=date(2026, 9, 12)), token="t", coach="Coach")
+    html = render(build_roster(conn, today=date(2026, 9, 12)), coach="Coach")
     assert html.count("#clearance-review") == 1
     assert "Review injury clearance" in html

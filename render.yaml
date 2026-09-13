@@ -63,10 +63,6 @@ services:
         value: "true"
 
       # --- Layer 4: the coach console -------------------------------------
-      # Render generates the token. Read it in the Render dashboard, then open
-      # https://<your-service>.onrender.com/coach?token=<that value>
-      - key: COACH_ACCESS_TOKEN
-        generateValue: true
       - key: COACH_NAME
         sync: false
       - key: COACH_DRAFT_HOUR

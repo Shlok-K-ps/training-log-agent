@@ -31,7 +31,6 @@ from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import telegram, vonage, whatsapp
 from app.decision.injury_pivot import injury_pivot_options
-from app.coach import auth as coach_auth
 from app.coach.athlete import athlete_detail, suggest_message
 from app.coach.athlete_view import render_athlete
 from app.coach.analytics_view import render_analytics
@@ -45,13 +44,11 @@ from app.scheduling.outbox import (
     send_approved_notes,
 )
 from app.coach import (
-    COOKIE_NAME,
     build_roster,
     pending_reviews,
     render as render_roster,
     render_athletes,
     render_landing,
-    render_login,
     render_outbox,
     render_privacy,
     render_terms,
@@ -170,89 +167,27 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def product_home(request: Request) -> Response:
-    token = request.query_params.get("token", "").strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    is_logged_in = coach_auth.is_valid(token)
-    return HTMLResponse(render_landing(is_logged_in=is_logged_in))
+async def product_home() -> Response:
+    return HTMLResponse(render_landing())
 
 
-@app.get("/coach/login", response_class=HTMLResponse)
-async def coach_login_page(request: Request) -> Response:
-    token = request.query_params.get("token", "").strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    if coach_auth.is_valid(token):
-        return RedirectResponse(url="/coach", status_code=303)
-    return HTMLResponse(render_login())
-
-
-@app.post("/coach/login", response_class=HTMLResponse)
-async def coach_login_submit(request: Request) -> Response:
-    form = dict(await request.form())
-    token = str(form.get("token", "")).strip()
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=401)
-
-    response = RedirectResponse(url="/coach", status_code=303)
-    is_secure = request.url.scheme == "https"
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=token,
-        httponly=True,
-        secure=is_secure,
-        samesite="lax",
-        max_age=60 * 60 * 24 * 30,
-        path="/",
-    )
-    return response
-
-
-@app.get("/coach/logout", response_class=HTMLResponse)
-async def coach_logout() -> Response:
-    response = RedirectResponse(url="/coach/login", status_code=303)
-    response.delete_cookie(key=COOKIE_NAME, path="/")
-    return response
+@app.get("/coach/login", include_in_schema=False)
+@app.get("/coach/logout", include_in_schema=False)
+async def coach_sign_in_retired() -> Response:
+    """The desk no longer has a sign-in; old bookmarks land on it directly."""
+    return RedirectResponse(url="/coach", status_code=303)
 
 
 @app.get("/coach", response_class=HTMLResponse)
-async def coach_console(request: Request, token: str = "") -> Response:
-    """The roster. Read-only, and closed unless COACH_ACCESS_TOKEN is set."""
-    effective_token = token.strip() if token else request.cookies.get(COOKIE_NAME, "").strip()
-    if not effective_token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(effective_token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
-
-    html = await run_in_threadpool(_render_console, effective_token, None)
-    response = HTMLResponse(html)
-    if token and request.cookies.get(COOKIE_NAME) != effective_token:
-        is_secure = request.url.scheme == "https"
-        response.set_cookie(
-            key=COOKIE_NAME,
-            value=effective_token,
-            httponly=True,
-            secure=is_secure,
-            samesite="lax",
-            max_age=60 * 60 * 24 * 30,
-            path="/",
-        )
-    return response
+async def coach_console() -> Response:
+    """The roster: decisions and exceptions that need a coach today."""
+    return HTMLResponse(await run_in_threadpool(_render_console, None))
 
 
 @app.post("/coach/clear-injury", response_class=HTMLResponse)
 async def coach_clear_injury(request: Request) -> Response:
     """The one write the console can make, and it records who made it."""
     form = dict(await request.form())
-    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
-
     athlete_id = str(form.get("athlete_id", "")).strip()
     clearance_source = str(form.get("clearance_source", "")).strip()
     reason = str(form.get("reason", "")).strip()
@@ -301,7 +236,7 @@ def _clear_injury(
     return ("ok", f"Injury flag cleared for {athlete_id}, recorded against {settings.coach_name}.")
 
 
-def _render_console(token: str, message: tuple[str, str] | None) -> str:
+def _render_console(message: tuple[str, str] | None) -> str:
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -312,21 +247,14 @@ def _render_console(token: str, message: tuple[str, str] | None) -> str:
         conn.close()
     has_demo = any(is_demo(a) for a in roster_ids)
     return render_roster(
-        roster, token=token, coach=settings.coach_name, message=message,
+        roster, coach=settings.coach_name, message=message,
         has_demo=has_demo, pending_count=pending_count,
     )
 
 
 @app.get("/coach/athletes", response_class=HTMLResponse)
-async def coach_athletes(request: Request, token: str = "") -> Response:
+async def coach_athletes(request: Request) -> Response:
     """Searchable squad directory and the entry point to each athlete workspace."""
-    effective_token = token.strip() if token else request.cookies.get(COOKIE_NAME, "").strip()
-    if not effective_token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(effective_token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     return HTMLResponse(await run_in_threadpool(_render_athlete_directory, None))
 
 
@@ -353,26 +281,14 @@ def _render_athlete_directory(message: tuple[str, str] | None) -> str:
 @app.post("/coach/demo/seed", response_class=HTMLResponse)
 async def coach_seed_demo(request: Request) -> Response:
     """Load a demo squad so an empty console can show what a full one looks like."""
-    form = dict(await request.form())
-    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
     message = await run_in_threadpool(_seed_demo)
-    return HTMLResponse(await run_in_threadpool(_render_console, token, message))
+    return HTMLResponse(await run_in_threadpool(_render_console, message))
 
 
 @app.post("/coach/demo/clear", response_class=HTMLResponse)
 async def coach_clear_demo(request: Request) -> Response:
-    form = dict(await request.form())
-    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
     message = await run_in_threadpool(_clear_demo)
-    return HTMLResponse(await run_in_threadpool(_render_console, token, message))
+    return HTMLResponse(await run_in_threadpool(_render_console, message))
 
 
 def _seed_demo() -> tuple[str, str]:
@@ -398,13 +314,8 @@ def _clear_demo() -> tuple[str, str]:
 
 
 @app.get("/coach/athlete/{athlete_id}", response_class=HTMLResponse)
-async def coach_athlete(athlete_id: str, request: Request, token: str = "") -> Response:
+async def coach_athlete(athlete_id: str, request: Request) -> Response:
     """One athlete: what they did, what the rules make of it, what to say back."""
-    effective = token.strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    try:
-        coach_auth.check(effective)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
     html = await run_in_threadpool(_render_athlete, athlete_id, None)
     if html is None:
         return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
@@ -415,11 +326,6 @@ async def coach_athlete(athlete_id: str, request: Request, token: str = "") -> R
 async def coach_message_athlete(athlete_id: str, request: Request) -> Response:
     """Queue a coach-written message. They wrote it, so it needs no second approval."""
     form = dict(await request.form())
-    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
     message = await run_in_threadpool(
         _queue_note, athlete_id, str(form.get("body", ""))
     )
@@ -433,13 +339,6 @@ async def coach_message_athlete(athlete_id: str, request: Request) -> Response:
 async def coach_approve_injury_plan(athlete_id: str, request: Request) -> Response:
     """Select one bounded training pivot without clearing the injury flag."""
     form = dict(await request.form())
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     result = await run_in_threadpool(
         _approve_injury_plan,
         athlete_id,
@@ -495,11 +394,6 @@ def _approve_injury_plan(
 @app.post("/coach/athletes/register", response_class=HTMLResponse)
 async def coach_register_athlete(request: Request) -> Response:
     form = dict(await request.form())
-    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(f"<h1>Coach console</h1><p>{exc}</p>", status_code=403)
     message = await run_in_threadpool(
         _register, {str(key): str(value) for key, value in form.items()}
     )
@@ -533,11 +427,6 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
 
 @app.post("/coach/athlete/{athlete_id}/telegram/unlink", response_class=HTMLResponse)
 async def coach_unlink_telegram(athlete_id: str, request: Request) -> Response:
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -639,28 +528,14 @@ def _register(form: dict[str, str]) -> tuple[str, str]:
 
 
 @app.get("/coach/outbox", response_class=HTMLResponse)
-async def coach_outbox(request: Request, token: str = "") -> Response:
+async def coach_outbox(request: Request) -> Response:
     """Tonight's queue: what wants to go out tomorrow, and why."""
-    effective_token = token.strip() if token else request.cookies.get(COOKIE_NAME, "").strip()
-    if not effective_token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(effective_token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
-    return HTMLResponse(await run_in_threadpool(_render_outbox, effective_token, None))
+    return HTMLResponse(await run_in_threadpool(_render_outbox, None))
 
 
 @app.get("/coach/whatsapp", response_class=HTMLResponse)
 async def coach_whatsapp(request: Request, tab: str = "inbox", athlete: str = "") -> Response:
     """The daily message desk: feedback, approval, schedule and delivery."""
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     valid_tab = tab if tab in {"inbox", "approval", "scheduled", "sent"} else "inbox"
     return HTMLResponse(
         await run_in_threadpool(_render_whatsapp, valid_tab, athlete.strip(), None)
@@ -669,13 +544,6 @@ async def coach_whatsapp(request: Request, tab: str = "inbox", athlete: str = ""
 
 @app.get("/coach/analytics", response_class=HTMLResponse)
 async def coach_analytics(request: Request) -> Response:
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     return HTMLResponse(await run_in_threadpool(_render_analytics))
 
 
@@ -696,13 +564,6 @@ def _render_analytics() -> str:
 @app.post("/coach/whatsapp/review", response_class=HTMLResponse)
 async def coach_whatsapp_review(request: Request) -> Response:
     form = dict(await request.form())
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     result = await run_in_threadpool(
         _review_draft,
         str(form.get("athlete_id", "")).strip(),
@@ -716,13 +577,6 @@ async def coach_whatsapp_review(request: Request) -> Response:
 
 @app.post("/coach/whatsapp/bulk-approve", response_class=HTMLResponse)
 async def coach_whatsapp_bulk_approve(request: Request) -> Response:
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     result = await run_in_threadpool(_bulk_approve_unchanged)
     return HTMLResponse(await run_in_threadpool(_render_whatsapp, "approval", "", result))
 
@@ -730,13 +584,6 @@ async def coach_whatsapp_bulk_approve(request: Request) -> Response:
 @app.post("/coach/whatsapp/reviewed", response_class=HTMLResponse)
 async def coach_whatsapp_mark_reviewed(request: Request) -> Response:
     form = dict(await request.form())
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     athlete_id = str(form.get("athlete_id", "")).strip()
     result = await run_in_threadpool(_mark_feedback_reviewed, athlete_id)
     return HTMLResponse(await run_in_threadpool(_render_whatsapp, "inbox", athlete_id, result))
@@ -745,13 +592,6 @@ async def coach_whatsapp_mark_reviewed(request: Request) -> Response:
 @app.post("/coach/whatsapp/simulate", response_class=HTMLResponse)
 async def coach_whatsapp_simulate(request: Request) -> Response:
     form = dict(await request.form())
-    token = request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
     athlete_id = str(form.get("athlete_id", "")).strip()
     body = str(form.get("body", "")).strip()
     if not is_demo(athlete_id) or not body:
@@ -828,14 +668,6 @@ def _render_whatsapp(
 @app.post("/coach/outbox/review", response_class=HTMLResponse)
 async def coach_review_draft(request: Request) -> Response:
     form = dict(await request.form())
-    token = str(form.get("token", "")).strip() or request.cookies.get(COOKIE_NAME, "").strip()
-    if not token:
-        return RedirectResponse(url="/coach/login", status_code=303)
-    try:
-        coach_auth.check(token)
-    except coach_auth.CoachAuthError as exc:
-        return HTMLResponse(render_login(error=str(exc)), status_code=403)
-
     message = await run_in_threadpool(
         _review_draft,
         str(form.get("athlete_id", "")).strip(),
@@ -844,7 +676,7 @@ async def coach_review_draft(request: Request) -> Response:
         str(form.get("decision", "")).strip(),
         str(form.get("body", "")),
     )
-    return HTMLResponse(await run_in_threadpool(_render_outbox, token, message))
+    return HTMLResponse(await run_in_threadpool(_render_outbox, message))
 
 
 def _review_draft(
@@ -865,7 +697,7 @@ def _review_draft(
     return ("ok", f"Message {verb} {athlete_id} on {local_date}.")
 
 
-def _render_outbox(token: str, message: tuple[str, str] | None) -> str:
+def _render_outbox(message: tuple[str, str] | None) -> str:
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -873,7 +705,7 @@ def _render_outbox(token: str, message: tuple[str, str] | None) -> str:
     finally:
         conn.close()
     return render_outbox(
-        pending, token=token, coach=settings.coach_name, today=date.today(),
+        pending, coach=settings.coach_name, today=date.today(),
         message=message,
     )
 

@@ -101,11 +101,8 @@ def test_the_webhook_logs_a_set_and_queues_coaching_for_review(client):
 
 
 def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeypatch):
-    from app.coach import COOKIE_NAME
     from app.config import settings as app_settings
 
-    monkeypatch.setattr(app_settings, "coach_access_token", "coach-test-token")
-    client.cookies.set(COOKIE_NAME, "coach-test-token")
     assert client.post("/coach/demo/seed").status_code == 200
     response = client.post(
         "/coach/whatsapp/simulate",

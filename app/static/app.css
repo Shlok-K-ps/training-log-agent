@@ -496,7 +496,6 @@ tbody tr:hover {
 .desk-stat,
 .pace-stat,
 .summary-tile,
-.login-box,
 .legal-container,
 .feature-card,
 .stat-tile,
@@ -653,13 +652,6 @@ tbody tr:hover {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.016em;
-}
-
-.signout-link {
-  display: inline-block;
-  margin: 8px 6px 0;
-  color: var(--red);
-  font-size: 15px;
 }
 
 .compact-bar,
@@ -2094,79 +2086,7 @@ dialog form button {
 .pace-on_track b { background: var(--tint-soft); color: var(--tint-text); }
 .pace-lagging b { background: var(--red-soft); color: var(--red-text); }
 
-/* 10. Sign in
-   ========================================================================== */
-
-.login-screen {
-  display: grid;
-  place-items: center;
-  min-height: 100vh;
-  min-height: 100dvh;
-  padding: 24px 16px;
-}
-
-.login-box {
-  width: 100%;
-  max-width: 420px;
-  padding: 36px 30px 26px;
-  border-radius: 28px;
-  box-shadow: var(--shadow-raised);
-  text-align: center;
-  animation: sheet-in 520ms var(--ease-out) both;
-}
-
-.login-box .mac-app-icon {
-  margin: 0 auto 18px;
-}
-
-.login-box h1 {
-  margin-bottom: 8px;
-  font-size: 28px;
-  letter-spacing: -0.026em;
-}
-
-.login-box p {
-  margin-bottom: 22px;
-  color: var(--text-2);
-  font-size: 15px;
-  line-height: 1.45;
-}
-
-.login-box .msg {
-  margin-bottom: 14px;
-  text-align: left;
-}
-
-.login-box form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  text-align: left;
-}
-
-.field-label {
-  margin-left: 4px;
-  color: var(--text-2);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.login-box button {
-  width: 100%;
-  min-height: 50px;
-  margin-top: 8px;
-  border-radius: var(--r-md);
-  font-size: 17px;
-}
-
-.back-link {
-  display: inline-block;
-  margin-top: 18px;
-  color: var(--tint);
-  font-size: 15px;
-}
-
-/* 11. Public site
+/* 10. Public site
    ========================================================================== */
 
 .wrapper,
@@ -2705,7 +2625,7 @@ dialog form button {
   border-top: 1px solid var(--separator);
 }
 
-/* 12. Motion
+/* 11. Motion
    ========================================================================== */
 
 ::view-transition-old(root),
@@ -2742,7 +2662,7 @@ dialog form button {
 .hero > :nth-child(6), .tile:nth-child(6), .directory-row:nth-child(6), .athlete-line:nth-child(6) { animation-delay: 200ms; }
 .directory-row:nth-child(n+7), .athlete-line:nth-child(n+7) { animation-delay: 240ms; }
 
-/* 13. Responsive
+/* 12. Responsive
    ========================================================================== */
 
 @media (max-width: 1100px) {

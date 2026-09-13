@@ -193,9 +193,6 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         assert "Telegram" in health["messaging_transport"]
         assert "Telegram connected" in main._render_athlete("+919812340001", None)
 
-        from app.coach import COOKIE_NAME
-        monkeypatch.setattr(settings, "coach_access_token", "coach-test-token")
-        c.cookies.set(COOKIE_NAME, "coach-test-token")
         desk = c.get("/coach/whatsapp")
         assert "Telegram is active" in desk.text
         assert "Open an athlete profile to connect their Telegram chat" in desk.text

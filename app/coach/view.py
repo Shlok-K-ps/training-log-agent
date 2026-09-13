@@ -155,8 +155,7 @@ def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
         f'<nav class="side-links" aria-label="Roster navigation">{"".join(side_nav)}</nav>'
         '<div class="side-meta">'
         f'<div class="coach-profile"><span class="avatar" aria-hidden="true">{initial}</span>'
-        f'<div>Signed in as<strong>{escape(coach)}</strong></div></div>'
-        '<a class="signout-link" href="/coach/logout">Sign out</a>'
+        f'<div>Head coach<strong>{escape(coach)}</strong></div></div>'
         '</div>'
         '</aside>'
         f'<nav class="bottom-bar" aria-label="Mobile navigation">{"".join(bottom_nav)}</nav>'
@@ -286,7 +285,6 @@ def _tutorial() -> str:
 def render(
     roster: Roster,
     *,
-    token: str = "",
     coach: str,
     message: tuple[str, str] | None = None,
     has_demo: bool = False,
@@ -591,7 +589,6 @@ def _outbox_card(item: PendingMessage) -> str:
 def render_outbox(
     pending: tuple[PendingMessage, ...],
     *,
-    token: str = "",
     coach: str,
     today,
     message: tuple[str, str] | None = None,
@@ -628,49 +625,10 @@ def render_outbox(
     )
 
 
-def render_login(error: str | None = None, message: str | None = None) -> str:
-    """Render the coach sign-in page."""
-    error_markup = f'<div class="msg err">{escape(error)}</div>' if error else ""
-    msg_markup = f'<div class="msg ok">{escape(message)}</div>' if message else ""
-
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Power AI — Coach Sign In</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <meta name="color-scheme" content="light dark">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/motion.js" defer></script>
-</head>
-<body>
-  <main class="login-screen">
-    <div class="login-box">
-      <span class="mac-app-icon icon-lg" aria-hidden="true">{_BOLT}</span>
-      <h1>Coach Sign In</h1>
-      <p>Enter your coach access token. It is kept in a secure, HTTP-only cookie and never appears in page URLs.</p>
-      {error_markup}
-      {msg_markup}
-      <form method="post" action="/coach/login">
-        <label class="field-label" for="token">Coach access token</label>
-        <input type="password" id="token" name="token" required autofocus autocomplete="current-password" placeholder="Paste coach token">
-        <button type="submit">Sign In</button>
-      </form>
-      <a class="back-link" href="/">Back to overview</a>
-    </div>
-  </main>
-</body>
-</html>"""
-
-
-def render_landing(*, is_logged_in: bool = False) -> str:
+def render_landing() -> str:
     """Render the public landing page with Power AI design system."""
-    coach_link = "/coach" if is_logged_in else "/coach/login"
-    coach_text = "Open Coach Desk" if is_logged_in else "Coach Sign In"
+    coach_link = "/coach"
+    coach_text = "Open Coach Desk"
     arrow_svg = (
         '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" '
         'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">'
