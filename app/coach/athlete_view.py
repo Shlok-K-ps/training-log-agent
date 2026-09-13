@@ -1,7 +1,8 @@
 """The athlete page: what they did, what the rules make of it, what to say back.
 
-Kept separate from `view.py` so the roster and outbox markup stays as it is. The
-shared stylesheet is imported rather than duplicated.
+It opens on the decision the coach owes this athlete, then the evidence, the plan
+and the conversation. Everything shown comes from the same rules and records the
+agent used; the page adds no coaching of its own.
 """
 
 from __future__ import annotations
@@ -9,35 +10,138 @@ from __future__ import annotations
 from html import escape
 
 from app.coach.athlete import AthleteDetail, progress_series
-from app.coach.view import coach_frame
+from app.coach.view import coach_frame, conversation_bubbles, initials
+from app.decision.injury_pivot import InjuryPivot, pivot_message
+from app.scheduling.outbox import message_kind_label
 
-def _injury_pivot_panel(detail: AthleteDetail) -> str:
-    if not detail.injured or detail.injury_entry_id is None:
+_BUCKET_TONE = {"needs_you": "act", "watch": "watch", "meet_prep": "meet", "fine": "fine"}
+_BUCKET_BADGE = {
+    "needs_you": ("tag-act", "Needs you"),
+    "watch": ("tag-watch", "Watch"),
+    "meet_prep": ("tag-meet", "Meet prep"),
+    "fine": ("tag-fine", "On track"),
+}
+
+
+def _current_plan(detail: AthleteDetail) -> InjuryPivot | None:
+    """The pivot the coach approved for this injury, if it still applies."""
+    decision = detail.injury_plan_decision
+    if (
+        not decision
+        or detail.injury_entry_id is None
+        or int(decision.get("injury_entry_id", -1)) != detail.injury_entry_id
+    ):
+        return None
+    code = str(decision.get("option_code"))
+    return next((option for option in detail.injury_pivots if option.code == code), None)
+
+
+def _hero(detail: AthleteDetail, *, plan: InjuryPivot | None, awaiting: int) -> str:
+    bucket = detail.roster.bucket.value
+    badge_cls, badge_text = _BUCKET_BADGE.get(bucket, ("tag-fine", "On track"))
+    status = " · ".join(f.detail for f in detail.roster.flags) or "No active flags — current trend is within policy."
+    athlete = escape(detail.athlete_id)
+    if detail.clearance_requested:
+        action = (f"/coach/athlete/{athlete}#clearance-review", "Review clearance")
+    elif detail.injured and detail.injury_pivots and plan is None:
+        action = (f"/coach/athlete/{athlete}#injury-plan", "Choose injury plan")
+    elif awaiting:
+        action = ("/coach/whatsapp?tab=approval", f"Approve {awaiting} message{'s' if awaiting != 1 else ''}")
+    else:
+        action = (f"/coach/athlete/{athlete}#messages", "Message athlete")
+    meta = [
+        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in"),
+        ("Last log", detail.last_activity or "never"),
+        ("Phase", detail.phase),
+    ]
+    if plan is not None:
+        meta.append(("Injury plan", plan.title))
+    meta_html = "".join(f"<span>{escape(k)} <b>{escape(str(v))}</b></span>" for k, v in meta)
+    return (
+        '<section class="athlete-hero">'
+        f'<span class="avatar lg ring-{_BUCKET_TONE.get(bucket, "fine")}" aria-hidden="true">'
+        f'{escape(initials(detail.display_name))}</span>'
+        '<div class="hero-copy">'
+        f'<span class="badge {badge_cls}">{badge_text}</span>'
+        f'<p class="hero-status">{escape(status)}</p>'
+        f'<div class="hero-meta">{meta_html}</div></div>'
+        f'<div class="hero-action"><a class="btn btn-primary" href="{action[0]}">{escape(action[1])}</a></div>'
+        '</section>'
+    )
+
+
+def _injury_plan_panel(detail: AthleteDetail, *, coach: str, plan: InjuryPivot | None) -> str:
+    """Four bounded plans, each with the message it sends. The coach picks one,
+    checks or edits the wording, and approves both together."""
+    if not detail.injured or detail.injury_entry_id is None or not detail.injury_pivots:
         return ""
-    selected = detail.injury_plan_decision
-    selected_note = ""
-    if selected and int(selected.get("injury_entry_id", -1)) == detail.injury_entry_id:
-        selected_note = (
-            '<div class="msg ok"><strong>Current coach-approved pivot:</strong> '
-            f'{escape(str(selected.get("plan_text", "")))}</div>'
-        )
+    recommended = next((o for o in detail.injury_pivots if o.recommended), detail.injury_pivots[0])
+    selected = plan or recommended
+    first_name = detail.display_name.split()[0] if detail.name else "the athlete"
     options = []
     for option in detail.injury_pivots:
-        marker = '<span class="badge badge-blue">Recommended starting path</span>' if option.recommended else ""
+        badges = ""
+        if option.recommended:
+            badges += '<span class="badge badge-blue">Recommended</span>'
+        if plan is not None and option.code == plan.code:
+            badges += '<span class="badge tag-fine">Current plan ✓</span>'
+        checked = " checked" if option.code == selected.code else ""
         options.append(
-            f'<div class="pivot-option {"recommended" if option.recommended else ""}">{marker}'
-            f'<h3>{escape(option.title)}</h3><p>{escape(option.plan)}</p>'
-            f'<p><strong>Why consider it:</strong> {escape(option.rationale)}</p>'
-            f'<form method="post" action="/coach/athlete/{escape(detail.athlete_id)}/injury-plan">'
-            f'<input type="hidden" name="injury_entry_id" value="{detail.injury_entry_id}">'
-            f'<input type="hidden" name="option_code" value="{escape(option.code)}">'
-            '<button type="submit">Approve this training pivot</button></form></div>'
+            f'<label class="plan-option{" selected" if checked else ""}">'
+            f'<input type="radio" name="option_code" value="{escape(option.code)}"{checked} required '
+            f'data-message="{escape(pivot_message(option, coach=coach), quote=True)}">'
+            '<span class="plan-option-body">'
+            f'<span class="plan-option-top"><strong>{escape(option.title)}</strong>{badges}</span>'
+            f'<span class="plan-option-text">{escape(option.plan)}</span>'
+            f'<span class="plan-option-why">{escape(option.rationale)}</span>'
+            '</span></label>'
         )
+    note = f" ({detail.injury_note})" if detail.injury_note else ""
+    if plan is None:
+        head = (
+            '<h2>Choose an injury plan</h2>'
+            f'<p>New injury{escape(note)}. Pick how training changes, check the message '
+            f'{escape(first_name)} will receive, then approve.</p>'
+        )
+        state = '<span class="clearance-state">Decision needed</span>'
+        submit = "Approve plan and schedule message"
+    else:
+        head = (
+            f'<h2>Injury plan: {escape(plan.title)}</h2>'
+            f'<p>Current injury{escape(note)}. You can switch plans; the new message replaces '
+            "any that has not been sent yet.</p>"
+        )
+        state = '<span class="badge tag-fine">Plan approved</span>'
+        submit = "Switch to the selected plan"
     return (
-        '<section class="pivot-panel"><h2>Fresh injury · coach decision required</h2>'
-        '<p>The injury gate remains open in every path. These options change training only; '
-        'they do not diagnose the injury or clear the athlete.</p>'
-        f'{selected_note}<div class="pivot-grid">{"".join(options)}</div></section>'
+        f'<section id="injury-plan" class="injury-plan{" decided" if plan else ""}">'
+        f'<div class="plan-head"><div>{head}</div>{state}</div>'
+        f'<form id="injury-plan-form" method="post" action="/coach/athlete/{escape(detail.athlete_id)}/injury-plan">'
+        f'<input type="hidden" name="injury_entry_id" value="{detail.injury_entry_id}">'
+        f'<div class="plan-options" role="radiogroup" aria-label="Injury plans">{"".join(options)}</div>'
+        f'<label class="plan-message">Message to {escape(first_name)}'
+        f'<textarea name="body" maxlength="1400">{escape(pivot_message(selected, coach=coach))}</textarea></label>'
+        '<div class="plan-actions"><small>Every plan keeps the injury flag open. Only a recorded '
+        'independent clearance reopens normal programming.</small>'
+        f'<button class="btn btn-primary" type="submit">{submit}</button></div>'
+        '</form></section>'
+        """<script>
+(() => {
+  const form = document.getElementById('injury-plan-form');
+  if (!form) return;
+  const box = form.querySelector('textarea[name=body]');
+  let generated = box.value;
+  form.querySelectorAll('input[name=option_code]').forEach((radio) => {
+    radio.addEventListener('change', () => {
+      if (box.value === generated) box.value = radio.dataset.message;
+      generated = radio.dataset.message;
+      form.querySelectorAll('.plan-option').forEach((option) => {
+        option.classList.toggle('selected', option.querySelector('input').checked);
+      });
+    });
+  });
+})();
+</script>"""
     )
 
 
@@ -70,7 +174,7 @@ def _injury_clearance_panel(detail: AthleteDetail) -> str:
         '<label class="clearance-confirm"><input type="checkbox" name="independent_confirmation" '
         'value="confirmed" required><span>I confirm this clearance came from someone other '
         'than the athlete and I want to remove the injury safety gate.</span></label>'
-        '<div class="clearance-actions"><small>This records the signed-in coach, source, basis '
+        '<div class="clearance-actions"><small>This records the coach, source, basis '
         'and timestamp. It does not represent a diagnosis by Power AI.</small>'
         '<button type="submit">Record clearance and reopen programming</button></div>'
         '</form></section>'
@@ -145,6 +249,46 @@ def _chart(lift: str, points: tuple[tuple[str, float], ...]) -> str:
     )
 
 
+def _telegram_panel(
+    detail: AthleteDetail, pairing_url: str | None, linked: bool, ready: bool
+) -> str:
+    if linked and ready:
+        return (
+            '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Connected</span>'
+            '<h2>Telegram connected</h2><p>This athlete receives approved messages '
+            'through the permanent Telegram channel.</p></div><form method="post" action="/coach/athlete/'
+            f'{escape(detail.athlete_id)}/telegram/unlink">'
+            '<button class="danger" type="submit">Disconnect Telegram</button>'
+            '</form></section>'
+        )
+    if pairing_url and ready:
+        return (
+            '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Action needed</span>'
+            '<h2>Connect this athlete to Telegram</h2>'
+            '<p>Open the signed link, press Start in Telegram, and this private chat '
+            'will be paired to the athlete profile.</p></div>'
+            f'<a class="approve" href="{escape(pairing_url)}" '
+            'target="_blank" rel="noopener">Connect Telegram</a></section>'
+        )
+    if pairing_url:
+        return (
+            '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Reconnecting</span>'
+            '<h2>Telegram webhook is not ready</h2><p>The bot settings exist, but '
+            'Render has not confirmed its webhook. Check the deployment log before pairing.</p></div></section>'
+        )
+    return ""
+
+
+def _facts(items: list[tuple[str, object]]) -> str:
+    usable = [(label, value) for label, value in items if value not in (None, "", ())]
+    if not usable:
+        return '<p class="empty">Not configured yet.</p>'
+    return '<dl class="facts">' + "".join(
+        f'<div><dt>{escape(label)}</dt><dd>{escape(str(value))}</dd></div>'
+        for label, value in usable
+    ) + '</dl>'
+
+
 def render_athlete(
     detail: AthleteDetail,
     *,
@@ -154,115 +298,69 @@ def render_athlete(
     telegram_pairing_url: str | None = None,
     telegram_linked: bool = False,
     telegram_ready: bool | None = None,
+    conversation=(),
+    scheduled=(),
+    awaiting: int = 0,
+    pending_count: int = 0,
 ) -> str:
     banner = ""
     if message:
         kind, text = message
         banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
+    if telegram_ready is None:
+        telegram_ready = bool(telegram_linked or telegram_pairing_url)
+    plan = _current_plan(detail)
 
+    # --- Evidence: what happened and what the rules make of it ---
     tiles = [
-        ("Last logged", detail.last_activity or "never", False, ""),
-        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in", detail.readiness_band in {"orange", "red"}, ""),
-        ("Sleep", f"{detail.checkin.sleep_hours:g} h" if detail.checkin and detail.checkin.sleep_hours is not None else "not reported", False, ""),
-        ("Phase", detail.phase, False, ""),
+        ("Last logged", detail.last_activity or "never", False),
+        ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in", detail.readiness_band in {"orange", "red"}),
+        ("Sleep", f"{detail.checkin.sleep_hours:g} h" if detail.checkin and detail.checkin.sleep_hours is not None else "not reported", False),
+        ("Phase", detail.phase, False),
     ]
     if detail.injured:
         days = f"{detail.injury_days_open}d" if detail.injury_days_open is not None else "open"
-        tiles.append(("Injury", days, True, ""))
+        tiles.append(("Injury", days, True))
     if any(f.kind == "silent" for f in detail.roster.flags):
-        tiles.append(("Silent", f"{detail.roster.days_silent}d", True, ""))
+        tiles.append(("Silent", f"{detail.roster.days_silent}d", True))
     if detail.roster.weeks_to_meet is not None:
-        tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False, ""))
+        tiles.append(("Meet in", f"{detail.roster.weeks_to_meet}w", False))
     tile_html = "".join(
         f'<div class="tile"><div class="k">{escape(k)}</div>'
         f'<div class="v{" warn" if warn else ""}">{escape(v)}</div></div>'
-        for k, v, warn, sym in tiles
+        for k, v, warn in tiles
     )
-
     verdicts = "".join(
         f"<tr><td>{escape(a.lift)}</td><td>{escape(a.verdict.value)}</td>"
-        f"<td>{a.current_weight:g} kg</td><td>{a.sessions_considered}</td></tr>"
-        if a.current_weight is not None else
-        f"<tr><td>{escape(a.lift)}</td><td>{escape(a.verdict.value)}</td>"
-        f"<td>—</td><td>{a.sessions_considered}</td></tr>"
+        + (f"<td>{a.current_weight:g} kg</td>" if a.current_weight is not None else "<td>—</td>")
+        + f"<td>{a.sessions_considered}</td></tr>"
         for a in detail.assessments
     )
     verdict_table = (
-        "<h2>What the rules say</h2><table><thead><tr><th>Lift</th><th>Verdict</th>"
+        '<h3 class="sub-head">What the rules say</h3><table><thead><tr><th>Lift</th><th>Verdict</th>'
         "<th>Latest top set</th><th>Sessions</th></tr></thead>"
         f"<tbody>{verdicts}</tbody></table>"
         if verdicts else ""
     )
-
     charts = "".join(_chart(lift, pts) for lift, pts in progress_series(detail).items())
-    charts = f"<h2>Progress</h2>{charts}" if charts else ""
-
+    charts = f'<h3 class="sub-head">Progress</h3>{charts}' if charts else ""
     rows = "".join(
         f"<tr><td>{escape(s.session_date)}</td><td>{escape(s.lift)}</td>"
         f"<td>{escape(s.summary)}</td></tr>"
         for s in detail.sessions[:15]
     )
     log = (
-        "<h2>Recent sessions</h2><table><thead><tr><th>Date</th><th>Lift</th>"
+        '<h3 class="sub-head">Recent sessions</h3><table><thead><tr><th>Date</th><th>Lift</th>'
         f"<th>Set</th></tr></thead><tbody>{rows}</tbody></table>"
-        if rows else '<h2>Recent sessions</h2><p class="empty">Nothing logged yet.</p>'
+        if rows else '<h3 class="sub-head">Recent sessions</h3><p class="empty">Nothing logged yet.</p>'
+    )
+    evidence = (
+        '<section id="evidence" class="profile-section"><h2>Evidence</h2>'
+        f'<div class="grid">{tile_html}</div>{verdict_table}{charts}{log}</section>'
     )
 
-    compose = (
-        '<div class="context-card compose coach-draft">'
-        '<div class="draft-state">Prepared · requires coach approval</div>'
-        '<h2>Message for the athlete</h2>'
-        '<form method="post" action="/coach/athlete/'
-        f'{escape(detail.athlete_id)}/message">'
-        f'<textarea name="body" id="draft-composer" maxlength="1400" '
-        f'oninput="document.getElementById(\'live-preview-bubble\').textContent=this.value">{escape(suggested)}</textarea>'
-        '<div class="draft-preview-wrap">'
-        '<div class="section-caption">Preview</div>'
-        f'<div id="live-preview-bubble" class="chat-bubble">{escape(suggested)}</div>'
-        '</div>'
-        '<div class="btns"><button class="btn btn-primary" type="submit">Approve and queue</button></div>'
-        '<p class="hint">Built from this athlete\'s record and current trend. Edit freely. '
-        "The exact approved wording is what will be sent.</p>"
-        "</form></div>"
-    )
-    telegram_panel = ""
-    if telegram_ready is None:
-        telegram_ready = bool(telegram_linked or telegram_pairing_url)
-    if telegram_linked and telegram_ready:
-        telegram_panel = (
-            '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Connected</span>'
-            '<h2>Telegram connected</h2><p>This athlete receives approved messages '
-            'through the permanent Telegram channel.</p></div><form method="post" action="/coach/athlete/'
-            f'{escape(detail.athlete_id)}/telegram/unlink">'
-            '<button class="danger" type="submit">Disconnect Telegram</button>'
-            '</form></section>'
-        )
-    elif telegram_pairing_url and telegram_ready:
-        telegram_panel = (
-            '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Action needed</span>'
-            '<h2>Connect this athlete to Telegram</h2>'
-            '<p>Open the signed link, press Start in Telegram, and this private chat '
-            'will be paired to the athlete profile.</p></div>'
-            f'<a class="approve" href="{escape(telegram_pairing_url)}" '
-            'target="_blank" rel="noopener">Connect Telegram</a></section>'
-        )
-    elif telegram_pairing_url:
-        telegram_panel = (
-            '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Reconnecting</span>'
-            '<h2>Telegram webhook is not ready</h2><p>The bot settings exist, but '
-            'Render has not confirmed its webhook. Check the deployment log before pairing.</p></div></section>'
-        )
-
-    def facts(items: list[tuple[str, object]]) -> str:
-        usable = [(label, value) for label, value in items if value not in (None, "", ())]
-        if not usable:
-            return '<p class="empty">Not configured yet.</p>'
-        return '<dl class="facts">' + "".join(
-            f'<div><dt>{escape(label)}</dt><dd>{escape(str(value))}</dd></div>'
-            for label, value in usable
-        ) + '</dl>'
-
-    recovery = facts([
+    # --- Plan: the context the rules work from ---
+    recovery = _facts([
         ("Readiness band", detail.readiness_band),
         ("Self-rating", detail.checkin.readiness if detail.checkin else None),
         ("Soreness", detail.checkin.soreness if detail.checkin else None),
@@ -274,11 +372,12 @@ def render_athlete(
         '<div class="context-card"><h2>Recovery today</h2>' + recovery
         + (f'<ul class="recovery-reasons">{reasons}</ul>' if reasons else "") + '</div>'
     )
-    program_panel = '<div class="context-card"><h2>Programming</h2>' + facts([
+    program_panel = '<div class="context-card"><h2>Programming</h2>' + _facts([
         ("Method", str(detail.program.get("methodology", "")).replace("_", " ")),
         ("Suggested starting method", detail.suggested_method),
         ("Why", detail.suggested_method_reason),
         ("Inputs still needed", ", ".join(detail.suggested_method_inputs)),
+        ("Injury plan", plan.title if plan else None),
         ("Experience", detail.program.get("experience")),
         ("Training days", detail.program.get("days_per_week")),
         ("Starting bodyweight", f'{detail.profile.get("bodyweight_kg")} kg' if detail.profile.get("bodyweight_kg") else None),
@@ -294,7 +393,7 @@ def render_athlete(
         f'{detail.goal_pace.target_kg:g} kg by {escape(detail.goal_pace.target_date)}.</div>'
         if detail.goal_pace else ""
     ) + '</div>'
-    schedule_panel = '<div class="context-card"><h2>Schedule & logistics</h2>' + facts([
+    schedule_panel = '<div class="context-card"><h2>Schedule & logistics</h2>' + _facts([
         ("Calendar", "Connected" if detail.calendar_connected else "Not connected"),
         ("Timezone", detail.schedule.get("timezone")),
         ("Morning check-in", detail.schedule.get("morning_checkin_time")),
@@ -302,7 +401,7 @@ def render_athlete(
         ("Bedtime", detail.schedule.get("bedtime")),
     ]) + '</div>'
     supplement_text = "; ".join(detail.supplements) if detail.supplements else None
-    nutrition_panel = '<div class="context-card"><h2>Nutrition & supplements</h2>' + facts([
+    nutrition_panel = '<div class="context-card"><h2>Nutrition & supplements</h2>' + _facts([
         ("Diet", detail.nutrition.get("diet_style")),
         ("Foods available", detail.nutrition.get("foods_available")),
         ("Allergies", detail.nutrition.get("allergies")),
@@ -310,20 +409,61 @@ def render_athlete(
         ("Protein target", f'{detail.nutrition.get("protein_target_g")} g' if detail.nutrition.get("protein_target_g") else None),
         ("Approved supplements", supplement_text),
     ]) + '</div>'
-    status = " · ".join(f.detail for f in detail.roster.flags) or "No active flags — current trend is within policy."
-    body = (
-        f"{banner}"
-        f'<div class="status-strip"><strong>Current status:</strong> {escape(status)}</div>'
-        f'{telegram_panel}'
-        f'{_injury_clearance_panel(detail)}{_injury_pivot_panel(detail)}'
-        f'<div class="grid">{tile_html}</div>'
-        '<div class="profile-grid"><div>'
+    plan_section = (
+        '<section id="plan" class="profile-section"><h2>Plan</h2>'
         f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
-        f"{verdict_table}{charts}{log}</div>{compose}</div>"
+        '</section>'
+    )
+
+    # --- Messages: the conversation, what is scheduled, and a note to send ---
+    first_name = detail.display_name.split()[0] if detail.name else "the athlete"
+    scheduled_html = "".join(
+        f'<div><span>{escape(message_kind_label(str(row["message_kind"])))} · '
+        f'{escape(str(row["local_date"]))}</span>{escape(str(row["body"]))}</div>'
+        for row in scheduled
+    )
+    thread = (
+        '<section class="context-card thread-card"><h2>Conversation</h2>'
+        + (
+            f'<div class="chat-stream">{conversation_bubbles(conversation)}</div>'
+            if conversation else f'<p class="empty">No messages with {escape(first_name)} yet.</p>'
+        )
+        + (f'<div class="scheduled-mini"><h3>Scheduled to send</h3>{scheduled_html}</div>' if scheduled else "")
+        + "</section>"
+    )
+    compose = (
+        '<div class="context-card compose coach-draft">'
+        '<div class="draft-state">Prepared · requires coach approval</div>'
+        f'<h2>Message for {escape(first_name)}</h2>'
+        '<form method="post" action="/coach/athlete/'
+        f'{escape(detail.athlete_id)}/message">'
+        f'<textarea name="body" id="draft-composer" maxlength="1400" '
+        f'oninput="document.getElementById(\'live-preview-bubble\').textContent=this.value">{escape(suggested)}</textarea>'
+        '<div class="draft-preview-wrap">'
+        '<div class="section-caption">Preview</div>'
+        f'<div id="live-preview-bubble" class="chat-bubble">{escape(suggested)}</div>'
+        '</div>'
+        '<div class="btns"><button class="btn btn-primary" type="submit">Approve and queue</button></div>'
+        '<p class="hint">Built from this athlete\'s record and current trend. Edit freely. '
+        "The exact approved wording is what will be sent.</p>"
+        "</form></div>"
+    )
+
+    body = (
+        f"{banner}{_hero(detail, plan=plan, awaiting=awaiting)}"
+        '<nav class="section-nav" aria-label="Athlete sections">'
+        '<a href="#evidence">Evidence</a><a href="#plan">Plan</a><a href="#messages">Messages</a></nav>'
+        f"{_telegram_panel(detail, telegram_pairing_url, telegram_linked, telegram_ready)}"
+        f"{_injury_clearance_panel(detail)}"
+        f"{'' if detail.clearance_requested else _injury_plan_panel(detail, coach=coach, plan=plan)}"
+        '<div class="profile-grid">'
+        f'<div class="profile-main">{evidence}{plan_section}</div>'
+        f'<aside id="messages" class="profile-side">{thread}{compose}</aside>'
+        '</div>'
     )
     return coach_frame(
         body, active="athletes", coach=coach, title=detail.display_name,
-        subtitle=f"{detail.athlete_id} · complete training, recovery and plan history",
+        subtitle=f"{detail.athlete_id} · evidence, plan and conversation",
         today=detail.reviewed_on.isoformat(), back=("/coach/athletes", "Athletes"),
-        athlete_id=detail.athlete_id,
+        athlete_id=detail.athlete_id, pending_count=pending_count,
     )

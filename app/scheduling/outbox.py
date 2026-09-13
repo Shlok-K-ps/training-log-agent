@@ -10,12 +10,12 @@ coach reads the queue, edits anything that reads wrong, and approves. In the
 morning, only approved drafts go out.
 
 Unreviewed means unsent. A coach who is asleep, busy or on holiday produces
-silence, not an unsupervised broadcast — the same way an unset token closes the
-console rather than opening it. This is a product invariant, not configuration.
+silence, not an unsupervised broadcast. This is a product invariant, not configuration.
 """
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -28,6 +28,25 @@ from app.storage import db
 MORNING = "morning_checkin"
 COACH_NOTE = "coach_note"
 FEEDBACK_REPLY = "feedback_reply:"
+INJURY_PLAN = FEEDBACK_REPLY + "injury:"
+
+
+def new_coach_note_kind() -> str:
+    """Each coach note gets its own key, so two notes on one day both go out."""
+    return f"{COACH_NOTE}:{secrets.token_hex(6)}"
+
+
+def message_kind_label(message_kind: str) -> str:
+    """How a queued or sent message reads to the coach."""
+    if message_kind == MORNING:
+        return "Morning check-in"
+    if message_kind == COACH_NOTE or message_kind.startswith(COACH_NOTE + ":"):
+        return "Coach note"
+    if message_kind.startswith(INJURY_PLAN):
+        return "Injury plan"
+    if message_kind.startswith(FEEDBACK_REPLY):
+        return "Reply to athlete"
+    return message_kind.replace("_", " ").capitalize()
 
 
 def _local_now(conn: sqlite3.Connection, athlete_id: str, now_utc: datetime):
@@ -118,7 +137,7 @@ def send_approved_notes(
     """
     now_utc = now_utc or datetime.now(timezone.utc)
     sent = 0
-    for row in db.approved_drafts(conn, COACH_NOTE):
+    for row in db.approved_drafts_with_prefix(conn, COACH_NOTE):
         athlete_id = str(row["athlete_id"])
         resolved = _local_now(conn, athlete_id, now_utc)
         local_today = (
@@ -127,7 +146,7 @@ def send_approved_notes(
         if str(row["local_date"]) > local_today:
             continue
         sender(athlete_id, str(row["body"]))
-        db.mark_draft_sent(conn, athlete_id, COACH_NOTE, str(row["local_date"]))
+        db.mark_draft_sent(conn, athlete_id, str(row["message_kind"]), str(row["local_date"]))
         sent += 1
     return sent
 

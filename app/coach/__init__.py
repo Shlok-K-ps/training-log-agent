@@ -9,10 +9,10 @@ from app.coach.roster import (
     build_roster, pending_reviews, review_athlete,
 )
 from app.coach.view import (
+    approval_card,
     render,
     render_athletes,
     render_landing,
-    render_outbox,
     render_privacy,
     render_terms,
 )
@@ -20,5 +20,5 @@ from app.coach.view import (
 __all__ = [
     "Bucket", "Flag", "PendingMessage", "Roster", "RosterEntry",
     "build_roster", "pending_reviews", "review_athlete",
-    "render", "render_athletes", "render_landing", "render_outbox", "render_privacy", "render_terms",
+    "approval_card", "render", "render_athletes", "render_landing", "render_privacy", "render_terms",
 ]

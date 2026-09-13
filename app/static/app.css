@@ -2625,6 +2625,591 @@ dialog form button {
   border-top: 1px solid var(--separator);
 }
 
+/* 13. Coach workflow: Today, decisions, approvals, athlete profile, injury plans
+   ========================================================================== */
+
+.today-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: 22px;
+}
+
+.today-main {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  min-width: 0;
+}
+
+.today-side {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.today-side .panel,
+.today-side .demo {
+  margin: 0;
+}
+
+.today-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.section-head-row h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 22px;
+}
+
+.section-head-row a {
+  font-size: 15px;
+}
+
+.section-head-row form {
+  margin: 0;
+}
+
+.decision-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.decision-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px 14px 20px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: linear-gradient(90deg, var(--red-soft) 0%, transparent 45%), var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.decision-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  background: var(--red);
+}
+
+.decision-body {
+  min-width: 0;
+}
+
+.decision-kind {
+  display: block;
+  color: var(--red-text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.decision-body .athlete-name {
+  font-size: 17px;
+}
+
+.decision-body p {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.decision-action {
+  white-space: nowrap;
+}
+
+.avatar.lg {
+  width: 60px;
+  height: 60px;
+  font-size: 21px;
+}
+
+.avatar.ring-act { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--red); }
+.avatar.ring-watch { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--orange); }
+.avatar.ring-meet { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--tint); }
+.avatar.ring-fine { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--green); }
+
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.empty-card strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.all-clear {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(135deg, var(--green-soft) 0%, transparent 70%), var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.all-clear .check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #FFFFFF;
+  font: 700 20px/1 var(--font-rounded);
+}
+
+.all-clear strong {
+  font-size: 17px;
+}
+
+.all-clear p {
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.list-card {
+  padding: 2px 18px;
+  border-radius: var(--r-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.list-card.fine-collapse {
+  margin-top: 0;
+  border-top: 0;
+}
+
+.list-card .fine-summary {
+  padding: 14px 0;
+}
+
+.plan-note {
+  margin-top: 3px;
+  color: var(--green-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.approval-card {
+  margin-bottom: 0;
+  padding: 16px 18px 18px;
+}
+
+.draft-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.approval-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.approval-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.approval-state {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.approval-card .draft-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Athlete profile */
+
+.athlete-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.hero-status {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.hero-meta b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.section-nav {
+  position: sticky;
+  top: 10px;
+  z-index: 20;
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--bar);
+  box-shadow: var(--shadow-card);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+}
+
+.section-nav a {
+  padding: 6px 16px;
+  border-radius: 9px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.section-nav a:hover {
+  opacity: 1;
+  background: var(--fill);
+}
+
+.profile-main {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-margin-top: 72px;
+}
+
+.profile-section > h2 {
+  font-size: 26px;
+  letter-spacing: -0.026em;
+}
+
+.sub-head {
+  margin: 8px 0 -4px;
+  font-size: 17px;
+}
+
+.profile-side {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  scroll-margin-top: 72px;
+}
+
+.profile-side .coach-draft {
+  position: static;
+}
+
+.thread-card .chat-stream {
+  max-height: 380px;
+  min-height: 0;
+  padding: 4px 0 2px;
+  overflow-y: auto;
+}
+
+.scheduled-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+}
+
+.scheduled-mini h3 {
+  font-size: 15px;
+}
+
+.scheduled-mini div {
+  font-size: 14px;
+}
+
+.scheduled-mini span {
+  display: block;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Injury plan */
+
+.injury-plan {
+  padding: 20px 22px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--red-soft) 0%, transparent 160px), var(--card);
+  box-shadow: var(--shadow-card);
+  scroll-margin-top: 72px;
+}
+
+.injury-plan.decided {
+  background: linear-gradient(180deg, var(--green-soft) 0%, transparent 160px), var(--card);
+}
+
+.plan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plan-head h2 {
+  font-size: 22px;
+}
+
+.plan-head p {
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.plan-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.plan-option {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--r-md);
+  background: var(--card-2);
+  cursor: pointer;
+  transition: box-shadow var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
+}
+
+.plan-option:hover {
+  box-shadow: inset 0 0 0 1px var(--separator-strong);
+}
+
+.plan-option input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border: 2px solid var(--text-3);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: border-color var(--duration-hover) var(--ease-out), background-color var(--duration-hover) var(--ease-out);
+}
+
+.plan-option input[type="radio"]:checked {
+  border-color: var(--tint);
+  background: var(--tint);
+  box-shadow: inset 0 0 0 4px var(--card);
+}
+
+.plan-option.selected,
+.plan-option:has(input:checked) {
+  background: var(--card);
+  box-shadow: inset 0 0 0 2px var(--tint);
+}
+
+.plan-option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plan-option-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-option-top strong {
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.plan-option-text {
+  font-size: 14px;
+}
+
+.plan-option-why {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.plan-message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.plan-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.plan-actions small {
+  max-width: 54ch;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* Messaging desk additions */
+
+.thread-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.thread-panel .thread-panel-head h2 {
+  padding: 0;
+  border: 0;
+}
+
+.thread-actions {
+  padding: 0 16px 16px;
+}
+
+.delivery-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.delivery-state.tag-fine {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
+@media (max-width: 1100px) {
+  .today-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .today-side,
+  .profile-side {
+    position: static;
+  }
+}
+
+@media (max-width: 900px) {
+  .bottom-bar {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .decision-card,
+  .approval-head,
+  .athlete-hero {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .decision-action,
+  .athlete-hero .hero-action {
+    grid-column: 1 / -1;
+  }
+
+  .decision-action,
+  .hero-action .btn {
+    width: 100%;
+    min-height: 46px;
+    border-radius: var(--r-md);
+  }
+
+  .approval-state {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .section-nav {
+    top: calc(52px + env(safe-area-inset-top));
+  }
+}
+
+@media (max-width: 640px) {
+  .plan-options {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-actions .btn {
+    width: 100%;
+  }
+}
+
 /* 11. Motion
    ========================================================================== */
 

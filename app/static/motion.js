@@ -109,6 +109,20 @@
     });
   };
 
+  // Bulk approval only covers untouched drafts, so it switches off the moment
+  // the coach starts editing any message on the page.
+  function initBulkGuard() {
+    const bulk = document.querySelector('[data-bulk-approve]');
+    if (!bulk) return;
+    const fields = [...document.querySelectorAll('.message-card textarea')];
+    const eligible = bulk.dataset.eligible !== '0';
+    const update = () => {
+      bulk.disabled = !eligible || fields.some((field) => field.value !== field.defaultValue);
+    };
+    fields.forEach((field) => field.addEventListener('input', update));
+    update();
+  }
+
   function updateClock() {
     const el = document.getElementById('utc-clock');
     if (!el) return;
@@ -118,6 +132,7 @@
   function init() {
     initScrollState();
     initCounters();
+    initBulkGuard();
     if (document.getElementById('utc-clock')) {
       updateClock();
       setInterval(updateClock, 1000);

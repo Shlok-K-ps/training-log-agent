@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 import secrets
@@ -21,6 +22,7 @@ from datetime import date
 from contextlib import asynccontextmanager
 from contextlib import suppress
 from functools import lru_cache
+from urllib.parse import quote, unquote
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -30,7 +32,7 @@ from starlette.concurrency import run_in_threadpool
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
 from app.channels import telegram, vonage, whatsapp
-from app.decision.injury_pivot import injury_pivot_options
+from app.decision.injury_pivot import injury_pivot_options, pivot_message
 from app.coach.athlete import athlete_detail, suggest_message
 from app.coach.athlete_view import render_athlete
 from app.coach.analytics_view import render_analytics
@@ -40,6 +42,9 @@ from app.coach.demo import clear_demo_squad, is_demo, seed_demo_squad
 from app.scheduling.outbox import (
     COACH_NOTE,
     FEEDBACK_REPLY,
+    INJURY_PLAN,
+    MORNING,
+    new_coach_note_kind,
     send_approved_feedback,
     send_approved_notes,
 )
@@ -49,7 +54,6 @@ from app.coach import (
     render as render_roster,
     render_athletes,
     render_landing,
-    render_outbox,
     render_privacy,
     render_terms,
 )
@@ -171,6 +175,58 @@ async def product_home() -> Response:
     return HTMLResponse(render_landing())
 
 
+# --- Coach console ------------------------------------------------------------
+# Every write redirects back to a page (post/redirect/get), so a browser refresh
+# never repeats an approval, a note or a clearance. The outcome travels in a
+# short-lived cookie and is shown once on the page the coach lands on.
+
+FLASH_COOKIE = "coach_flash"
+
+
+def _redirect(url: str, message: tuple[str, str] | None = None) -> RedirectResponse:
+    response = RedirectResponse(url=url, status_code=303)
+    if message is not None:
+        response.set_cookie(
+            FLASH_COOKIE, quote(json.dumps(list(message))),
+            max_age=60, httponly=True, samesite="lax", path="/",
+        )
+    return response
+
+
+def _take_flash(request: Request) -> tuple[str, str] | None:
+    raw = request.cookies.get(FLASH_COOKIE)
+    if not raw:
+        return None
+    try:
+        kind, text = json.loads(unquote(raw))
+    except (ValueError, TypeError):
+        return None
+    if kind not in {"ok", "warn", "err"} or not isinstance(text, str):
+        return None
+    return kind, text
+
+
+def _page(request: Request, html: str | None) -> Response:
+    if html is None:
+        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
+    response = HTMLResponse(html)
+    if FLASH_COOKIE in request.cookies:
+        response.delete_cookie(FLASH_COOKIE, path="/")
+    return response
+
+
+def _return_to(form: dict, default: str) -> str:
+    """Only ever send the coach back to a console page on this site."""
+    target = str(form.get("return_to", "")).strip()
+    if target.startswith("/coach") and not target.startswith("//"):
+        return target
+    return default
+
+
+def _athlete_url(athlete_id: str, anchor: str = "") -> str:
+    return f"/coach/athlete/{quote(athlete_id)}" + (f"#{anchor}" if anchor else "")
+
+
 @app.get("/coach/login", include_in_schema=False)
 @app.get("/coach/logout", include_in_schema=False)
 async def coach_sign_in_retired() -> Response:
@@ -179,9 +235,45 @@ async def coach_sign_in_retired() -> Response:
 
 
 @app.get("/coach", response_class=HTMLResponse)
-async def coach_console() -> Response:
-    """The roster: decisions and exceptions that need a coach today."""
-    return HTMLResponse(await run_in_threadpool(_render_console, None))
+async def coach_console(request: Request) -> Response:
+    """Today: the decisions, approvals and exceptions waiting on the coach."""
+    return _page(request, await run_in_threadpool(_render_console, _take_flash(request)))
+
+
+def _current_injury_plan_title(conn, athlete_id: str) -> str | None:
+    """The coach's chosen pivot for the athlete's current injury, if any."""
+    entry_id = db.open_injury_entry_id(conn, athlete_id)
+    decision = db.latest_injury_plan_decision(conn, athlete_id)
+    if entry_id is None or decision is None or int(decision["injury_entry_id"]) != entry_id:
+        return None
+    _, note = db.injury_state(conn, athlete_id)
+    code = str(decision["option_code"])
+    return next(
+        (option.title for option in injury_pivot_options(note) if option.code == code),
+        code.replace("_", " ").capitalize(),
+    )
+
+
+def _render_console(message: tuple[str, str] | None) -> str:
+    conn = db.connect()
+    try:
+        db.init_db(conn)
+        today = date.today()
+        roster = build_roster(conn, today=today)
+        roster_ids = db.list_athletes(conn)
+        pending = pending_reviews(conn, today=today)
+        injury_plans = tuple(
+            (entry, _current_injury_plan_title(conn, entry.athlete_id))
+            for entry in roster.entries
+            if any(flag.kind == "injured" for flag in entry.flags)
+        )
+    finally:
+        conn.close()
+    return render_roster(
+        roster, coach=settings.coach_name, message=message,
+        has_demo=any(is_demo(a) for a in roster_ids),
+        pending_count=len(pending), pending=pending, injury_plans=injury_plans,
+    )
 
 
 @app.post("/coach/clear-injury", response_class=HTMLResponse)
@@ -195,10 +287,8 @@ async def coach_clear_injury(request: Request) -> Response:
     message = await run_in_threadpool(
         _clear_injury, athlete_id, clearance_source, reason, confirmation
     )
-    html = await run_in_threadpool(_render_athlete, athlete_id, message)
-    if html is None:
-        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
-    return HTMLResponse(html)
+    anchor = "" if message[0] == "ok" else "clearance-review"
+    return _redirect(_athlete_url(athlete_id, anchor), message)
 
 
 def _clear_injury(
@@ -233,29 +323,14 @@ def _clear_injury(
         return ("err", f"Not cleared: {exc}")
     finally:
         conn.close()
-    return ("ok", f"Injury flag cleared for {athlete_id}, recorded against {settings.coach_name}.")
-
-
-def _render_console(message: tuple[str, str] | None) -> str:
-    conn = db.connect()
-    try:
-        db.init_db(conn)
-        roster = build_roster(conn, today=date.today())
-        roster_ids = db.list_athletes(conn)
-        pending_count = len(db.pending_drafts(conn))
-    finally:
-        conn.close()
-    has_demo = any(is_demo(a) for a in roster_ids)
-    return render_roster(
-        roster, coach=settings.coach_name, message=message,
-        has_demo=has_demo, pending_count=pending_count,
-    )
+    who = athlete_name or athlete_id
+    return ("ok", f"Injury flag cleared for {who}, recorded against {settings.coach_name}.")
 
 
 @app.get("/coach/athletes", response_class=HTMLResponse)
 async def coach_athletes(request: Request) -> Response:
     """Searchable squad directory and the entry point to each athlete workspace."""
-    return HTMLResponse(await run_in_threadpool(_render_athlete_directory, None))
+    return _page(request, await run_in_threadpool(_render_athlete_directory, _take_flash(request)))
 
 
 def _render_athlete_directory(message: tuple[str, str] | None) -> str:
@@ -281,14 +356,14 @@ def _render_athlete_directory(message: tuple[str, str] | None) -> str:
 @app.post("/coach/demo/seed", response_class=HTMLResponse)
 async def coach_seed_demo(request: Request) -> Response:
     """Load a demo squad so an empty console can show what a full one looks like."""
-    message = await run_in_threadpool(_seed_demo)
-    return HTMLResponse(await run_in_threadpool(_render_console, message))
+    form = dict(await request.form())
+    return _redirect(_return_to(form, "/coach"), await run_in_threadpool(_seed_demo))
 
 
 @app.post("/coach/demo/clear", response_class=HTMLResponse)
 async def coach_clear_demo(request: Request) -> Response:
-    message = await run_in_threadpool(_clear_demo)
-    return HTMLResponse(await run_in_threadpool(_render_console, message))
+    form = dict(await request.form())
+    return _redirect(_return_to(form, "/coach"), await run_in_threadpool(_clear_demo))
 
 
 def _seed_demo() -> tuple[str, str]:
@@ -316,10 +391,9 @@ def _clear_demo() -> tuple[str, str]:
 @app.get("/coach/athlete/{athlete_id}", response_class=HTMLResponse)
 async def coach_athlete(athlete_id: str, request: Request) -> Response:
     """One athlete: what they did, what the rules make of it, what to say back."""
-    html = await run_in_threadpool(_render_athlete, athlete_id, None)
-    if html is None:
-        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
-    return HTMLResponse(html)
+    return _page(
+        request, await run_in_threadpool(_render_athlete, athlete_id, _take_flash(request))
+    )
 
 
 @app.post("/coach/athlete/{athlete_id}/message", response_class=HTMLResponse)
@@ -329,28 +403,36 @@ async def coach_message_athlete(athlete_id: str, request: Request) -> Response:
     message = await run_in_threadpool(
         _queue_note, athlete_id, str(form.get("body", ""))
     )
-    html = await run_in_threadpool(_render_athlete, athlete_id, message)
-    if html is None:
-        return HTMLResponse("<h1>Not found</h1><p>No such athlete.</p>", status_code=404)
-    return HTMLResponse(html)
+    return _redirect(_athlete_url(athlete_id, "messages"), message)
 
 
 @app.post("/coach/athlete/{athlete_id}/injury-plan", response_class=HTMLResponse)
 async def coach_approve_injury_plan(athlete_id: str, request: Request) -> Response:
-    """Select one bounded training pivot without clearing the injury flag."""
+    """Choose one bounded training pivot and approve the message that explains it."""
     form = dict(await request.form())
     result = await run_in_threadpool(
         _approve_injury_plan,
         athlete_id,
         str(form.get("injury_entry_id", "")).strip(),
         str(form.get("option_code", "")).strip(),
+        str(form.get("body", "")),
     )
-    html = await run_in_threadpool(_render_athlete, athlete_id, result)
-    return HTMLResponse(html or "<h1>Not found</h1>", status_code=200 if html else 404)
+    return _redirect(_athlete_url(athlete_id, "injury-plan"), result)
+
+
+def _delivery_channel(conn, athlete_id: str) -> str:
+    """Where an approved message will actually go, in words a coach can act on."""
+    if settings.telegram_configured and db.telegram_chat_id(conn, athlete_id):
+        return "goes out on the next send via Telegram"
+    if settings.whatsapp_configured:
+        return f"goes out on the next send via {settings.whatsapp_transport_name}"
+    if settings.telegram_configured:
+        return "goes out once this athlete connects Telegram"
+    return "goes out once a messaging channel is connected"
 
 
 def _approve_injury_plan(
-    athlete_id: str, injury_entry_id_raw: str, option_code: str
+    athlete_id: str, injury_entry_id_raw: str, option_code: str, edited_body: str = ""
 ) -> tuple[str, str]:
     conn = db.connect()
     try:
@@ -361,34 +443,37 @@ def _approve_injury_plan(
         except ValueError:
             return ("err", "The injury version was invalid; refresh and review again.")
         if current_id != supplied_id:
-            return ("err", "The injury changed; refresh and review the current options.")
+            return ("err", "The injury changed; review the current options again.")
         _, note = db.injury_state(conn, athlete_id)
         option = next(
             (candidate for candidate in injury_pivot_options(note) if candidate.code == option_code),
             None,
         )
         if option is None:
-            return ("err", "That training pivot is not available.")
+            return ("err", "Choose one of the injury plans first.")
+        body = edited_body.strip() or pivot_message(option, coach=settings.coach_name)
         db.record_injury_plan_decision(
             conn, athlete_id=athlete_id, injury_entry_id=supplied_id,
             option_code=option.code, plan_text=option.plan,
             approved_by=settings.coach_name,
         )
-        message_kind = FEEDBACK_REPLY + f"injury:{supplied_id}"
-        body = (
-            f"Training update from {settings.coach_name}: {option.plan} "
-            "This changes training only; your injury flag remains open until independent clearance is recorded."
-        )
-        db.create_draft(conn, athlete_id, message_kind, date.today().isoformat(), body)
+        today = date.today().isoformat()
+        message_kind = f"{INJURY_PLAN}{supplied_id}"
+        existing = db.draft(conn, athlete_id, message_kind, today)
+        if existing is not None and str(existing["status"]) == "sent":
+            # A changed plan after today's message went out is a new message.
+            message_kind = f"{message_kind}:{secrets.token_hex(4)}"
+        db.create_draft(conn, athlete_id, message_kind, today, body)
         db.review_draft(
-            conn, athlete_id, message_kind, date.today().isoformat(),
+            conn, athlete_id, message_kind, today,
             status="approved", reviewed_by=settings.coach_name, body=body,
         )
+        channel = _delivery_channel(conn, athlete_id)
     except ValueError as exc:
         return ("err", f"Plan not approved: {exc}")
     finally:
         conn.close()
-    return ("ok", f"Approved “{option.title}”. It is queued for WhatsApp delivery.")
+    return ("ok", f"“{option.title}” is now the plan. The message is scheduled and {channel}.")
 
 
 @app.post("/coach/athletes/register", response_class=HTMLResponse)
@@ -397,7 +482,17 @@ async def coach_register_athlete(request: Request) -> Response:
     message = await run_in_threadpool(
         _register, {str(key): str(value) for key, value in form.items()}
     )
-    return HTMLResponse(await run_in_threadpool(_render_athlete_directory, message))
+    return _redirect("/coach/athletes", message)
+
+
+def _approved_outbound(conn) -> list:
+    """Every coach-approved message still waiting for its send, soonest first."""
+    rows = (
+        db.approved_drafts(conn, MORNING)
+        + db.approved_drafts_with_prefix(conn, COACH_NOTE)
+        + db.approved_drafts_with_prefix(conn, FEEDBACK_REPLY)
+    )
+    return sorted(rows, key=lambda row: (str(row["local_date"]), str(row["athlete_id"])))
 
 
 def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | None:
@@ -410,6 +505,11 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
         detail = athlete_detail(conn, athlete_id, today=today)
         telegram_chat = db.telegram_chat_id(conn, athlete_id)
         telegram_pairing_version = db.telegram_pairing_version(conn, athlete_id)
+        conversation = db.whatsapp_messages(conn, athlete_id, limit=40)
+        pending = db.pending_drafts(conn)
+        scheduled = [
+            row for row in _approved_outbound(conn) if str(row["athlete_id"]) == athlete_id
+        ]
     finally:
         conn.close()
     return render_athlete(
@@ -422,11 +522,15 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
         ),
         telegram_linked=telegram_chat is not None,
         telegram_ready=bool(getattr(app.state, "telegram_webhook_ready", False)),
+        conversation=conversation,
+        scheduled=scheduled,
+        awaiting=sum(1 for row in pending if str(row["athlete_id"]) == athlete_id),
+        pending_count=len(pending),
     )
 
 
 @app.post("/coach/athlete/{athlete_id}/telegram/unlink", response_class=HTMLResponse)
-async def coach_unlink_telegram(athlete_id: str, request: Request) -> Response:
+async def coach_unlink_telegram(athlete_id: str) -> Response:
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -438,8 +542,7 @@ async def coach_unlink_telegram(athlete_id: str, request: Request) -> Response:
         if removed
         else ("err", "This athlete did not have a Telegram chat connected.")
     )
-    html = await run_in_threadpool(_render_athlete, athlete_id, message)
-    return HTMLResponse(html or "<h1>Not found</h1>", status_code=200 if html else 404)
+    return _redirect(_athlete_url(athlete_id), message)
 
 
 def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
@@ -450,9 +553,10 @@ def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
     try:
         db.init_db(conn)
         today = date.today().isoformat()
-        db.create_draft(conn, athlete_id, COACH_NOTE, today, body)
+        message_kind = new_coach_note_kind()
+        db.create_draft(conn, athlete_id, message_kind, today, body)
         db.review_draft(
-            conn, athlete_id, COACH_NOTE, today,
+            conn, athlete_id, message_kind, today,
             status="approved", reviewed_by=settings.coach_name, body=body,
         )
     except ValueError as exc:
@@ -527,23 +631,24 @@ def _register(form: dict[str, str]) -> tuple[str, str]:
     return ("ok", f"{name.strip()} added. They appear once they text, or right away here.")
 
 
-@app.get("/coach/outbox", response_class=HTMLResponse)
-async def coach_outbox(request: Request) -> Response:
-    """Tonight's queue: what wants to go out tomorrow, and why."""
-    return HTMLResponse(await run_in_threadpool(_render_outbox, None))
+@app.get("/coach/outbox", include_in_schema=False)
+async def coach_outbox() -> Response:
+    """The outbox is the Messaging Desk's approval tab; old links land there."""
+    return RedirectResponse(url="/coach/whatsapp?tab=approval", status_code=303)
 
 
 @app.get("/coach/whatsapp", response_class=HTMLResponse)
 async def coach_whatsapp(request: Request, tab: str = "inbox", athlete: str = "") -> Response:
     """The daily message desk: feedback, approval, schedule and delivery."""
     valid_tab = tab if tab in {"inbox", "approval", "scheduled", "sent"} else "inbox"
-    return HTMLResponse(
-        await run_in_threadpool(_render_whatsapp, valid_tab, athlete.strip(), None)
+    return _page(
+        request,
+        await run_in_threadpool(_render_whatsapp, valid_tab, athlete.strip(), _take_flash(request)),
     )
 
 
 @app.get("/coach/analytics", response_class=HTMLResponse)
-async def coach_analytics(request: Request) -> Response:
+async def coach_analytics() -> Response:
     return HTMLResponse(await run_in_threadpool(_render_analytics))
 
 
@@ -562,6 +667,7 @@ def _render_analytics() -> str:
 
 
 @app.post("/coach/whatsapp/review", response_class=HTMLResponse)
+@app.post("/coach/outbox/review", response_class=HTMLResponse, include_in_schema=False)
 async def coach_whatsapp_review(request: Request) -> Response:
     form = dict(await request.form())
     result = await run_in_threadpool(
@@ -572,13 +678,14 @@ async def coach_whatsapp_review(request: Request) -> Response:
         str(form.get("decision", "")).strip(),
         str(form.get("body", "")),
     )
-    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "approval", "", result))
+    return _redirect(_return_to(form, "/coach/whatsapp?tab=approval"), result)
 
 
 @app.post("/coach/whatsapp/bulk-approve", response_class=HTMLResponse)
 async def coach_whatsapp_bulk_approve(request: Request) -> Response:
+    form = dict(await request.form())
     result = await run_in_threadpool(_bulk_approve_unchanged)
-    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "approval", "", result))
+    return _redirect(_return_to(form, "/coach/whatsapp?tab=approval"), result)
 
 
 @app.post("/coach/whatsapp/reviewed", response_class=HTMLResponse)
@@ -586,7 +693,7 @@ async def coach_whatsapp_mark_reviewed(request: Request) -> Response:
     form = dict(await request.form())
     athlete_id = str(form.get("athlete_id", "")).strip()
     result = await run_in_threadpool(_mark_feedback_reviewed, athlete_id)
-    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "inbox", athlete_id, result))
+    return _redirect(f"/coach/whatsapp?tab=inbox&athlete={quote(athlete_id)}", result)
 
 
 @app.post("/coach/whatsapp/simulate", response_class=HTMLResponse)
@@ -601,7 +708,7 @@ async def coach_whatsapp_simulate(request: Request) -> Response:
             _process, athlete_id, body, "SIM" + secrets.token_hex(12)
         )
         result = ("ok", "Simulated athlete message received and processed.")
-    return HTMLResponse(await run_in_threadpool(_render_whatsapp, "inbox", athlete_id, result))
+    return _redirect(f"/coach/whatsapp?tab=inbox&athlete={quote(athlete_id)}", result)
 
 
 def _bulk_approve_unchanged() -> tuple[str, str]:
@@ -640,12 +747,15 @@ def _render_whatsapp(
             str(conversations[0]["athlete_id"]) if conversations else ""
         )
         messages = db.whatsapp_messages(conn, selected, limit=100) if selected else []
-        selected_name = db.athlete_name(conn, selected) or selected
+        names = {
+            candidate: db.athlete_name(conn, candidate) or candidate
+            for candidate in db.list_athletes(conn)
+        }
+        selected_name = names.get(selected) or selected
         demo_athletes = tuple(
-            (candidate, db.athlete_name(conn, candidate) or candidate)
-            for candidate in db.list_athletes(conn) if is_demo(candidate)
+            (candidate, name) for candidate, name in names.items() if is_demo(candidate)
         )
-        scheduled = db.approved_drafts(conn, "morning_checkin") + db.approved_drafts(conn, COACH_NOTE)
+        scheduled = _approved_outbound(conn)
         sent = [
             row for row in db.whatsapp_messages(conn, limit=300)
             if row["direction"] == "outbound"
@@ -662,21 +772,8 @@ def _render_whatsapp(
             or bool(getattr(app.state, "telegram_webhook_ready", False))
         ),
         transport_name=settings.messaging_transport_name,
+        names=names,
     )
-
-
-@app.post("/coach/outbox/review", response_class=HTMLResponse)
-async def coach_review_draft(request: Request) -> Response:
-    form = dict(await request.form())
-    message = await run_in_threadpool(
-        _review_draft,
-        str(form.get("athlete_id", "")).strip(),
-        str(form.get("message_kind", "")).strip(),
-        str(form.get("local_date", "")).strip(),
-        str(form.get("decision", "")).strip(),
-        str(form.get("body", "")),
-    )
-    return HTMLResponse(await run_in_threadpool(_render_outbox, message))
 
 
 def _review_draft(
@@ -685,6 +782,7 @@ def _review_draft(
     conn = db.connect()
     try:
         db.init_db(conn)
+        name = db.athlete_name(conn, athlete_id) or athlete_id
         db.review_draft(
             conn, athlete_id, message_kind, local_date,
             status=decision, reviewed_by=settings.coach_name, body=body,
@@ -694,20 +792,7 @@ def _review_draft(
     finally:
         conn.close()
     verb = "approved for" if decision == "approved" else "held back from"
-    return ("ok", f"Message {verb} {athlete_id} on {local_date}.")
-
-
-def _render_outbox(message: tuple[str, str] | None) -> str:
-    conn = db.connect()
-    try:
-        db.init_db(conn)
-        pending = pending_reviews(conn, today=date.today())
-    finally:
-        conn.close()
-    return render_outbox(
-        pending, coach=settings.coach_name, today=date.today(),
-        message=message,
-    )
+    return ("ok", f"Message {verb} {name} on {local_date}.")
 
 
 @app.get("/privacy", response_class=HTMLResponse)

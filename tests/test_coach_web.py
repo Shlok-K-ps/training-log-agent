@@ -55,7 +55,7 @@ def test_coach_console_opens_without_signing_in():
         assert resp.status_code == 200
         assert "Coach Rao" in resp.text
         assert "Roster" in resp.text
-        assert "Overview" in resp.text
+        assert "Today" in resp.text
         assert "Daily agent loop" in resp.text
         assert "Approval queue" in resp.text
         assert "Load a demo squad" in resp.text or "Remove demo athletes" in resp.text
@@ -197,12 +197,14 @@ def test_goal_analytics_is_a_separate_workspace():
         assert "Lagging" in resp.text
 
 
-def test_outbox_opens_without_signing_in():
+def test_outbox_now_lives_in_the_messaging_desk():
     with TestClient(app) as client:
-        resp = client.get("/coach/outbox")
-        assert resp.status_code == 200
-        assert "Coach Rao" in resp.text
-        assert "Outbox" in resp.text
+        resp = client.get("/coach/outbox", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/coach/whatsapp?tab=approval"
+        page = client.get("/coach/outbox")
+        assert page.status_code == 200
+        assert "Needs approval" in page.text
 
 
 def test_privacy_and_terms_pages_render_with_styling():

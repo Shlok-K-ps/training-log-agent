@@ -67,3 +67,12 @@ def injury_pivot_options(note: str | None) -> tuple[InjuryPivot, ...]:
         ),
     )
     return paths if urgent else (paths[1], paths[2], paths[3], paths[0])
+
+
+def pivot_message(option: InjuryPivot, *, coach: str) -> str:
+    """The athlete-facing wording for a chosen pivot, before any coach edit."""
+    return (
+        f"Training update from {coach}: {option.plan} "
+        "This changes training only; your injury flag remains open until "
+        "independent clearance is recorded."
+    )

@@ -10,7 +10,8 @@ from __future__ import annotations
 from datetime import date
 from html import escape
 
-from app.coach.roster import BUCKET_LABEL, BUCKET_ORDER, Bucket, PendingMessage, Roster
+from app.coach.roster import BUCKET_ORDER, Bucket, PendingMessage, Roster, RosterEntry
+from app.scheduling.outbox import message_kind_label
 
 
 def _vt_athlete(athlete_id: str | None) -> str:
@@ -20,71 +21,15 @@ def _vt_athlete(athlete_id: str | None) -> str:
     return f"athlete-{digits}" if digits else ""
 
 
-def _vt_draft(athlete_id: str | None) -> str:
-    if not athlete_id:
-        return ""
-    digits = "".join(c for c in athlete_id if c.isdigit())
-    return f"draft-{digits}" if digits else ""
-
-
-# ------------------------------------------------------------------------------
-# Base CSS: Powerlifting visual identity (calibrated plates palette, mobile-first)
-# Red 25kg (Action/Deload), Yellow 15kg (Watch/Stall), Blue 20kg (Meet/Nav), Green 10kg (On track)
-# ------------------------------------------------------------------------------
-_BASE_CSS = ""
-
-def _card(entry) -> str:
-    """Render an individual athlete card."""
-    items = "".join(
-        f'<li class="{"act" if f.action else ""}">{escape(f.detail)}</li>'
-        for f in entry.flags
-    )
-    meta = []
-    if entry.latest_session:
-        meta.append(entry.latest_session)
-    if entry.readiness_score is not None:
-        meta.append(f"readiness {entry.readiness_score}/100")
-    if entry.last_activity:
-        meta.append(f"last log {entry.last_activity}")
-    meta_html = (
-        f'<p class="muted" style="margin:6px 0 0">{escape(" · ".join(meta))}</p>'
-        if meta else ""
-    )
-    body = f"{meta_html}<ul>{items}</ul>" if items else meta_html
-    form = ""
-    if entry.needs_action and entry.injury_days_open is not None:
-        form = (
-            f'<p><a class="clearance-link" href="/coach/athlete/{escape(entry.athlete_id)}#clearance-review">'
-            'Review injury clearance →</a></p>'
-        )
-
-    # Semantic badge label to guarantee severity is clear without color alone
-    badge_markup = ""
-    if entry.bucket is Bucket.NEEDS_YOU:
-        badge_markup = '<span class="badge badge-red">[!] Needs Action</span>'
-    elif entry.bucket is Bucket.WATCH:
-        badge_markup = '<span class="badge badge-yellow">[!] Watch</span>'
-    elif entry.bucket is Bucket.MEET_PREP:
-        badge_markup = '<span class="badge badge-blue">[#] Meet Prep</span>'
-
-    return (
-        f'<div class="card {entry.bucket.value}">'
-        f'<div class="who"><div><a class="name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a> {badge_markup}</div>'
-        f'<span class="id">{escape(entry.athlete_id)}</span></div>'
-        f"{body}{form}</div>"
-    )
-
-
 # Line glyphs drawn on a 24px grid in the manner of SF Symbols.
 _NAV_ICONS = {
-    "overview": '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/>'
-                '<rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>',
+    "overview": '<rect x="3.5" y="5" width="17" height="15.5" rx="3.5"/><path d="M3.5 10.5h17M8.5 3v4M15.5 3v4"/>'
+                '<path d="m9 15.5 2 2 4-4"/>',
     "athletes": '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 19.5c.6-3.3 3.2-5.5 6.5-5.5s5.9 2.2 6.5 5.5"/>'
                 '<path d="M15.5 4.8a3.3 3.3 0 0 1 0 6.4"/><path d="M18 14.4c1.9.7 3.2 2.5 3.5 5.1"/>',
     "whatsapp": '<path d="M20.5 11.5c0 4.1-3.8 7.5-8.5 7.5a9.6 9.6 0 0 1-3.3-.6L4 19.8l1.3-3.6a7 7 0 0 1-1.8-4.7'
                 'C3.5 7.4 7.3 4 12 4s8.5 3.4 8.5 7.5Z"/>',
     "analytics": '<path d="M3.5 17.5 9 12l3.5 3.5 8-8"/><path d="M15 7.5h5.5V13"/>',
-    "outbox": '<path d="M21 3 10.5 13.5"/><path d="M21 3 14.5 21l-4-7.5L3 9.5Z"/>',
 }
 
 _BOLT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13.5 2 4 13.5h7L10 22l10-12h-7z"/></svg>'
@@ -111,17 +56,16 @@ def _long_date(today) -> str:
 
 
 def _coach_nav(*, active: str, coach: str, pending_count: int = 0) -> str:
-    """Stable product navigation shared by every authenticated coach page.
+    """Stable product navigation shared by every coach page.
 
     A sidebar on wide screens and a tab bar on phones. The tab bar carries short
-    labels so all five destinations fit without wrapping.
+    labels so all four destinations fit without wrapping.
     """
     links = (
-        ("overview", "/coach", "Overview", "Overview"),
+        ("overview", "/coach", "Today", "Today"),
         ("athletes", "/coach/athletes", "Athletes", "Athletes"),
         ("whatsapp", "/coach/whatsapp", "Messaging Desk", "Messages"),
         ("analytics", "/coach/analytics", "Goal Analytics", "Goals"),
-        ("outbox", "/coach/outbox", "Outbox", "Outbox"),
     )
     side_nav = []
     bottom_nav = []
@@ -238,13 +182,44 @@ def _register_form(today: date) -> str:
 """
 
 
-def _demo_controls(roster: Roster, has_demo: bool) -> str:
-    """Keep demo controls available from Overview, even with a real roster."""
+def initials(name: str) -> str:
+    """Up to two initials for an avatar, e.g. 'Priya Kulkarni' -> 'PK'."""
+    parts = [part for part in name.split() if part[:1].isalpha()]
+    return "".join(part[0] for part in parts[:2]).upper() or "#"
+
+
+def banner(message: tuple[str, str] | None) -> str:
+    if not message:
+        return ""
+    kind, text = message
+    return f'<div class="msg {escape(kind)}">{escape(text)}</div>'
+
+
+def conversation_bubbles(messages) -> str:
+    """A conversation oldest first: the athlete on the left, outbound on the right."""
+    bubbles = []
+    for row in reversed(list(messages)):
+        direction = str(row["direction"])
+        status = str(row["status"])
+        timestamp = str(row["occurred_at"]).replace("T", " ")[:16]
+        channel = str(row["channel"] or "whatsapp").capitalize()
+        error = f' · error {escape(str(row["error_code"]))}' if row["error_code"] else ""
+        bubbles.append(
+            f'<div class="bubble {escape(direction)}">{escape(str(row["body"]))}'
+            f'<span class="bubble-meta">{escape(channel)} · {escape(timestamp)} · '
+            f'{escape(status)}{error}</span></div>'
+        )
+    return "".join(bubbles)
+
+
+def _demo_controls(roster: Roster, has_demo: bool, *, return_to: str = "/coach") -> str:
+    """Keep demo controls available, even with a real roster."""
+    hidden = f'<input type="hidden" name="return_to" value="{escape(return_to)}">'
     if has_demo:
         return (
             '<div class="demo">'
             "<p>This roster includes demo athletes.</p>"
-            '<form method="post" action="/coach/demo/clear">'
+            f'<form method="post" action="/coach/demo/clear">{hidden}'
             '<button class="skip" type="submit">Remove demo athletes</button></form>'
             "</div>"
         )
@@ -255,7 +230,7 @@ def _demo_controls(roster: Roster, has_demo: bool) -> str:
     )
     return (
         '<div class="demo"><p>' + escape(message) + '</p>'
-        '<form method="post" action="/coach/demo/seed">'
+        f'<form method="post" action="/coach/demo/seed">{hidden}'
         '<button type="submit">Load a demo squad</button></form></div>'
     )
 
@@ -270,16 +245,91 @@ def _tutorial() -> str:
 <dialog id="tutorial">
   <h1>How to use Coach Desk</h1>
   <ol>
+    <li><strong>Start on Today:</strong> injury decisions and clearance requests come first, then the messages the agent has drafted.</li>
+    <li><strong>Approve or hold:</strong> every card shows the evidence and the exact wording. Edit it before approving if it reads wrong.</li>
+    <li><strong>Handle injuries:</strong> pick one of the four plans, check the message it will send, and approve. The injury flag stays open until independent clearance.</li>
     <li><strong>Add athletes:</strong> record bodyweight, 1RMs, training frequency, current injuries and a dated goal.</li>
-    <li><strong>Read Overview:</strong> start with exceptions rather than checking every athlete manually.</li>
-    <li><strong>Open Messaging Desk:</strong> review feedback, inspect the prepared change, and approve or hold the exact message.</li>
-    <li><strong>Handle injuries:</strong> choose a bounded training pivot; the injury gate stays open until independent clearance.</li>
-    <li><strong>Check Analytics:</strong> use ahead/on-track/lagging as a prompt to review—not an automatic programme change.</li>
+    <li><strong>Check Goals:</strong> ahead, on track or lagging is a prompt to review, not an automatic programme change.</li>
   </ol>
-  <p>For a safe walkthrough, load the demo squad and use “Test the messaging workflow” inside Messaging Desk.</p>
+  <p>For a safe walkthrough, load the demo squad and use “Test the messaging workflow” in Messages.</p>
   <form method="dialog"><button type="submit">Got it</button></form>
 </dialog>
 """
+
+
+def _flag_text(entry: RosterEntry, kind: str) -> str:
+    return next((flag.detail for flag in entry.flags if flag.kind == kind), "")
+
+
+def _decision_card(entry: RosterEntry, *, kind: str, detail: str, href: str, action: str) -> str:
+    return (
+        '<article class="decision-card">'
+        f'<span class="avatar ring-act" aria-hidden="true">{escape(initials(entry.display_name))}</span>'
+        '<div class="decision-body">'
+        f'<span class="decision-kind">{escape(kind)}</span>'
+        f'<a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+        f'<p>{escape(detail)}</p></div>'
+        f'<a class="btn btn-primary decision-action" href="{href}">{escape(action)}</a>'
+        '</article>'
+    )
+
+
+def _athlete_row(entry: RosterEntry, note: str = "") -> str:
+    signal = " · ".join(f.detail for f in entry.flags) or "On track"
+    readiness = (
+        f'<span class="readiness-pill {escape(entry.readiness_band or "")}">'
+        f'<span class="dot">●</span> {entry.readiness_score}/100</span>'
+        if entry.readiness_score is not None else '<span class="muted">No check-in</span>'
+    )
+    note_html = f'<div class="plan-note">{escape(note)}</div>' if note else ""
+    return (
+        '<div class="athlete-line">'
+        f'<div><a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+        f'<div class="muted">{escape(entry.latest_session or "No session logged")}</div></div>'
+        f'<div class="signal">{escape(signal)}{note_html}</div>{readiness}</div>'
+    )
+
+
+def approval_card(item: PendingMessage, *, return_to: str = "/coach/whatsapp?tab=approval") -> str:
+    """One drafted message with the evidence behind it and the controls to decide."""
+    a = item.athlete
+    reasons = " · ".join(f.detail for f in a.flags) or "Nothing flagged"
+    readiness = (
+        f"{a.readiness_score}/100 · {a.readiness_band}"
+        if a.readiness_score is not None else "No same-day check-in"
+    )
+    marks = ""
+    if item.bulk_eligible:
+        marks += '<span class="safe-mark">Safe to bulk approve</span>'
+    if item.edited:
+        marks += '<span class="manual-mark">Edited</span>'
+    return (
+        '<article class="message-card approval-card">'
+        '<header class="approval-head">'
+        f'<span class="avatar" aria-hidden="true">{escape(initials(a.display_name))}</span>'
+        '<div class="approval-who">'
+        f'<a class="athlete-name" href="/coach/athlete/{escape(item.athlete_id)}">{escape(a.display_name)}</a>'
+        f'<span class="muted">{escape(message_kind_label(item.message_kind))} · for {escape(item.local_date)}</span></div>'
+        f'<div class="approval-state">{marks}<span class="readiness-pill yellow">Awaiting approval</span></div>'
+        '</header>'
+        '<div class="evidence-grid">'
+        f'<div><span>Training trend</span><strong>{escape(a.training_summary or "No baseline")}</strong></div>'
+        f'<div><span>Latest session</span><strong>{escape(a.latest_session or "Nothing logged")}</strong></div>'
+        f'<div><span>Readiness</span><strong>{escape(readiness)}</strong></div>'
+        '</div>'
+        f'<p class="evidence-reason"><b>Why surfaced:</b> {escape(reasons)}</p>'
+        '<form method="post" action="/coach/whatsapp/review">'
+        f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
+        f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
+        f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
+        f'<input type="hidden" name="return_to" value="{escape(return_to)}">'
+        '<label class="draft-label">Message the athlete will receive'
+        f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea></label>'
+        '<div class="card-actions">'
+        '<button class="btn btn-primary" type="submit" name="decision" value="approved">Approve</button>'
+        '<button class="btn btn-ghost" type="submit" name="decision" value="skipped">Hold</button>'
+        '</div></form></article>'
+    )
 
 
 def render(
@@ -289,172 +339,134 @@ def render(
     message: tuple[str, str] | None = None,
     has_demo: bool = False,
     pending_count: int = 0,
+    pending: tuple[PendingMessage, ...] = (),
+    injury_plans: tuple[tuple[RosterEntry, str | None], ...] = (),
 ) -> str:
-    """Render the operating overview: one big thing, counts sentence, and grouped buckets."""
-    banner = ""
-    if message:
-        kind, text = message
-        banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
-
-    # 1. Counts sentence replacing the stat tiles
-    needs_you_count = sum(1 for e in roster.entries if e.bucket is Bucket.NEEDS_YOU)
-    watch_count = sum(1 for e in roster.entries if e.bucket is Bucket.WATCH)
-    meet_prep_count = sum(1 for e in roster.entries if e.bucket is Bucket.MEET_PREP)
-    fine_count = sum(1 for e in roster.entries if e.bucket is Bucket.FINE)
-
-    summary = (
-        ("act", "Need attention", needs_you_count),
-        ("watch", "On watch", watch_count),
-        ("meet", "Meet prep", meet_prep_count),
-        ("fine", "On track", fine_count),
+    """Today: everything waiting on the coach, in the order to handle it."""
+    counts = {bucket: len(roster.bucket(bucket)) for bucket in BUCKET_ORDER}
+    tiles = (
+        ("act", "Needs you", Bucket.NEEDS_YOU),
+        ("watch", "Watch", Bucket.WATCH),
+        ("meet", "Meet prep", Bucket.MEET_PREP),
+        ("fine", "On track", Bucket.FINE),
     )
     summary_tiles = '<div class="summary-tiles">' + "".join(
-        f'<a class="summary-tile {cls}" href="/coach/athletes">'
+        f'<a class="summary-tile {cls}" href="/coach/athletes?status={bucket.value}">'
         f'<span class="summary-label">{label}</span>'
-        f'<span class="summary-num" data-counter data-target="{count}">{count}</span>'
-        f'<span class="summary-caption">{"athlete" if count == 1 else "athletes"}</span></a>'
-        for cls, label, count in summary
-    ) + '</div>'
+        f'<span class="summary-num" data-counter data-target="{counts[bucket]}">{counts[bucket]}</span>'
+        f'<span class="summary-caption">{"athlete" if counts[bucket] == 1 else "athletes"}</span></a>'
+        for cls, label, bucket in tiles
+    ) + "</div>"
 
-    # 2. One Big Thing panel: single most urgent Needs You athlete
-    most_urgent = next((e for e in roster.entries if e.bucket is Bucket.NEEDS_YOU), None)
-    if not most_urgent and roster.entries:
-        most_urgent = next((e for e in roster.entries if e.bucket is Bucket.WATCH), None)
-
-    one_big_thing = ""
-    if most_urgent:
-        signal = " · ".join(f.detail for f in most_urgent.flags) or "Urgent coach action required"
-        action_btn = (
-            f'<a class="btn btn-primary" href="/coach/athlete/{escape(most_urgent.athlete_id)}#clearance-review">'
-            'Review injury clearance &rarr;</a>'
-            if (most_urgent.needs_action and most_urgent.injury_days_open is not None) else
-            f'<a class="btn btn-primary" href="/coach/athlete/{escape(most_urgent.athlete_id)}">'
-            'Open athlete file &rarr;</a>'
-        )
-        obt_badge = (
-            '<span class="obt-bucket tag-act">Needs You</span>'
-            if most_urgent.bucket is Bucket.NEEDS_YOU else
-            '<span class="obt-bucket tag-watch">Watch</span>'
-        )
-        one_big_thing = (
-            f'<section class="one-big-thing" aria-label="Most urgent exception">'
-            f'<div class="obt-header">'
-            '<span class="obt-kicker"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9"/>'
-            '<path d="M10 5.5v5.5M10 14.3v.2" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>'
-            'Needs your attention</span>'
-            f'{obt_badge}'
-            f'</div>'
-            f'<div class="obt-body">'
-            f'<div class="obt-info">'
-            f'<h2 class="obt-name"><a style="view-transition-name: { _vt_athlete(most_urgent.athlete_id) };" href="/coach/athlete/{escape(most_urgent.athlete_id)}">{escape(most_urgent.display_name)}</a></h2>'
-            f'<div class="obt-meta">{escape(most_urgent.athlete_id)} &middot; Latest: {escape(most_urgent.latest_session or "No recent session")}</div>'
-            f'<p class="obt-reason">{escape(signal)}</p>'
-            f'</div>'
-            f'<div class="obt-action">{action_btn}</div>'
-            f'</div>'
-            f'</section>'
-        )
-
-    # 3. Rest of the queue as glass rows grouped by bucket, Fine collapsed
-    def render_row(entry) -> str:
-        signal = " · ".join(f.detail for f in entry.flags) or "On track"
-        readiness = (
-            f'<span class="readiness-pill {escape(entry.readiness_band or "")}">'
-            f'<span class="dot">●</span> {entry.readiness_score}/100</span>'
-            if entry.readiness_score is not None else '<span class="muted">No check-in</span>'
-        )
-        action = ""
-        if entry.needs_action and entry.injury_days_open is not None:
-            action = (
-                f'<div><a class="clearance-link" href="/coach/athlete/{escape(entry.athlete_id)}#clearance-review">'
-                'Clearance &rarr;</a></div>'
-            )
-        return (
-            '<div class="athlete-line">'
-            f'<div><a class="athlete-name" style="view-transition-name: { _vt_athlete(entry.athlete_id) };" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
-            f'<div class="muted">{escape(entry.latest_session or "No session logged")}</div></div>'
-            f'<div class="signal">{escape(signal)}</div>{readiness}{action}</div>'
-        )
-
-    # Buckets: Needs you, Watch, Meet prep
-    bucket_sections = []
-    bucket_groups = [
-        ("Needs you", [e for e in roster.entries if e.bucket is Bucket.NEEDS_YOU and e != most_urgent], "tag-act"),
-        ("Watch", [e for e in roster.entries if e.bucket is Bucket.WATCH and e != most_urgent], "tag-watch"),
-        ("Meet prep", [e for e in roster.entries if e.bucket is Bucket.MEET_PREP], "tag-meet"),
-    ]
-    for title, entries, tag_cls in bucket_groups:
-        if entries:
-            bucket_sections.append(
-                f'<div class="bucket-group">'
-                f'<div class="bucket-group-title"><span class="badge {tag_cls}">{escape(title)}</span> '
-                f'<span class="muted">({len(entries)})</span></div>'
-                f'{"".join(render_row(e) for e in entries)}'
-                f'</div>'
-            )
-
-    fine_entries = [e for e in roster.entries if e.bucket is Bucket.FINE]
-    fine_markup = ""
-    if fine_entries:
-        fine_markup = (
-            f'<details class="fine-collapse">'
-            f'<summary class="fine-summary">'
-            f'<span>Fine ({len(fine_entries)}) &mdash; athletes on track</span>'
-            f'<span>&darr;</span>'
-            f'</summary>'
-            f'<div class="fine-rows">{"".join(render_row(e) for e in fine_entries)}</div>'
-            f'</details>'
-        )
-
-    priority_body = (
-        "".join(bucket_sections) + fine_markup
-        if (bucket_sections or fine_markup)
-        else '<p class="empty">No athletes in squad.</p>'
+    # 1. Decisions only the coach can make: clearance requests, then new injuries.
+    plan_titles = {entry.athlete_id: title for entry, title in injury_plans}
+    decisions: list[str] = []
+    in_decisions: set[str] = set()
+    for entry in roster.entries:
+        if any(flag.kind == "clearance_requested" for flag in entry.flags):
+            decisions.append(_decision_card(
+                entry, kind="Clearance requested",
+                detail=_flag_text(entry, "clearance_requested"),
+                href=f"/coach/athlete/{escape(entry.athlete_id)}#clearance-review",
+                action="Review injury clearance",
+            ))
+            in_decisions.add(entry.athlete_id)
+    for entry, title in injury_plans:
+        if title is None and entry.athlete_id not in in_decisions:
+            decisions.append(_decision_card(
+                entry, kind="Injury plan needed", detail=_flag_text(entry, "injured"),
+                href=f"/coach/athlete/{escape(entry.athlete_id)}#injury-plan",
+                action="Choose injury plan",
+            ))
+            in_decisions.add(entry.athlete_id)
+    decision_section = (
+        '<section class="today-section" aria-labelledby="decisions-title">'
+        '<div class="section-head-row">'
+        f'<h2 id="decisions-title">Needs your decision <span class="n">{len(decisions)}</span></h2></div>'
+        f'<div class="decision-list">{"".join(decisions)}</div></section>'
+        if decisions else ""
     )
 
-    # 4. Daily agent loop: fixed numbering 01, 02, 03, no emoji/symbols in headings
+    # 2. Messages the agent drafted, with the evidence and the exact wording.
+    eligible = sum(1 for item in pending if item.bulk_eligible)
+    bulk = (
+        '<form method="post" action="/coach/whatsapp/bulk-approve">'
+        '<input type="hidden" name="return_to" value="/coach">'
+        f'<button class="btn btn-ghost btn-sm" type="submit" data-bulk-approve data-eligible="{eligible}">'
+        f'Approve unchanged check-ins ({eligible})</button></form>'
+        if eligible else ""
+    )
+    approval_section = (
+        '<section class="today-section" aria-labelledby="approvals-title">'
+        '<div class="section-head-row">'
+        f'<h2 id="approvals-title">Approval queue <span class="n">{len(pending)}</span></h2>{bulk}</div>'
+        + (
+            "".join(approval_card(item, return_to="/coach") for item in pending)
+            if pending else
+            '<div class="empty-card"><strong>Nothing waiting for approval.</strong>'
+            "<span>Replies to athletes and tomorrow's check-ins appear here as soon as the agent drafts them.</span></div>"
+        )
+        + "</section>"
+    )
+
+    # 3. What the agent noticed, then who is fine.
+    watch = [e for e in roster.bucket(Bucket.WATCH) if e.athlete_id not in in_decisions]
+    meet = roster.bucket(Bucket.MEET_PREP)
+    fine = roster.bucket(Bucket.FINE)
+
+    def plan_note(entry: RosterEntry) -> str:
+        title = plan_titles.get(entry.athlete_id)
+        return f"Injury plan: {title}" if title else ""
+
+    def listed(title: str, entries, status: str) -> str:
+        if not entries:
+            return ""
+        return (
+            '<section class="today-section"><div class="section-head-row">'
+            f'<h2>{escape(title)} <span class="n">{len(entries)}</span></h2>'
+            f'<a href="/coach/athletes?status={status}">See in roster →</a></div>'
+            f'<div class="list-card">{"".join(_athlete_row(e, plan_note(e)) for e in entries)}</div></section>'
+        )
+
+    fine_section = (
+        '<details class="fine-collapse list-card"><summary class="fine-summary">'
+        f'<span>On track ({len(fine)})</span><span>&darr;</span></summary>'
+        f'<div class="fine-rows">{"".join(_athlete_row(e) for e in fine)}</div></details>'
+        if fine else ""
+    )
+    all_clear = (
+        '<div class="all-clear"><span class="check" aria-hidden="true">✓</span>'
+        "<div><strong>All clear.</strong><p>Nothing needs a decision right now. "
+        "New athlete messages will land here.</p></div></div>"
+        if roster.entries and not decisions and not pending and not watch else ""
+    )
+    empty_roster = (
+        '<div class="empty-card"><strong>No athletes yet.</strong>'
+        "<span>Add athletes from the Athletes page, or load the demo squad to explore the workflow.</span></div>"
+        if not roster.entries else ""
+    )
+
     workflow = (
         '<div class="panel"><div class="panel-head"><h2>Daily agent loop</h2></div>'
-        '<div class="flow-step"><b>01</b><div><strong>Observe</strong><p>Sleep, readiness, training and nutrition arrive through Telegram or WhatsApp.</p></div></div>'
-        '<div class="flow-step"><b>02</b><div><strong>Prepare</strong><p>Rules combine today\'s check-in with history and current trends.</p></div></div>'
-        '<div class="flow-step"><b>03</b><div><strong>Verify</strong><p>You edit or approve; only your approved wording can leave the queue.</p></div></div>'
+        '<div class="flow-step"><b>01</b><div><strong>Observe</strong><p>Sessions, sleep, readiness and injuries arrive through Telegram or WhatsApp.</p></div></div>'
+        '<div class="flow-step"><b>02</b><div><strong>Prepare</strong><p>Deterministic rules turn the evidence into a drafted message or a decision.</p></div></div>'
+        '<div class="flow-step"><b>03</b><div><strong>Approve</strong><p>You edit, approve or hold. Only your approved wording is sent.</p></div></div>'
         '</div>'
-    )
-
-    squad_links = ", ".join(
-        f'<a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
-        for entry in roster.entries
-    ) or '<span class="empty">No athletes yet.</span>'
-    squad_panel = (
-        '<div class="panel"><div class="panel-head"><h2>Squad directory</h2>'
-        '<a href="/coach/athletes">Open directory &rarr;</a></div>'
-        f'<p class="squad-links">{squad_links}</p></div>'
     )
 
     body = (
-        f"{banner}"
-        f"{summary_tiles}"
-        f"{one_big_thing}"
-        '<div class="dashboard-grid">'
-        '<div>'
-        '<div class="panel"><div class="panel-head"><h2>Roster priorities</h2>'
-        '<a href="/coach/athletes">View all athletes &rarr;</a></div>'
-        f'{priority_body}</div>'
-        '</div>'
-        '<div>'
-        '<div class="panel"><div class="panel-head"><h2>Approval queue</h2>'
-        '<a href="/coach/whatsapp?tab=approval">Open queue &rarr;</a></div>'
-        f'<p class="big-number"><span data-counter data-target="{pending_count}">{pending_count}</span></p>'
-        '<p class="section-note">Prepared messages waiting for a human decision.</p></div>'
-        f'{workflow}{_tutorial()}{squad_panel}'
-        '</div>'
-        '</div>'
-        + _demo_controls(roster, has_demo)
+        f"{banner(message)}{summary_tiles}"
+        '<div class="today-grid"><div class="today-main">'
+        f"{empty_roster}{all_clear}{decision_section}{approval_section}"
+        f'{listed("Watch", watch, "watch")}{listed("Meet prep", meet, "meet_prep")}{fine_section}'
+        '</div><aside class="today-side">'
+        f"{workflow}{_tutorial()}{_demo_controls(roster, has_demo)}"
+        "</aside></div>"
     )
     return coach_frame(
-        body, active="overview", coach=coach, title="Overview",
-        subtitle="The decisions and exceptions that need a coach today.",
-        today=roster.reviewed_on.isoformat(), pending_count=pending_count,
+        body, active="overview", coach=coach, title="Today",
+        subtitle="Decisions first, then the messages waiting for your approval.",
+        today=roster.reviewed_on.isoformat(), pending_count=pending_count or len(pending),
     )
 
 
@@ -471,10 +483,6 @@ def render_athletes(
     telegram_linked_ids: set[str] | None = None,
 ) -> str:
     """Searchable squad directory with current readiness and training context."""
-    banner = ""
-    if message:
-        kind, text = message
-        banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
     rows = []
     telegram_linked_ids = telegram_linked_ids or set()
     for entry in roster.entries:
@@ -484,7 +492,9 @@ def render_athletes(
             if entry.readiness_score is not None else '<span class="muted">Not checked in</span>'
         )
         haystack = f"{entry.display_name} {entry.athlete_id} {entry.bucket.value} {status}".lower()
-        dot_cls = "act" if entry.bucket is Bucket.NEEDS_YOU else ("watch" if entry.bucket is Bucket.WATCH else ("meet" if entry.bucket is Bucket.MEET_PREP else "fine"))
+        dot_cls = {
+            Bucket.NEEDS_YOU: "act", Bucket.WATCH: "watch", Bucket.MEET_PREP: "meet",
+        }.get(entry.bucket, "fine")
         if telegram_ready and entry.athlete_id in telegram_linked_ids:
             channel = '<span class="channel-mini connected">Telegram connected</span>'
         elif telegram_ready:
@@ -499,7 +509,7 @@ def render_athletes(
         rows.append(
             f'<div class="directory-row athlete-record" data-bucket="{entry.bucket.value}" '
             f'data-search="{escape(haystack)}">'
-            f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" style="view-transition-name: { _vt_athlete(entry.athlete_id) };" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
+            f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
             f'<div class="muted">{escape(entry.athlete_id)}</div>{channel}</div>'
             f'<div><strong>{escape(entry.training_summary or "No training baseline")}</strong>'
             f'<div class="muted">{escape(status)}</div></div>{readiness}'
@@ -526,6 +536,8 @@ const filter=document.getElementById('athlete-filter');
 function filterAthletes(){const q=search.value.trim().toLowerCase();const f=filter.value;
 document.querySelectorAll('.athlete-record').forEach(row=>{row.hidden=!row.dataset.search.includes(q)||(f!=='all'&&row.dataset.bucket!==f);});}
 search.addEventListener('input',filterAthletes);filter.addEventListener('change',filterAthletes);
+const preset=new URLSearchParams(location.search).get('status');
+if(preset&&[...filter.options].some(option=>option.value===preset)){filter.value=preset;filterAthletes();}
 </script>"""
     if telegram_ready:
         telegram_notice = (
@@ -541,87 +553,14 @@ search.addEventListener('input',filterAthletes);filter.addEventListener('change'
     else:
         telegram_notice = ""
     body = (
-        f"{banner}{telegram_notice}{_demo_controls(roster, has_demo)}{tools}{directory}"
+        f"{banner(message)}{telegram_notice}"
+        f"{_demo_controls(roster, has_demo, return_to='/coach/athletes')}{tools}{directory}"
         f"{_register_form(roster.reviewed_on)}{script}"
     )
     return coach_frame(
         body, active="athletes", coach=coach, title="Athletes",
         subtitle="Current status, recent progress and readiness across the full squad.",
         today=roster.reviewed_on.isoformat(), pending_count=pending_count,
-    )
-
-
-def _outbox_card(item: PendingMessage) -> str:
-    a = item.athlete
-    reasons = " · ".join(escape(f.detail) for f in a.flags) or "nothing flagged"
-    readiness = (
-        f"{a.readiness_score}/100 · {a.readiness_band}"
-        if a.readiness_score is not None else "No same-day check-in"
-    )
-    return (
-        f'<div class="card {a.bucket.value} message-card" style="view-transition-name: { _vt_draft(item.athlete_id) };">'
-        '<div class="panel-head"><div>'
-        f'<a class="athlete-name" href="/coach/athlete/{escape(item.athlete_id)}">'
-        f'{escape(a.display_name)}</a>'
-        f'<div class="muted">{escape(item.message_kind.replace("_", " ").title())} &middot; '
-        f'{escape(item.local_date)}</div></div>'
-        '<span class="readiness-pill yellow">Awaiting approval</span></div>'
-        '<div class="evidence-grid">'
-        f'<div><span>Training trend</span><strong>{escape(a.training_summary or "No baseline")}</strong></div>'
-        f'<div><span>Latest session</span><strong>{escape(a.latest_session or "Nothing logged")}</strong></div>'
-        f'<div><span>Readiness</span><strong>{escape(readiness)}</strong></div>'
-        '</div>'
-        f'<p class="evidence-reason"><b>Why surfaced:</b> {reasons}</p>'
-        '<form method="post" action="/coach/outbox/review">'
-        f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
-        f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
-        f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
-        '<label class="draft-label">Message the athlete will receive (editable in place)</label>'
-        f'<textarea name="body" maxlength="1400">{escape(item.body)}</textarea>'
-        '<div class="card-actions">'
-        '<button class="btn btn-primary" type="submit" name="decision" value="approved">'
-        f'Approve for {escape(item.local_date)}</button>'
-        '<button class="btn btn-ghost" type="submit" name="decision" value="skipped">'
-        "Hold / Don’t send</button></div></form></div>"
-    )
-
-
-def render_outbox(
-    pending: tuple[PendingMessage, ...],
-    *,
-    coach: str,
-    today,
-    message: tuple[str, str] | None = None,
-) -> str:
-    """Render the outbox review queue."""
-    banner = ""
-    if message:
-        kind, text = message
-        banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
-
-    if not pending:
-        body = (
-            '<p class="empty">Nothing is queued. Drafts appear the evening before '
-            "each athlete's morning, in their own timezone.</p>"
-        )
-    else:
-        cards = [_outbox_card(item) for item in pending]
-        body = (
-            f"<section><h2 class='list-title'>Queued for tomorrow <span class='n'>{len(pending)}</span></h2>"
-            + "".join(cards)
-            + "</section>"
-        )
-
-    intro = (
-        '<div class="review-note"><div><strong>Human approval is the final step.</strong> '
-        'The agent prepared each draft from recorded history and current status. '
-        'Edit freely, approve it, or hold it back. <strong>Nothing below has been sent.</strong></div></div>'
-    )
-    return coach_frame(
-        f"{banner}{intro}{body}", active="outbox", coach=coach,
-        title="Outbox",
-        subtitle="Verify the evidence, edit the wording, then approve what goes to each athlete.",
-        today=today.isoformat(), pending_count=len(pending),
     )
 
 

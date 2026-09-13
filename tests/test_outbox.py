@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.coach import pending_reviews, render_outbox
+from app.coach import approval_card, pending_reviews
 from app.scheduling.morning import send_due_morning_prompts
 from app.scheduling.outbox import (
     FEEDBACK_REPLY,
@@ -178,7 +178,7 @@ def test_the_queue_shows_why_each_message_is_going_out(scheduled):
     assert any(f.kind == "stalled" for f in pending[0].athlete.flags)
     assert pending[0].edited is False
 
-    html = render_outbox(pending, coach="Coach Rao", today=date(2026, 9, 10))
+    html = "".join(approval_card(item) for item in pending)
     assert "Training trend" in html
     assert "Latest session" in html
     assert "Readiness" in html
