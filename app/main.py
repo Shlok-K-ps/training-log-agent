@@ -93,12 +93,15 @@ async def lifespan(app: FastAPI):
     conn.close()
     log.info("database ready at %s", settings.db_file)
     app.state.telegram_webhook_ready = False
+    app.state.telegram_webhook_error = None
     if settings.telegram_configured:
         try:
             await run_in_threadpool(telegram.configure_webhook)
             app.state.telegram_webhook_ready = True
             log.info("Telegram webhook connected")
-        except Exception:  # noqa: BLE001 - service and simulator must still boot
+        except Exception as exc:  # noqa: BLE001 - service and simulator must still boot
+            # Telegram transport exceptions deliberately contain no credentials.
+            app.state.telegram_webhook_error = str(exc)
             log.exception("Telegram webhook setup failed")
     task = None
     if settings.enable_morning_scheduler:
@@ -342,6 +345,7 @@ def _render_athlete_directory(message: tuple[str, str] | None) -> str:
         has_demo=any(is_demo(a) for a in roster_ids), pending_count=pending_count,
         telegram_configured=settings.telegram_configured,
         telegram_ready=bool(getattr(app.state, "telegram_webhook_ready", False)),
+        telegram_error=getattr(app.state, "telegram_webhook_error", None),
         telegram_linked_ids=telegram_linked_ids,
     )
 
@@ -900,6 +904,9 @@ async def health() -> dict[str, object]:
         "telegram_integration": settings.telegram_configured,
         "telegram_webhook_ready": bool(
             getattr(app.state, "telegram_webhook_ready", False)
+        ),
+        "telegram_webhook_error": getattr(
+            app.state, "telegram_webhook_error", None
         ),
         "messaging_transport": settings.messaging_transport_name,
         "morning_scheduler": settings.enable_morning_scheduler,

@@ -161,6 +161,7 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         health = c.get("/health").json()
         assert health["telegram_integration"] is True
         assert health["telegram_webhook_ready"] is True
+        assert health["telegram_webhook_error"] is None
         assert "Telegram" in health["messaging_transport"]
         assert "Telegram connected" in main._render_athlete("+919812340001", None)
 
@@ -214,6 +215,7 @@ def test_health_does_not_claim_webhook_ready_when_registration_fails(
         health = client.get("/health").json()
     assert health["telegram_integration"] is True
     assert health["telegram_webhook_ready"] is False
+    assert health["telegram_webhook_error"] == "Telegram rejected webhook"
 
 
 def test_approved_message_prefers_the_paired_telegram_chat(tmp_path, monkeypatch):

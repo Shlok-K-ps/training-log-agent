@@ -418,6 +418,7 @@ def render_athletes(
     pending_count: int = 0,
     telegram_configured: bool = False,
     telegram_ready: bool = False,
+    telegram_error: str | None = None,
     telegram_linked_ids: set[str] | None = None,
 ) -> str:
     """Searchable squad directory with current readiness and training context."""
@@ -482,9 +483,10 @@ search.addEventListener('input',filterAthletes);filter.addEventListener('change'
             'Use the connection shown under each athlete to pair their private chat.</div>'
         )
     elif telegram_configured:
+        reason = f" Reason: {escape(telegram_error)}." if telegram_error else ""
         telegram_notice = (
             '<div class="msg warn"><strong>Telegram is configured but its webhook is not verified.</strong> '
-            'Check the latest Render deployment log before pairing an athlete.</div>'
+            f'Check the latest Render deployment log before pairing an athlete.{reason}</div>'
         )
     else:
         telegram_notice = ""
