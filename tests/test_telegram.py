@@ -137,12 +137,12 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
     finally:
         conn.close()
     token = telegram.pairing_token("+919812340001")
-    athlete_page = main._render_athlete("+919812340001", None)
-    assert "Connect this athlete to Telegram" in athlete_page
-    assert ">Connect Telegram</a>" in athlete_page
-    assert token in athlete_page
     headers = {"X-Telegram-Bot-Api-Secret-Token": "webhook_secret-123"}
     with client as c:
+        athlete_page = main._render_athlete("+919812340001", None)
+        assert "Connect this athlete to Telegram" in athlete_page
+        assert ">Connect Telegram</a>" in athlete_page
+        assert token in athlete_page
         paired = c.post(
             "/webhook/telegram",
             headers=headers,
@@ -160,6 +160,7 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         assert logged.status_code == 200
         health = c.get("/health").json()
         assert health["telegram_integration"] is True
+        assert health["telegram_webhook_ready"] is True
         assert "Telegram" in health["messaging_transport"]
         assert "Telegram connected" in main._render_athlete("+919812340001", None)
 
@@ -169,6 +170,9 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         desk = c.get("/coach/whatsapp")
         assert "Telegram is active" in desk.text
         assert "Open an athlete profile to connect their Telegram chat" in desk.text
+        directory = c.get("/coach/athletes")
+        assert "Telegram bot is connected" in directory.text
+        assert "Telegram connected" in directory.text
 
     conn = db.connect(settings.database_path)
     try:
@@ -192,6 +196,24 @@ def test_bad_telegram_webhook_secret_is_rejected(tmp_path, monkeypatch):
                               "chat": {"id": 1, "type": "private"}}},
         )
     assert response.status_code == 403
+
+
+def test_health_does_not_claim_webhook_ready_when_registration_fails(
+    tmp_path, monkeypatch
+):
+    from app import main
+
+    settings = _telegram_settings(monkeypatch)
+    monkeypatch.setattr(settings, "database_path", str(tmp_path / "failed-webhook.db"))
+    monkeypatch.setattr(
+        main.telegram,
+        "configure_webhook",
+        lambda: (_ for _ in ()).throw(RuntimeError("Telegram rejected webhook")),
+    )
+    with TestClient(main.app) as client:
+        health = client.get("/health").json()
+    assert health["telegram_integration"] is True
+    assert health["telegram_webhook_ready"] is False
 
 
 def test_approved_message_prefers_the_paired_telegram_chat(tmp_path, monkeypatch):

@@ -1717,6 +1717,43 @@ dialog::backdrop {
   font-size: 13px;
 }
 
+.calendar-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.calendar-control input[type="date"] {
+  width: 100%;
+  min-width: 0;
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+.calendar-trigger {
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 8px 11px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  font: 600 12px var(--font-mono);
+  cursor: pointer;
+}
+
+.calendar-trigger:hover { background: rgba(255, 255, 255, 0.12); }
+
+.channel-mini {
+  display: inline-block;
+  margin-top: 5px;
+  color: var(--accent-cyan);
+  font: 600 10px var(--font-mono);
+  letter-spacing: .03em;
+  text-decoration: none;
+}
+
+.channel-mini.connected { color: var(--plate-green-text); }
+.channel-mini.warning { color: var(--plate-yellow-text); }
+
 .onboarding-form button[type="submit"] {
   background: var(--text);
   color: var(--canvas);

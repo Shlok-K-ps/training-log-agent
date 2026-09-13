@@ -547,6 +547,7 @@ def render_athlete(
     message: tuple[str, str] | None = None,
     telegram_pairing_url: str | None = None,
     telegram_linked: bool = False,
+    telegram_ready: bool | None = None,
 ) -> str:
     banner = ""
     if message:
@@ -619,7 +620,9 @@ def render_athlete(
         "</form></div>"
     )
     telegram_panel = ""
-    if telegram_linked:
+    if telegram_ready is None:
+        telegram_ready = bool(telegram_linked or telegram_pairing_url)
+    if telegram_linked and telegram_ready:
         telegram_panel = (
             '<section class="channel-callout"><div><span class="channel-label">ATHLETE CHANNEL · CONNECTED</span>'
             '<h2>Telegram connected</h2><p>This athlete receives approved messages '
@@ -628,7 +631,7 @@ def render_athlete(
             '<button class="danger" type="submit">Disconnect Telegram</button>'
             '</form></section>'
         )
-    elif telegram_pairing_url:
+    elif telegram_pairing_url and telegram_ready:
         telegram_panel = (
             '<section class="channel-callout"><div><span class="channel-label">ATHLETE CHANNEL · ACTION NEEDED</span>'
             '<h2>Connect this athlete to Telegram</h2>'
@@ -636,6 +639,12 @@ def render_athlete(
             'will be paired to the athlete profile.</p></div>'
             f'<a class="approve" href="{escape(telegram_pairing_url)}" '
             'target="_blank" rel="noopener">Connect Telegram</a></section>'
+        )
+    elif telegram_pairing_url:
+        telegram_panel = (
+            '<section class="channel-callout"><div><span class="channel-label">ATHLETE CHANNEL · RECONNECTING</span>'
+            '<h2>Telegram webhook is not ready</h2><p>The bot settings exist, but '
+            'Render has not confirmed its webhook. Check the deployment log before pairing.</p></div></section>'
         )
 
     def facts(items: list[tuple[str, object]]) -> str:

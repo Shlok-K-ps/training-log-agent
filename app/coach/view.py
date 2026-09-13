@@ -171,7 +171,8 @@ def _register_form(today: date) -> str:
 <form class="onboarding-form" method="post" action="/coach/athletes/register">
   <div class="onboarding-grid">
     <label>Name<input type="text" name="name" required maxlength="60" placeholder="Athlete name"></label>
-    <label>WhatsApp number<input type="text" name="athlete_id" required maxlength="20" placeholder="+919812340001"></label>
+    <label>Athlete phone / ID<input type="tel" name="athlete_id" required maxlength="22"
+      inputmode="tel" pattern="[+][1-9][0-9 ()-]{{7,20}}" placeholder="+91 98123 40001"></label>
     <label>Bodyweight (kg)<input type="number" name="bodyweight_kg" min="30" max="400" step="0.1" required></label>
     <label>Squat 1RM (kg)<input type="number" name="squat_1rm_kg" min="1" max="600" step="0.5" required></label>
     <label>Bench 1RM (kg)<input type="number" name="bench_1rm_kg" min="1" max="400" step="0.5" required></label>
@@ -180,9 +181,13 @@ def _register_form(today: date) -> str:
     <label>Experience<select name="experience" required><option value="novice">Novice</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
     <label>Goal lift<select name="goal_lift"><option value="">No numeric goal yet</option><option value="squat">Squat</option><option value="bench press">Bench press</option><option value="deadlift">Deadlift</option></select></label>
     <label>Goal 1RM (kg)<input type="number" name="goal_target_kg" min="1" max="700" step="0.5"></label>
-    <label>Goal / meet date<input type="date" name="goal_target_date"
-      min="{earliest_goal}" max="{latest_goal}" aria-label="Goal or meet date"></label>
-    <label class="onboarding-wide">Current injury or restriction<input type="text" name="injury_note" maxlength="240" placeholder="Leave blank if none; any entry opens the injury safety gate"></label>
+    <label>Goal / meet date<span class="calendar-control">
+      <input id="goal-target-date" type="date" name="goal_target_date"
+        min="{earliest_goal}" max="{latest_goal}" aria-label="Goal or meet date">
+      <button class="calendar-trigger" type="button"
+        onclick="const field=document.getElementById('goal-target-date'); if(field.showPicker){{field.showPicker();}} else {{field.focus();}}">Choose date</button>
+    </span></label>
+    <label class="onboarding-wide">Current injury or restriction<input type="text" name="injury_note" maxlength="240" placeholder="Leave blank if none"></label>
   </div>
   <button type="submit">Create athlete profile</button>
   <p class="hint">These are coach-entered starting facts. They create the baseline for programme selection and goal pacing; they do not clear or diagnose injuries.</p>
@@ -411,6 +416,9 @@ def render_athletes(
     message: tuple[str, str] | None = None,
     has_demo: bool = False,
     pending_count: int = 0,
+    telegram_configured: bool = False,
+    telegram_ready: bool = False,
+    telegram_linked_ids: set[str] | None = None,
 ) -> str:
     """Searchable squad directory with current readiness and training context."""
     banner = ""
@@ -418,6 +426,7 @@ def render_athletes(
         kind, text = message
         banner = f'<div class="msg {escape(kind)}">{escape(text)}</div>'
     rows = []
+    telegram_linked_ids = telegram_linked_ids or set()
     for entry in roster.entries:
         status = " · ".join(f.detail for f in entry.flags) or "On track"
         readiness = (
@@ -426,11 +435,22 @@ def render_athletes(
         )
         haystack = f"{entry.display_name} {entry.athlete_id} {entry.bucket.value} {status}".lower()
         dot_cls = "act" if entry.bucket is Bucket.NEEDS_YOU else ("watch" if entry.bucket is Bucket.WATCH else ("meet" if entry.bucket is Bucket.MEET_PREP else "fine"))
+        if telegram_ready and entry.athlete_id in telegram_linked_ids:
+            channel = '<span class="channel-mini connected">Telegram connected</span>'
+        elif telegram_ready:
+            channel = (
+                f'<a class="channel-mini" href="/coach/athlete/{escape(entry.athlete_id)}">'
+                'Connect Telegram →</a>'
+            )
+        elif telegram_configured:
+            channel = '<span class="channel-mini warning">Telegram webhook not ready</span>'
+        else:
+            channel = '<span class="channel-mini muted">Telegram not configured</span>'
         rows.append(
             f'<div class="directory-row athlete-record" data-bucket="{entry.bucket.value}" '
             f'data-search="{escape(haystack)}">'
             f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" style="view-transition-name: { _vt_athlete(entry.athlete_id) };" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
-            f'<div class="muted">{escape(entry.athlete_id)}</div></div>'
+            f'<div class="muted">{escape(entry.athlete_id)}</div>{channel}</div>'
             f'<div><strong style="font-size:13px">{escape(entry.training_summary or "No training baseline")}</strong>'
             f'<div class="muted">{escape(status)}</div></div>{readiness}'
             f'<div class="muted">{escape(entry.last_activity or "Never")}</div></div>'
@@ -456,8 +476,20 @@ function filterAthletes(){const q=search.value.trim().toLowerCase();const f=filt
 document.querySelectorAll('.athlete-record').forEach(row=>{row.hidden=!row.dataset.search.includes(q)||(f!=='all'&&row.dataset.bucket!==f);});}
 search.addEventListener('input',filterAthletes);filter.addEventListener('change',filterAthletes);
 </script>"""
+    if telegram_ready:
+        telegram_notice = (
+            '<div class="msg ok"><strong>Telegram bot is connected.</strong> '
+            'Use the connection shown under each athlete to pair their private chat.</div>'
+        )
+    elif telegram_configured:
+        telegram_notice = (
+            '<div class="msg warn"><strong>Telegram is configured but its webhook is not verified.</strong> '
+            'Check the latest Render deployment log before pairing an athlete.</div>'
+        )
+    else:
+        telegram_notice = ""
     body = (
-        f"{banner}{_demo_controls(roster, has_demo)}{tools}{directory}"
+        f"{banner}{telegram_notice}{_demo_controls(roster, has_demo)}{tools}{directory}"
         f"{_register_form(roster.reviewed_on)}{script}"
     )
     return coach_frame(

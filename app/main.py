@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 import secrets
 from datetime import date
 from contextlib import asynccontextmanager
@@ -91,9 +92,11 @@ async def lifespan(app: FastAPI):
     db.init_db(conn)
     conn.close()
     log.info("database ready at %s", settings.db_file)
+    app.state.telegram_webhook_ready = False
     if settings.telegram_configured:
         try:
             await run_in_threadpool(telegram.configure_webhook)
+            app.state.telegram_webhook_ready = True
             log.info("Telegram webhook connected")
         except Exception:  # noqa: BLE001 - service and simulator must still boot
             log.exception("Telegram webhook setup failed")
@@ -330,12 +333,16 @@ def _render_athlete_directory(message: tuple[str, str] | None) -> str:
         db.init_db(conn)
         roster = build_roster(conn, today=date.today())
         roster_ids = db.list_athletes(conn)
+        telegram_linked_ids = db.telegram_linked_athletes(conn)
         pending_count = len(db.pending_drafts(conn))
     finally:
         conn.close()
     return render_athletes(
         roster, coach=settings.coach_name, message=message,
         has_demo=any(is_demo(a) for a in roster_ids), pending_count=pending_count,
+        telegram_configured=settings.telegram_configured,
+        telegram_ready=bool(getattr(app.state, "telegram_webhook_ready", False)),
+        telegram_linked_ids=telegram_linked_ids,
     )
 
 
@@ -516,6 +523,7 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
             athlete_id, telegram_pairing_version
         ),
         telegram_linked=telegram_chat is not None,
+        telegram_ready=bool(getattr(app.state, "telegram_webhook_ready", False)),
     )
 
 
@@ -594,8 +602,11 @@ def _goal_date_from_form(form: dict[str, str]) -> str | None:
 
 
 def _register(form: dict[str, str]) -> tuple[str, str]:
-    athlete_id = form.get("athlete_id", "")
+    athlete_id = re.sub(r"[\s()-]", "", form.get("athlete_id", ""))
     name = form.get("name", "")
+    injury_note = form.get("injury_note", "").strip()
+    if injury_note.casefold() in {"no", "none", "nothing", "nil", "n/a", "na"}:
+        injury_note = ""
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -610,7 +621,7 @@ def _register(form: dict[str, str]) -> tuple[str, str]:
             deadlift_1rm_kg=_optional_number(form.get("deadlift_1rm_kg", "")),
             training_days=_optional_number(form.get("training_days", ""), integer=True),
             experience=form.get("experience", "").strip() or None,
-            injury_note=form.get("injury_note", ""),
+            injury_note=injury_note,
             goal_lift=form.get("goal_lift", "").strip() or None,
             goal_target_kg=_optional_number(form.get("goal_target_kg", "")),
             goal_target_date=_goal_date_from_form(form),
@@ -802,7 +813,10 @@ def _render_whatsapp(
         scheduled=scheduled, sent=sent, selected_athlete=selected,
         selected_name=selected_name, tab=tab, coach=settings.coach_name,
         demo_athletes=demo_athletes, today=date.today(), message=message,
-        transport_ready=settings.messaging_configured,
+        transport_ready=(
+            settings.whatsapp_configured
+            or bool(getattr(app.state, "telegram_webhook_ready", False))
+        ),
         transport_name=settings.messaging_transport_name,
     )
 
@@ -884,6 +898,9 @@ async def health() -> dict[str, object]:
         "whatsapp_integration": settings.whatsapp_configured,
         "whatsapp_transport": settings.whatsapp_transport_name,
         "telegram_integration": settings.telegram_configured,
+        "telegram_webhook_ready": bool(
+            getattr(app.state, "telegram_webhook_ready", False)
+        ),
         "messaging_transport": settings.messaging_transport_name,
         "morning_scheduler": settings.enable_morning_scheduler,
         "calendar_integration": settings.calendar_configured,

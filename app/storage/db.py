@@ -1377,6 +1377,14 @@ def telegram_chat_id(conn: sqlite3.Connection, athlete_id: str) -> str | None:
     return str(row["chat_id"]) if row is not None else None
 
 
+def telegram_linked_athletes(conn: sqlite3.Connection) -> set[str]:
+    """Athlete ids with a currently paired private Telegram chat."""
+    return {
+        str(row["athlete_id"])
+        for row in conn.execute("SELECT athlete_id FROM telegram_links")
+    }
+
+
 def unlink_telegram_chat(conn: sqlite3.Connection, athlete_id: str) -> bool:
     cur = conn.execute(
         "DELETE FROM telegram_links WHERE athlete_id = ?", (athlete_id,)

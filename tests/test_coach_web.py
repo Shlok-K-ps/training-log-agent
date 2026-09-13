@@ -103,6 +103,8 @@ def test_athlete_directory_is_a_separate_authenticated_workspace():
         assert 'name="deadlift_1rm_kg"' in resp.text
         assert 'name="bodyweight_kg"' in resp.text
         assert 'type="date" name="goal_target_date"' in resp.text
+        assert "showPicker" in resp.text
+        assert ">Choose date</button>" in resp.text
         assert 'min="' in resp.text
         assert 'max="' in resp.text
 
@@ -118,6 +120,37 @@ def test_goal_date_controls_build_a_real_calendar_date():
         })
     with pytest.raises(ValueError, match="day, month, and year"):
         _goal_date_from_form({"goal_day": "12", "goal_month": "", "goal_year": "2027"})
+
+
+def test_onboarding_accepts_spaced_phone_and_nothing_means_no_injury(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(settings, "database_path", str(tmp_path / "onboarding.db"))
+    with TestClient(app) as client:
+        client.cookies.set(COOKIE_NAME, TOKEN)
+        response = client.post("/coach/athletes/register", data={
+            "name": "Nikash",
+            "athlete_id": "+91 88846 84004",
+            "bodyweight_kg": "62",
+            "squat_1rm_kg": "60",
+            "bench_1rm_kg": "60",
+            "deadlift_1rm_kg": "60",
+            "training_days": "3",
+            "experience": "novice",
+            "goal_lift": "bench press",
+            "goal_target_kg": "80",
+            "goal_target_date": "2028-02-29",
+            "injury_note": "nothing",
+        })
+        assert response.status_code == 200
+        assert "Nikash added" in response.text
+
+    conn = db.connect()
+    try:
+        assert "+918884684004" in db.list_athletes(conn)
+        assert db.injury_state(conn, "+918884684004")[0] is False
+    finally:
+        conn.close()
 
 
 def test_clearance_review_rejects_self_clearance_and_records_source(tmp_path, monkeypatch):
