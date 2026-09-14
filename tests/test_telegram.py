@@ -199,8 +199,8 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         assert "Telegram is active" in desk.text
         assert "Open an athlete profile to connect their Telegram chat" in desk.text
         directory = c.get("/coach/athletes")
-        assert "Telegram bot is connected" in directory.text
-        assert "Telegram connected" in directory.text
+        assert "Telegram bot connected" in directory.text
+        assert '<td data-col="connection"><span class="chip chip-green">Connected</span>' in directory.text
 
     conn = db.connect(settings.database_path)
     try:

@@ -16,6 +16,9 @@ from app.casework.status import WAITING_FOR_DECISION, AthleteStatus
 from app.coach.demo_view import DEMO_STYLE, render_steps_static, report_html
 from app.coach.view import banner, coach_frame
 
+# Pairing outcomes that mean the athlete tried to connect and it did not work.
+PAIRING_FAILURE_OUTCOMES = frozenset({"link_replaced", "athlete_connected_elsewhere", "chat_connected_elsewhere"})
+
 TIMEZONES = (
     ("Asia/Kolkata", "India (Asia/Kolkata)"),
     ("Asia/Dubai", "Gulf (Asia/Dubai)"),
@@ -225,14 +228,29 @@ def setup_checklist(steps: list[dict], *, compact: bool = True) -> str:
             f'<div><strong>{escape(step["label"])}</strong><p>{escape(step["detail"])}</p></div>{button}</li>'
         )
     percent = round(100 * done / len(steps))
+    steps_html = f'<ol class="setup-steps">{"".join(items)}</ol>'
+    meter = f'<div class="setup-meter" aria-hidden="true"><span style="width:{percent}%"></span></div>'
+    if not compact:
+        return (
+            '<section class="setup-card" id="setup">'
+            f'<div class="setup-head"><div><span class="setup-eyebrow">{done} of {len(steps)} done</span>'
+            f'<h2>Set up your agent</h2></div>{meter}</div>{steps_html}'
+            '<p class="setup-foot"><a href="/demo">Watch the safe demo</a></p></section>'
+        )
+    # On Today, setup is one line with the next step; the full list folds away once started.
+    upcoming = steps[first_open]
+    expanded = done <= 1
+    next_button = "" if expanded else (
+        f'<a class="btn btn-primary btn-sm" href="{escape(upcoming["href"])}" data-step-next>'
+        f'{escape(upcoming["action"])}</a>'
+    )
     return (
-        '<section class="setup-card" id="setup">'
-        f'<div class="setup-head"><div><span class="setup-eyebrow">{done} of {len(steps)} done</span>'
-        '<h2>Set up your agent</h2><p>Each step unlocks the next. Everything is detected automatically.</p></div>'
-        f'<div class="setup-meter" aria-hidden="true"><span style="width:{percent}%"></span></div></div>'
-        f'<ol class="setup-steps">{"".join(items)}</ol>'
-        '<p class="setup-foot">Want to see what it does first? <a href="/demo">Watch the safe demo</a>. '
-        "It is fictional and never touches this console.</p></section>"
+        '<section class="setup-card setup-compact" id="setup">'
+        '<div class="setup-line"><div class="setup-line-text">'
+        f'<span class="setup-eyebrow">{done} of {len(steps)} done</span><h2>Set up your agent</h2>'
+        f'<span class="setup-next">Next: {escape(upcoming["label"])}</span></div>{meter}{next_button}</div>'
+        f'<details class="setup-all"{" open" if expanded else ""}><summary>All setup steps</summary>'
+        f"{steps_html}</details></section>"
     )
 
 
@@ -393,34 +411,44 @@ def setup_steps(status: AthleteStatus) -> list[dict]:
 
 
 def athlete_status_header(status: AthleteStatus, *, next_step: tuple[str, str], simulate_href: str) -> str:
-    """The setup progression and what the agent will do next, with only the most useful action."""
+    """Current status and the agent's next action first; the setup checklist only while setup is unfinished."""
     first = escape(status.first_name)
     steps = setup_steps(status)
     problems = [b for b in status.blockers if b not in status.setup_gaps]
+    complete = all(step["done"] for step in steps[:3])
     if status.ready:
-        state, badge, headline = "ready", '<span class="status-badge ready">Ready</span>', \
-            f"The agent is ready for {first}"
+        state, badge = "ready", '<span class="status-badge ready">Ready</span>'
+        headline = "Running automatically" if status.autopilot else "Ready · you approve each session"
     elif problems == [WAITING_FOR_DECISION]:
         state, badge, headline = "waiting", '<span class="status-badge waiting">Waiting for you</span>', \
-            "Today's training day needs your decision"
+            f"{first} needs a decision"
     elif problems:
         state, badge, headline = "blocked", '<span class="status-badge blocked">Blocked</span>', \
             "The agent is blocked"
     else:
         done = sum(1 for step in steps[:3] if step["done"])
         state, badge, headline = "setup", '<span class="status-badge">Setup needed</span>', \
-            f"{done} of 3 setup steps done"
+            f"Setup · {done} of 3 done"
 
-    items = []
-    for index, step in enumerate(steps):
-        mark = {"done": "✓", "blocked": "!"}.get(step["state"], str(index + 1))
-        current = ' aria-current="step"' if step["state"] == "current" else ""
-        items.append(
-            f'<li class="stepper-step is-{step["state"]}" data-step-key="{step["key"]}"{current}>'
-            f'<span class="stepper-mark" aria-hidden="true">{mark}</span>'
-            f'<div><strong>{escape(step["title"])}</strong>'
-            f'<span data-status="{step["key"]}">{escape(step["detail"])}</span></div></li>'
+    if complete:
+        facts = "".join(
+            f'<li><span class="fact-label">{label}</span>'
+            f'<span data-status="{step["key"]}">{escape(step["detail"])}</span></li>'
+            for label, step in zip(("Telegram", "Plan", "Autopilot"), steps[:3])
         )
+        progress = f'<ul class="status-facts">{facts}</ul>'
+    else:
+        items = []
+        for index, step in enumerate(steps):
+            mark = {"done": "✓", "blocked": "!"}.get(step["state"], str(index + 1))
+            current = ' aria-current="step"' if step["state"] == "current" else ""
+            items.append(
+                f'<li class="stepper-step is-{step["state"]}" data-step-key="{step["key"]}"{current}>'
+                f'<span class="stepper-mark" aria-hidden="true">{mark}</span>'
+                f'<div><strong>{escape(step["title"])}</strong>'
+                f'<span data-status="{step["key"]}">{escape(step["detail"])}</span></div></li>'
+            )
+        progress = f'<ol class="stepper" aria-label="Setup checklist">{"".join(items)}</ol>'
     idle = (
         '<p class="msg warn status-idle" data-idle>Autopilot is on but idle—there is no approved plan to run.</p>'
         if status.autopilot_decided and status.autopilot and not status.plan else ""
@@ -445,7 +473,7 @@ def athlete_status_header(status: AthleteStatus, *, next_step: tuple[str, str], 
     if status.waiting_case_id:
         actions.append(link("Review today's decision", f"/coach/case/{status.waiting_case_id}"))
     elif status.ready:
-        actions.append(link("Run a safe simulated test", simulate_href))
+        actions.append(link("Run a safe simulated test", simulate_href, primary=False))
         if status.latest_case_id:
             actions.append(link("View the agent's timeline", f"/coach/case/{status.latest_case_id}", primary=False))
     elif status.reachable and not (status.plan and status.autopilot_decided):
@@ -454,12 +482,11 @@ def athlete_status_header(status: AthleteStatus, *, next_step: tuple[str, str], 
     return (
         f'<section class="agent-status" id="agent-status" data-state="{state}" '
         f'data-ready="{"yes" if status.ready else "no"}">'
-        f'<div class="status-head"><div><span class="setup-eyebrow">Agent setup</span>'
-        f'<h2>{headline}</h2></div>{badge}</div>'
-        f'<ol class="stepper">{"".join(items)}</ol>{idle}{blockers}'
-        '<div class="status-next"><div><span class="k">What the agent will do next</span>'
-        f'<p data-status="next-action">{escape(status.next_action)}</p></div>'
-        f'<div class="status-actions">{"".join(actions)}</div></div>{notes_html}</section>'
+        f'<div class="status-head"><h2>{headline}</h2>{badge}</div>'
+        '<p class="status-next-line"><span class="k">Next</span>'
+        f'<span data-status="next-action">{escape(status.next_action)}</span></p>'
+        f'{progress}{idle}{blockers}{notes_html}'
+        f'<div class="status-actions">{"".join(actions)}</div></section>'
     )
 
 
@@ -494,6 +521,8 @@ def invite_section(
     warning = "" if telegram_ready else (
         '<p class="msg warn">The Telegram webhook has not been verified yet. The invite may not connect until it is.</p>'
     )
+    # Troubleshooting stays folded away unless the last pairing attempt actually failed.
+    help_open = " open" if last_attempt and last_attempt.get("outcome") in PAIRING_FAILURE_OUTCOMES else ""
     attempt = (
         f'<p class="invite-attempt" data-last-attempt>Last attempt: {escape(last_attempt["label"])} '
         f'({escape(last_attempt["when"])})</p>'
@@ -520,7 +549,7 @@ def invite_section(
         f'<p class="invite-status" data-telegram-status role="status" aria-live="polite">Waiting for {first} to press '
         "Start. This page checks automatically.</p>"
         f"{attempt}"
-        '<details class="invite-help"><summary>Invite not working?</summary><dl class="trouble">'
+        f'<details class="invite-help"{help_open}><summary>Invite not working?</summary><dl class="trouble">'
         f"<div><dt>The bot asked for the private invite</dt><dd>{first} opened the bot or typed /start instead of "
         f"tapping the invite. Send the invite again and ask {first} to tap it, then press Start.</dd></div>"
         "<div><dt>The bot said the invite isn’t valid</dt><dd>The link was cut short or changed while it was being "

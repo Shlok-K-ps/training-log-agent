@@ -22,7 +22,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import date
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from contextlib import asynccontextmanager
 from contextlib import suppress
@@ -43,7 +43,7 @@ from app.casework import clock, demo_day, engine
 from app.casework import status as agent_status
 from app.coach import demo_view, onboarding_view
 from app.casework import store as case_store
-from app.coach import agent_view
+from app.coach import agent_view, console_view
 from app.coach.view import banner, coach_frame
 from app.casework.transport import DeliveryFailed, LiveTransport
 from app.channels import telegram, vonage, whatsapp
@@ -66,8 +66,6 @@ from app.scheduling.outbox import (
 from app.coach import (
     build_roster,
     pending_reviews,
-    render as render_roster,
-    render_athletes,
     render_landing,
     render_privacy,
     render_terms,
@@ -509,34 +507,54 @@ def _current_injury_plan_title(conn, athlete_id: str) -> str | None:
     )
 
 
+def _athlete_rows(conn, roster) -> list:
+    """Each athlete's roster signals, agent readiness and whether pairing last failed."""
+    rows = []
+    for entry in roster.entries:
+        status = _athlete_status(conn, entry.athlete_id)
+        attempt = (
+            None if status.telegram_connected or status.demo
+            else db.latest_pairing_attempt(conn, entry.athlete_id)
+        )
+        outcome = str(attempt["outcome"]) if attempt is not None else ""
+        rows.append(console_view.AthleteRow(
+            entry=entry, status=status,
+            pairing_failed=outcome in console_view.PAIRING_FAILURE_OUTCOMES,
+            pairing_label=telegram.PAIRING_OUTCOME_LABELS.get(outcome),
+        ))
+    return rows
+
+
 def _render_console(message: tuple[str, str] | None) -> str:
     conn = db.connect()
     try:
         db.init_db(conn)
         today = date.today()
+        now = clock.utcnow()
         roster = build_roster(conn, today=today)
         roster_ids = db.list_athletes(conn)
         pending = _reviewable(conn, today)
-        injury_plans = tuple(
-            (entry, _current_injury_plan_title(conn, entry.athlete_id))
+        injury_plan_titles = {
+            entry.athlete_id: _current_injury_plan_title(conn, entry.athlete_id)
             for entry in roster.entries
             if any(flag.kind == "injured" for flag in entry.flags)
-        )
-        board = agent_board.snapshot(conn, clock.utcnow())
+        }
+        board = agent_board.snapshot(conn, now)
         steps = agent_status.setup_checklist(
-            conn, clock.utcnow(), telegram_available=settings.telegram_configured,
+            conn, now, telegram_available=settings.telegram_configured,
             agent_blocker=deployment.agent_blocker(),
         )
+        rows = _athlete_rows(conn, roster)
+        failures = db.recent_failed_deliveries(conn, since=case_store.iso(now - timedelta(hours=48)))
     finally:
         conn.close()
-    return render_roster(
-        roster, coach=settings.coach_name, message=message,
-        has_demo=any(is_demo(a) for a in roster_ids),
-        pending_count=len(pending), pending=pending, injury_plans=injury_plans,
-        agent_board=agent_view.agent_board(board, blocker=deployment.agent_blocker()),
-        extra_style=agent_view.AGENT_STYLE + onboarding_view.ONBOARDING_STYLE,
-        setup_html=onboarding_view.setup_checklist(steps),
+    return console_view.render_today(
+        rows=rows, board=board, pending=pending, injury_plan_titles=injury_plan_titles,
+        failures=failures, setup_html=onboarding_view.setup_checklist(steps),
         empty_html=onboarding_view.empty_state() if not roster_ids else "",
+        has_demo=any(is_demo(a) for a in roster_ids), blocker=deployment.agent_blocker(),
+        coach=settings.coach_name, today=today.isoformat(), message=message,
+        extra_style=agent_view.AGENT_STYLE + onboarding_view.ONBOARDING_STYLE,
     )
 
 
@@ -704,19 +722,19 @@ def _render_athlete_directory(message: tuple[str, str] | None) -> str:
     conn = db.connect()
     try:
         db.init_db(conn)
-        roster = build_roster(conn, today=date.today())
+        today = date.today()
+        roster = build_roster(conn, today=today)
         roster_ids = db.list_athletes(conn)
-        telegram_linked_ids = db.telegram_linked_athletes(conn)
+        rows = _athlete_rows(conn, roster)
         pending_count = _pending_count(conn)
     finally:
         conn.close()
-    return render_athletes(
-        roster, coach=settings.coach_name, message=message,
+    return console_view.render_roster(
+        rows, coach=settings.coach_name, today=today.isoformat(), message=message,
         has_demo=any(is_demo(a) for a in roster_ids), pending_count=pending_count,
         telegram_configured=settings.telegram_configured,
         telegram_ready=bool(getattr(app.state, "telegram_webhook_ready", False)),
         telegram_error=getattr(app.state, "telegram_webhook_error", None),
-        telegram_linked_ids=telegram_linked_ids,
     )
 
 

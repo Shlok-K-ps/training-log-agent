@@ -69,7 +69,7 @@ def test_an_empty_console_offers_exactly_two_ways_in(coach):
     primary = [(a.get_text(strip=True), a["href"]) for a in soup.select("#empty-console .empty-actions a")]
     assert primary == [("Set up a real athlete", "/coach/athletes/new"), ("Watch the safe demo", "/demo")]
     assert "Set up your agent" in page and "0 of 6 done" in page
-    assert "Open cases" not in page, "an empty console shows no empty machinery"
+    assert "What happens next" not in page and "ops-counts" not in page, "an empty console shows no empty machinery"
 
 
 def test_registering_needs_no_identifier_and_ends_on_a_telegram_invite(coach):
@@ -153,7 +153,7 @@ def test_the_athlete_page_answers_the_readiness_questions_and_shows_blockers(coa
     assert header.select_one('[data-status="training-plan"]').get_text(strip=True) == "Not created"
     assert header.select_one('[data-status="autopilot"]').get_text(strip=True) == "Not decided"
     assert header.select_one('[data-status="next-action"]').get_text(strip=True) == (
-        "Nothing yet. The agent starts once the setup steps above are finished.")
+        "Nothing until setup is finished.")
     assert not soup.select(".btn-disabled"), "no disabled buttons standing in for next steps"
 
     conn = db.connect(settings.database_path)

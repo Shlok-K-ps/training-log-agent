@@ -154,21 +154,6 @@ def timeline_items(events, *, with_names: bool, full: bool = False) -> str:
     return f'<ul class="timeline">{"".join(rows)}</ul>'
 
 
-def _learned_card(item: dict) -> str:
-    after = (
-        f"Since then: median <b>{item['after_median']} min</b> over {item['after_samples']} day(s)."
-        if item["after_median"] is not None else "Measuring the effect: no replies at the new time yet."
-    )
-    return (
-        '<div class="learned">'
-        f'<strong>{escape(item["athlete_name"])}: check-in {escape(item["old_value"])} → '
-        f'{escape(item["new_value"])}</strong>'
-        f'<p>{escape(item["explanation"])}</p>'
-        f'<p class="case-meta">Before: median <b>{escape(str(item["before_median"]))} min</b> to reply. '
-        f'{after}</p></div>'
-    )
-
-
 def demo_day_panel(board: Board, *, return_to: str = "/coach#demo-day") -> str:
     """The scripted demo day: clearly a simulation, separate from the real agent."""
 
@@ -201,79 +186,6 @@ def demo_day_panel(board: Board, *, return_to: str = "/coach#demo-day") -> str:
         f'<div class="option-row">{step("morning", "1. Play the morning", "btn-primary")}'
         f'{step("evening", "2. Play the evening", "btn-ghost")}'
         f'{step("reset", "Reset simulation", "btn-ghost")}</div>{cases}</section>'
-    )
-
-
-def agent_board(board: Board, *, return_to: str = "/coach", blocker: str | None = None) -> str:
-    stats = (
-        ("Needs you", len(board.needs_coach)),
-        ("In progress", len(board.open_cases)),
-        ("Closed today", len(board.completed)),
-        ("Messages sent", board.messages_sent),
-    )
-    strip = '<div class="agent-strip">' + "".join(
-        f'<div class="agent-stat"><span>{label}</span><strong>{value}</strong></div>'
-        for label, value in stats
-    ) + "</div>"
-
-    if not board.planned_athletes:
-        intro = (
-            '<div class="empty-card"><strong>The agent has no training days to own yet.</strong>'
-            "<span>Open an athlete, add their coach-approved weekly plan (sets, reps, RPE) and "
-            "the agent will run each training day from check-in to outcome.</span></div>"
-        )
-    else:
-        intro = ""
-    coach_notice = (
-        "" if board.coach_linked else
-        '<div class="msg warn">Escalations wait here only: link your Telegram by sending '
-        "<b>/coach &lt;setup code&gt;</b> to the bot to get them with decision buttons.</div>"
-    )
-
-    needs = (
-        '<section class="today-section"><div class="section-head-row">'
-        f'<h2>Exceptions for you <span class="n">{len(board.needs_coach)}</span></h2></div>'
-        + "".join(_needs_card(case, return_to=return_to) for case in board.needs_coach)
-        + "</section>"
-        if board.needs_coach else ""
-    )
-    waiting = (
-        '<section class="today-section"><div class="section-head-row">'
-        f'<h2>Open cases <span class="n">{len(board.open_cases)}</span></h2></div>'
-        + ("".join(_open_row(case) for case in board.open_cases)
-           or '<div class="empty-card"><span>No training day is in progress.</span></div>')
-        + "</section>"
-    )
-    done = (
-        '<section class="today-section"><div class="section-head-row">'
-        f'<h2>Completed by the agent <span class="n">{len(board.completed)}</span></h2></div>'
-        + ("".join(_completed_row(case) for case in board.completed)
-           or '<div class="empty-card"><span>Nothing closed in the last 24 hours.</span></div>')
-        + "</section>"
-    )
-    learned = (
-        '<section class="today-section"><div class="section-head-row"><h2>What the agent adapted</h2></div>'
-        + ("".join(_learned_card(item) for item in board.learned)
-           or '<div class="empty-card"><span>No adaptations yet. After four late check-in replies '
-              "the agent may move that athlete's check-in later, within fixed limits.</span></div>")
-        + "</section>"
-    )
-    timeline = (
-        '<section class="today-section"><div class="section-head-row"><h2>Agent timeline</h2>'
-        '<form method="post" action="/coach/agent/run">'
-        f'<input type="hidden" name="return_to" value="{escape(return_to)}">'
-        '<button class="btn btn-ghost btn-sm" type="submit">Run agent now (real time)</button></form></div>'
-        + (f'<div class="list-card">{timeline_items(board.timeline, with_names=True)}</div>'
-           if board.timeline else '<div class="empty-card"><span>No agent activity yet.</span></div>')
-        + "</section>"
-    )
-    blocked = (
-        f'<div class="msg err" role="alert"><b>Agent blocked.</b> {escape(blocker)}</div>'
-        if blocker else ""
-    )
-    return (
-        f"{blocked}{strip}{coach_notice}{intro}{needs}{waiting}{done}{timeline}{learned}"
-        f"{demo_day_panel(board)}"
     )
 
 
@@ -331,23 +243,37 @@ def render_case_body(case, events, *, athlete_name: str, message_banner: str) ->
 def athlete_agent_panel(
     athlete_id: str, state: dict, *, default_weekday: int | None = None, autopilot_decided: bool = True
 ) -> str:
-    """The coach-approved weekly plan (current plan, then the add form) and the autopilot choice."""
+    """The weekly plan, read-only until the coach chooses Edit plan, and the autopilot choice."""
     quoted = escape(athlete_id)
     settings = state["settings"]
     autopilot = bool(settings["autopilot"])
-    items = "".join(
-        "<li>"
-        f"<span class='plan-day'>{WEEKDAYS[int(row['weekday'])]}</span>"
-        f"<span class='plan-lift'>{escape(str(row['lift']).title())}</span>"
-        f"<span class='plan-dose'>{int(row['sets'])}×{int(row['reps'])} · RPE {float(row['rpe']):g}</span>"
+    plan_rows = state["plan"]
+
+    def day(row) -> str:
+        return WEEKDAYS[int(row["weekday"])]
+
+    def lift(row) -> str:
+        return escape(str(row["lift"]).title())
+
+    def dose(row) -> str:
+        return f"{int(row['sets'])}×{int(row['reps'])} · RPE {float(row['rpe']):g}"
+
+    readonly = "".join(
+        f"<li><span class='plan-day'>{day(row)}</span><span class='plan-lift'>{lift(row)}</span>"
+        f"<span class='plan-dose'>{dose(row)}</span></li>"
+        for row in plan_rows
+    )
+    editable = "".join(
+        f"<li><span class='plan-day'>{day(row)}</span><span class='plan-lift'>{lift(row)}</span>"
+        f"<span class='plan-dose'>{dose(row)}</span>"
         f"<form method='post' action='/coach/athlete/{quoted}/plan/retire'>"
         f"<input type='hidden' name='session_id' value='{int(row['id'])}'>"
-        f"<button class='btn btn-ghost btn-sm' type='submit' aria-label='Remove {escape(str(row['lift']).title())} "
-        f"on {WEEKDAYS[int(row['weekday'])]}'>Remove</button></form></li>"
-        for row in state["plan"]
+        f"<button class='btn btn-ghost btn-sm' type='submit' aria-label='Remove {lift(row)} on {day(row)}'>"
+        "Remove</button></form></li>"
+        for row in plan_rows
     )
     current = (
-        f"<ul class='plan-list'>{items}</ul>" if items else
+        f"<ul class='plan-list'>{readonly}</ul>" if plan_rows else
         "<p class='plan-empty'>No approved plan yet, so the agent has no training days to run.</p>"
     )
     weekday_options = "".join(
@@ -373,6 +299,12 @@ def athlete_agent_panel(
         "<div class='plan-form-foot'><p>Only sessions you add here can ever be delivered.</p>"
         "<button class='btn btn-primary' type='submit'>Add to weekly plan</button></div></form>"
     )
+    editor = (
+        f"<details class='plan-editor'{'' if plan_rows else ' open'}>"
+        "<summary class='btn btn-ghost btn-sm'>Edit plan</summary><div class='plan-editor-body'>"
+        + (f"<ul class='plan-list plan-list-edit'>{editable}</ul>" if plan_rows else "")
+        + f"{add_form}</div></details>"
+    )
 
     def autopilot_form(value: str, label: str, primary: bool) -> str:
         return (
@@ -383,24 +315,22 @@ def athlete_agent_panel(
 
     if not autopilot_decided:
         badge = "<span class='status-badge'>Not decided</span>"
-        summary = ("<b>Autopilot not decided.</b> Until you choose, every session waits for your approval "
-                   "before it is sent.")
+        summary = "<b>Autopilot not decided.</b> Every session waits for your approval."
         controls = autopilot_form("on", "Turn autopilot on", True) + autopilot_form("off", "Keep autopilot off", False)
     elif autopilot:
-        badge = ("<span class='status-badge ready'>On</span>" if state["plan"]
+        badge = ("<span class='status-badge ready'>On</span>" if plan_rows
                  else "<span class='status-badge'>On, idle</span>")
-        summary = ("<b>Autopilot on.</b> Routine days are delivered without you; the agent can only hold or "
-                   "reduce an approved session.")
+        summary = "<b>Autopilot on.</b> Routine days go out without you."
         controls = autopilot_form("off", "Turn autopilot off", False)
     else:
         badge = "<span class='status-badge off'>Off</span>"
-        summary = "<b>Autopilot off.</b> Every session waits for your approval before it is sent."
+        summary = "<b>Autopilot off.</b> Every session waits for your approval."
         controls = autopilot_form("on", "Turn autopilot on", False)
     adaptation = state["adaptation"]
     checkin_note = (
-        f"Check-in adapted to {escape(adaptation['new_value'])} (was {escape(adaptation['old_value'])}). "
+        f"Check-in moved to {escape(adaptation['new_value'])} (was {escape(adaptation['old_value'])}). "
         f"{escape(adaptation['explanation'])}"
-        if adaptation is not None else "Check-in uses the athlete's configured time."
+        if adaptation is not None else "Check-in at the athlete's usual time."
     )
     cases = "".join(
         f"<li><a href='/coach/case/{int(case['id'])}'>{escape(case['local_date'])}</a> · "
@@ -410,15 +340,15 @@ def athlete_agent_panel(
     return (
         "<div class='agent-panels'>"
         "<section class='panel agent-panel' id='agent-plan'>"
-        "<div class='panel-head'><h2>Weekly plan</h2></div>"
-        "<p class='section-note'>The agent only delivers sessions you have approved here. It never writes "
-        "training of its own; on a bad day it can only hold or reduce one.</p>"
-        f"<div class='plan-layout'><div class='plan-current'><h3>Current plan</h3>{current}</div>{add_form}</div>"
-        "</section>"
+        "<div class='panel-head'><h2>Weekly plan</h2>"
+        "<details class='why'><summary>Why?</summary><p>Only sessions you approve here are ever sent. "
+        "On a bad day the agent can hold or reduce one; it never adds training.</p></details></div>"
+        f"{current}{editor}</section>"
         "<section class='panel agent-panel' id='autopilot'>"
         f"<div class='panel-head'><h2>Autopilot</h2>{badge}</div>"
         f"<p class='section-note'>{summary}</p><div class='status-actions'>{controls}</div>"
+        "<details class='recent-days'><summary>Recent training days</summary>"
         f"<p class='case-meta autopilot-checkin'>{checkin_note}</p>"
-        f"<h3>Recent training days</h3><ul class='case-evidence'>{cases}</ul></section>"
+        f"<ul class='case-evidence'>{cases}</ul></details></section>"
         "</div>"
     )

@@ -1873,6 +1873,32 @@ def cancel_draft(
     return cur.rowcount == 1
 
 
+def recent_failed_deliveries(conn: sqlite3.Connection, *, since: str, limit: int = 20) -> list[dict]:
+    """Outbound messages that did not reach their athlete since `since`, newest first. Read-only."""
+    limit = max(1, min(int(limit), 100))
+    items = [
+        {"athlete_id": str(row["athlete_id"]), "message_kind": str(row["message_kind"]),
+         "body": str(row["body"]), "occurred_at": str(row["resolved_at"]), "error": row["last_error"]}
+        for row in conn.execute(
+            "SELECT athlete_id, message_kind, body, resolved_at, last_error FROM outbound_drafts "
+            "WHERE resolution = 'failed' AND resolved_at >= ? ORDER BY resolved_at DESC LIMIT ?",
+            (since, limit),
+        )
+    ]
+    items += [
+        {"athlete_id": str(row["athlete_id"]), "message_kind": str(row["message_kind"] or ""),
+         "body": str(row["body"]), "occurred_at": str(row["occurred_at"]), "error": row["error_code"]}
+        for row in conn.execute(
+            "SELECT athlete_id, message_kind, body, occurred_at, error_code FROM whatsapp_messages "
+            "WHERE direction = 'outbound' AND status = 'failed' AND occurred_at >= ? "
+            "ORDER BY occurred_at DESC LIMIT ?",
+            (since, limit),
+        )
+    ]
+    items.sort(key=lambda item: item["occurred_at"], reverse=True)
+    return items[:limit]
+
+
 def athlete_drafts(conn: sqlite3.Connection, athlete_id: str, *, limit: int = 20) -> list[sqlite3.Row]:
     """This athlete's outbound messages, newest first, whatever their state."""
     return list(conn.execute(

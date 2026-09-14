@@ -43,6 +43,7 @@ _HEAD_ASSETS = (
     "<link href='https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap' rel='stylesheet'>"
     "<link rel='stylesheet' href='/static/tokens.css'>"
     "<link rel='stylesheet' href='/static/app.css'>"
+    "<link rel='stylesheet' href='/static/console.css'>"
 )
 
 
@@ -143,10 +144,8 @@ def coach_frame(
         "<main class='workspace'><div class='workspace-head'>"
         f"{back_link}<div class='workspace-eyebrow'>{escape(_long_date(today))}</div>"
         f"<h1 {h1_style}>{escape(title)}</h1>"
-        f"<p class='workspace-sub'>{escape(subtitle)}</p></div>"
-        f"{body}<footer>Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
-        "record and fixed, tested coaching rules. The coach decides anything outside the agent's limits."
-        "</footer></main></div></body></html>"
+        + (f"<p class='workspace-sub'>{escape(subtitle)}</p>" if subtitle else "")
+        + f"</div>{body}<footer>Power AI &middot; Coach Desk</footer></main></div></body></html>"
     )
 
 def initials(name: str) -> str:

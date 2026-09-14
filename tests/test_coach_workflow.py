@@ -68,7 +68,7 @@ def test_two_notes_on_the_same_day_are_both_kept_and_sent(client):
 
 def test_the_injury_plan_shows_its_message_and_marks_the_choice(client):
     today_page = client.get("/coach").text
-    assert "Choose injury plan" in today_page
+    assert "Choose an injury plan" in today_page
 
     page = client.get(f"/coach/athlete/{ATHLETE}").text
     assert 'id="injury-plan"' in page
@@ -91,7 +91,7 @@ def test_the_injury_plan_shows_its_message_and_marks_the_choice(client):
     assert response.status_code == 200
     assert "is now the plan" in response.text
     assert "Current plan" in response.text
-    assert "Choose injury plan" not in client.get("/coach").text
+    assert "Choose an injury plan" not in client.get("/coach").text
 
     scheduled = client.get("/coach/whatsapp?tab=scheduled").text
     assert "Injury plan" in scheduled
@@ -169,6 +169,6 @@ def test_today_puts_drafted_messages_in_the_approval_queue(client):
     finally:
         conn.close()
     page = client.get("/coach").text
-    assert "Approval queue" in page
+    assert 'data-kind="approval"' in page and "Needs you" in page
     assert "Knee first: how did it feel?" in page
     assert 'name="return_to" value="/coach"' in page

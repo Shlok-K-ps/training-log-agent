@@ -69,11 +69,12 @@ def test_coach_console_opens_without_signing_in(tmp_path, monkeypatch):
 
         client.post("/coach/demo/seed")
         resp = client.get("/coach")
-        assert "Roster" in resp.text
-        assert "Daily agent loop" in resp.text
-        assert "Approval queue" in resp.text
+        assert "Open roster" in resp.text
+        assert "Decisions needed" in resp.text
+        assert "Needs you" in resp.text
         assert "Remove demo athletes" in resp.text
-        assert "Open tutorial" in resp.text
+        assert "Daily agent loop" not in resp.text and "Open tutorial" not in resp.text, (
+            "how the agent works belongs on the public site, not the console")
         assert "Set up your agent" in resp.text, "demo athletes do not count as real setup"
 
 
@@ -81,7 +82,7 @@ def test_athlete_directory_is_a_separate_workspace():
     with TestClient(app) as client:
         resp = client.get("/coach/athletes")
         assert resp.status_code == 200
-        assert "Current status, recent progress and readiness" in resp.text
+        assert 'class="roster-table"' in resp.text or "No athletes yet." in resp.text
         assert 'id="athlete-search"' in resp.text
         assert 'id="athlete-filter"' in resp.text
         assert "/coach/whatsapp" in resp.text

@@ -128,13 +128,13 @@ def athlete_status(
     setup_blockers = [b for b in status.blockers if b != WAITING_FOR_DECISION]
     if setup_blockers:
         status.next_action = (
-            "Nothing yet. The agent starts once the setup steps above are finished."
+            "Nothing until setup is finished."
             if setup_blockers == status.setup_gaps else
-            "Nothing until the blocking items above are fixed."
+            "Nothing until the blockers are fixed."
         )
     elif open_case is not None:
         if open_case["state"] == "needs_coach":
-            status.next_action = "Waiting for your decision on today's training day."
+            status.next_action = "Sends today's session once you decide."
         elif open_case["next_action_at"]:
             due = datetime.fromisoformat(str(open_case["next_action_at"]))
             status.next_action = (
