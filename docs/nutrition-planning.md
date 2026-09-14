@@ -1,5 +1,8 @@
 # Food-access nutrition and supplement scheduling
 
+> **Status:** design notes from an earlier WhatsApp-based version. Nutrition setup
+> is not part of the deployed Telegram training-day agent.
+
 The WhatsApp parser can capture an athlete's declared diet style, allergies,
 cooking access, foods they can regularly obtain, meals per day, and existing
 protein or calorie targets. The deterministic planner then chooses only from

@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY chat.py ./
 
-# SQLite file lives on a mounted volume in production so it survives redeploys.
+# Local SQLite fallback only. Any deployment must set DATABASE_URL (Postgres) so
+# the agent's memory survives restarts and redeploys.
 RUN mkdir -p /srv/data
 ENV DATABASE_PATH=/srv/data/training_log.db
 

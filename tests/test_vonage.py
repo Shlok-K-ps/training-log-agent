@@ -92,7 +92,8 @@ def test_signed_inbound_message_runs_the_real_coaching_pipeline(tmp_path, monkey
             },
         )
         assert response.status_code == 200
-        assert c.get("/health").json()["whatsapp_transport"] == "Vonage Sandbox"
+        # The historical adapter is reported only when someone has actually configured it.
+        assert c.get("/health").json()["legacy_whatsapp_adapter"] == "Vonage Sandbox"
 
     conn = db.connect(settings.database_path)
     try:

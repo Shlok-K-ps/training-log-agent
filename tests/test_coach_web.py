@@ -22,15 +22,15 @@ def test_landing_page_renders_complete_product_story():
         html = resp.text
         assert "Training Log Agent" in html
         assert "The coach reads exceptions" in html
-        # WhatsApp conversation
+        # Illustrative message example
         assert "squat 3x5 at 140 today" in html
         assert "Squat — Stalled" in html
-        # Core 3-layer architecture
-        assert "Gemini Flash" in html
-        assert "Single SQLite Timeline" in html
-        assert "Pure Python Rules" in html
-        # Transparent student engineering note
-        assert "student-built engineering project" in html
+        # What runs the live agent
+        assert "Gemini 2.5 Flash" in html
+        assert "Neon Postgres" in html
+        assert "Tested safety rules" in html
+        # Honest note
+        assert "Honest note" in html
         # Authority boundaries
         assert "Close an injury flag" in html
         assert "Coach Only" in html

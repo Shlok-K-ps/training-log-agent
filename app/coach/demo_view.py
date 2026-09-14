@@ -18,9 +18,10 @@ KIND_CLASS = {
 
 LEGEND = (
     ("k-interpret", "Interpretation",
-     "A language model turns free text into validated data. In production this is Gemini; "
-     "this public demo uses the same schema with a built-in offline parser."),
-    ("k-rule", "Fixed rule", "Deterministic code scores readiness and applies safety rules. No model involved."),
+     "Free text becomes validated data. The live agent uses Gemini 2.5 Flash; this demo uses a "
+     "built-in offline parser with the same data format, so nothing leaves the page."),
+    ("k-rule", "Fixed rule",
+     "Tested, repeatable rules score readiness and apply safety limits. Gemini is not involved."),
     ("k-action", "Agent action", "The agent sends a message or follows up on its own."),
     ("k-escalation", "Needs the coach", "Anything outside its authority is handed to the coach with evidence."),
     ("k-coach", "Coach decision", "The coach decides with one tap. The agent carries it out."),
@@ -197,7 +198,7 @@ def render_public_demo(trace: dict) -> str:
 <main class="demo-wrap">
 <section class="demo-intro">
   <h1>Watch the agent run a training day</h1>
-  <p>Two fictional athletes, one Monday, about a minute. The agent checks in, reads the replies,
+  <p>Two fictional athletes, one Monday, about 90 seconds. The agent checks in, reads the replies,
   decides with fixed rules, acts on its own, follows up when someone goes quiet, hands an injury
   to the coach and closes both days only when it knows what happened.</p>
   <div class="demo-controls">
@@ -231,10 +232,10 @@ def render_public_demo(trace: dict) -> str:
   <h2>Simulation or real agent?</h2>
   <table><thead><tr><th></th><th>This public demo</th><th>The real agent</th></tr></thead><tbody>
   <tr><td>Engine, rules, templates</td><td>The real ones</td><td>The same</td></tr>
-  <tr><td>Athletes</td><td>Fictional, in a throwaway database</td><td>The coach's athletes, in durable Postgres</td></tr>
+  <tr><td>Athletes</td><td>Fictional, in a temporary in-memory SQLite database</td><td>The coach's invited athletes, in Neon Postgres</td></tr>
   <tr><td>Messages</td><td>Shown on this page only</td><td>Sent on Telegram</td></tr>
-  <tr><td>Clock</td><td>A scripted Monday, compressed to a minute</td><td>Real time, woken every ten minutes</td></tr>
-  <tr><td>Interpretation</td><td>Built-in offline parser, same schema</td><td>Gemini, restricted to six validated actions</td></tr>
+  <tr><td>Clock</td><td>A scripted Monday, compressed to about 90 seconds</td><td>Real time, woken by a recurring GitHub Actions tick</td></tr>
+  <tr><td>Interpretation</td><td>Built-in offline parser, same data format</td><td>Gemini 2.5 Flash, restricted to six validated actions</td></tr>
   <tr><td>Coach decision</td><td>Scripted tap</td><td>The coach's own Telegram buttons</td></tr>
   </tbody></table>
 </section>
@@ -247,10 +248,12 @@ def render_public_demo(trace: dict) -> str:
   const steps = trace.steps;
   const names = Object.fromEntries(trace.athletes.map(a => [a.key, a.first]));
   const kindClass = {json.dumps(KIND_CLASS)};
-  const base = {{clock: 700, athlete: 1700, interpret: 1600, rule: 1600, action: 1400, wait: 700,
-    observe: 700, escalation: 2000, coach: 2800, outcome: 1600, adapt: 1500}};
+  // Weight the moments people need to read most heavily, then normalize the
+  // whole walkthrough to a comfortable 90 seconds at 1x speed.
+  const base = {{clock: 700, athlete: 1800, interpret: 2200, rule: 2200, action: 1800, wait: 800,
+    observe: 800, escalation: 2800, coach: 3600, outcome: 2200, adapt: 2200}};
   const total = steps.reduce((sum, step) => sum + (base[step.kind] || 1000), 0);
-  const scale = 60000 / total;
+  const scale = 90000 / total;
   const params = new URLSearchParams(location.search);
   let speed = Math.max(1, Number(params.get('speed')) || 1);
   let index = 0, timer = null, playing = false;

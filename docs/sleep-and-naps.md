@@ -1,5 +1,9 @@
 # Proactive sleep check-ins and nap scheduling
 
+> **Status:** describes the legacy morning scheduler from an earlier WhatsApp-based
+> version. The deployed product sends check-ins through the training-day agent on
+> Telegram instead, and the legacy scheduler stays off.
+
 Athletes can configure their IANA timezone, morning check-in time, usual
 training time, bedtime, and acceptable nap window through WhatsApp. When
 `ENABLE_MORNING_SCHEDULER=true`, the service checks every minute and sends one

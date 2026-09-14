@@ -3,20 +3,19 @@
 GitHub: <https://github.com/Shlok-K-ps/training-log-agent>  
 Live: <https://training-log-agent.onrender.com/>
 
-**A deterministic powerlifting coaching agent for one coach and twenty athletes.**
+**A training-day agent for one powerlifting coach and their athletes.**
 
-A powerlifting coach's real job is not writing programs. It is reading twenty
-WhatsApp messages a day, remembering who is hurt, noticing who has gone quiet,
-and catching the lifter who has been stuck at the same weight for a month. That
-work scales linearly with the roster, and it is the first thing to slip when the
-coach gets busy — which is exactly when an athlete most needs someone to notice.
+A powerlifting coach's real job is not writing programs. It is keeping up with
+twenty athletes' messages a day, remembering who is hurt, noticing who has gone
+quiet, and catching the lifter who has been stuck at the same weight for a month.
+That work scales linearly with the roster, and it is the first thing to slip when
+the coach gets busy — which is exactly when an athlete most needs someone to notice.
 
-This agent absorbs that work. Athletes text their sessions in plain English from
-the app they already have open. The agent parses them into structured data,
-tracks training, sleep, readiness, soreness, stress, bodyweight and nutrition,
-and prepares a deterministic verdict — progressing, stalled, deload — computed
-the same way every time. The coach approves the resulting guidance from one
-daily WhatsApp desk instead of reconstructing context across twenty chats.
+Power AI takes on that routine work. Athletes message the coach's Telegram bot in
+plain English. Gemini 2.5 Flash turns each message into validated structured data,
+and tested Python rules make the coaching and safety decisions the same way every
+time. The agent sends check-ins, follow-ups and permitted sessions on its own, and
+brings injuries and other exceptions to the coach.
 
 ## What the coach stops doing by hand
 
@@ -26,8 +25,8 @@ daily WhatsApp desk instead of reconstructing context across twenty chats.
 | Remembering who is hurt | An injury flag suppresses every load suggestion until a named person clears it |
 | Spotting a stall buried in weeks of logs | Stall episodes are recomputed on every message |
 | Chasing athletes for sleep and readiness | The agent sends the morning check-in itself, in each athlete's timezone |
-| Finding a slot around someone's timetable | The agent reads their calendar and real travel time and proposes options |
-| Booking the session | `confirm CODE` writes it to an app-owned calendar, idempotently |
+| Finding a slot around someone's timetable | Optional calendar planning reads their calendar and travel time and proposes options (built, but not enabled on the hosted deployment) |
+| Booking the session | Optional: `confirm CODE` writes it to an app-owned calendar (built, but not enabled on the hosted deployment) |
 
 Nothing here replaces the coach's judgement. It removes the clerical work that
 stands between the coach and the two or three athletes who actually need
@@ -37,14 +36,14 @@ attention today.
 > consenting test users. It is not a production medical or health-data system and
 > gives no medical advice.
 
-## See it in 60 seconds
+## See it in 90 seconds
 
 Open the live site and press **Watch the agent work**, or go straight to `/demo`.
 No login, no setup, nothing sent.
 
 ![A fictional training day in progress: athlete chats on the left, the coach console and the agent's reasoning on the right](docs/screenshots/02-demo-in-progress.png)
 
-Two fictional athletes, one Monday, compressed to about a minute:
+Two fictional athletes, one Monday, compressed to about 90 seconds:
 
 1. **07:30** The agent checks in with Priya and Arjun on its own.
 2. **07:52** Priya replies. Her message becomes validated data, fixed rules score her
@@ -65,15 +64,15 @@ Every step is colour-coded: **interpretation** (the language model), **fixed rul
 message templates on fictional athletes inside a throwaway in-memory database. It
 never opens the production database and never contacts Telegram. The coach's own
 athletes get the same behaviour for real on Telegram, in real time, with durable
-Postgres storage behind a console only the coach can open.
+Neon Postgres storage behind a console only the coach can open.
 
 | | Public simulation | Real Telegram agent |
 |---|---|---|
 | Athletes | Fictional | The coach's athletes |
 | Messages | Shown on the page | Sent on Telegram |
-| Clock | One scripted day in a minute | Real time |
-| Interpretation | Built-in offline parser, same schema | Gemini, limited to six validated actions |
-| Storage | Throwaway, in memory | Durable Postgres |
+| Clock | One scripted day in about 90 seconds | Real time, woken by a GitHub Actions tick |
+| Interpretation | Built-in offline parser, same data format | Gemini 2.5 Flash, limited to six validated actions |
+| Storage | Temporary in-memory SQLite (demo only) | Neon Postgres |
 | Access | Public | Coach only, via a signed Telegram link |
 
 ### Setting up a real athlete
@@ -131,6 +130,33 @@ instance. An athlete invited by the coach uses the real Telegram agent through a
 secure, single-use pairing link. Public coach registration and multi-tenancy are
 deliberately out of scope for this project.
 
+## How it is built
+
+| Job | What does it |
+|---|---|
+| Messaging | **Telegram** receives athlete updates and sends the agent's messages. |
+| Understanding messages | **Gemini 2.5 Flash** interprets natural-language messages into validated structured data. |
+| Coaching and safety decisions | **Deterministic Python rules**, covered by automated tests. |
+| Memory | **Neon Postgres** is the deployed app's durable memory. |
+| Local and test storage | **SQLite**, used only for local development, automated tests and the public demo's temporary in-memory database. |
+| Web application | **FastAPI** and **Uvicorn**, running on **Render**. |
+| The agent's clock | **GitHub Actions** calls a signed tick endpoint every ten minutes to wake the agent loop. |
+
+**What "active" means.** The agent starts the work itself: it sends scheduled
+check-ins, reminders, follow-ups and escalations without waiting for the coach to
+prompt it.
+
+**What "deterministic" means.** Important coaching and safety decisions follow
+tested, repeatable rules. Given the same facts they give the same result, and they
+are never invented by the language model.
+
+**What Gemini does not do.** Gemini interprets language. It does not independently
+clear injuries, invent training loads or change safety policies.
+
+The repository still contains early Twilio and Vonage WhatsApp adapters. They were
+experiments that were never used successfully and are not part of the deployed
+product.
+
 ## The training-day agent
 
 The core of the system is an agent that owns one athlete's scheduled training day
@@ -165,7 +191,7 @@ link the bot sends to the coach's linked Telegram account; there is no password.
 |---|---|---|---|
 | Report a session, pain, sleep, food | ✅ | — | — |
 | Parse a message into structured data | — | ✅ | — |
-| Judge progressing / stalled / deload | — | ✅ deterministic | — |
+| Judge progressing / stalled / deload | — | ✅ fixed, tested rules | — |
 | Open an injury flag | ✅ | ✅ | ✅ |
 | **Close an injury flag** | ❌ | ❌ | ✅ only |
 | Approve a supplement regimen | ❌ | ❌ | ✅ only |
@@ -176,7 +202,8 @@ The two ❌ rows are enforced in code, not in a prompt. See
 
 ---
 
-Athletes receive an immediate receipt; coaching guidance waits for the coach:
+Outside a training day, an athlete's message gets an immediate receipt and any
+coaching reply waits for the coach:
 
 ```
 athlete                                                        agent
@@ -186,38 +213,34 @@ athlete                                                        agent
    │                                                    Got it — I’ve logged your update and
    │                                                    sent it to your coach for review.
    ◀──────────────────────────────────────────────────────────────┤
-                          agent draft ──▶ coach approves ──▶ WhatsApp
+                          agent draft ──▶ coach approves ──▶ Telegram
 ```
 
 ---
 
 ## The architecture
 
-Three layers, and the split is the whole point.
+The language model reads; tested rules decide. That split is the whole point.
 
 ```
-   Telegram / WhatsApp ──▶ signed webhook
-                                   │
-   ┌───────────────────────────────┼───────────────────────────────┐
-   │                               ▼                               │
-   │  LAYER 1   app/agent/      Gemini Flash, function calling.    │
-   │  parse     ───────────     Messy English ──▶ arguments        │
-   │                            matching a schema. Validated and   │
-   │                            range-checked before storage.      │
-   │                                   │                           │
-   │                                   ▼                           │
-   │  LAYER 2   app/storage/    SQLite. One coaching timeline,    │
-   │  store     ────────────    plus encrypted integration state  │
-   │                            and approved slot proposals.      │
-   │                                   │                           │
-   │                                   ▼                           │
-   │  LAYER 3   app/decision/   Plain Python. Compares against     │
-   │  decide    ─────────────   this athlete's history and returns │
-   │                            the verdict. No model. No API call.│
-   │                            No randomness.                     │
-   └───────────────────────────────┼───────────────────────────────┘
-                                   ▼
-                        deterministic draft ──▶ coach ──▶ WhatsApp
+   Telegram ──▶ signed webhook   (FastAPI, served by Uvicorn on Render)
+        │
+        ▼
+   UNDERSTAND   app/agent/       Gemini 2.5 Flash turns messy English into
+                                 validated, range-checked structured data
+        │
+        ▼
+   DECIDE       app/casework/    the training-day case engine and fixed, tested
+                app/decision/    rules: no model, same facts give the same result
+        │
+        ▼
+   REMEMBER     app/storage/     Neon Postgres when deployed; SQLite for local
+                                 development, the tests and the public demo
+        │
+        ▼
+   ACT          check-ins, follow-ups, permitted sessions, escalations ──▶ Telegram
+
+   GitHub Actions ──▶ signed /internal/agent/tick every ten minutes wakes the loop
 ```
 
 **Why the split:** messy input needs a model, but the output is advice real
@@ -226,7 +249,8 @@ model is the right tool for reading "ground out the last two at one forty" and
 the wrong tool for deciding whether someone should strip 15% off their squat.
 
 The model never sees the reply text. It cannot write one. Its entire vocabulary
-is twenty function schemas in [`app/agent/schemas.py`](app/agent/schemas.py), and
+is the function schemas in [`app/agent/schemas.py`](app/agent/schemas.py) (21 in
+total; on Telegram it is limited to the six actions of the training-day loop), and
 anything it returns outside them is thrown away before it reaches the database.
 
 The same boundary now covers coaching. [`app/programming/`](app/programming/)
@@ -332,17 +356,17 @@ empirical findings.
 
 ## Design decisions, and what each one costs
 
-**Gemini during development only.** Flash is used for extraction, not coaching.
-Athlete messages can contain health, nutrition and training data, so production
-must use a data-processing arrangement suitable for that data. Do not launch a
-team on a consumer/free-tier model account. Exact `my home/gym/office is ...`
-commands, OAuth commands and confirmation codes are parsed locally and never
-sent to the model.
+**Gemini 2.5 Flash for interpretation only.** The deployed agent uses Gemini 2.5
+Flash to extract facts, not to coach. Athlete messages can contain health,
+nutrition and training data, so a real team deployment must use a data-processing
+arrangement suitable for that data; this project runs as a demonstration with
+consenting test users. Exact `my home/gym/office is ...` commands, OAuth commands
+and confirmation codes are parsed locally and never sent to the model.
 
-**SQLite.** Small, structured, single-writer data. One file you can copy, diff
-and open in any client. *Trade-off:* Postgres solves concurrency problems this
-project does not have, at the cost of a server to run and a connection string to
-keep secret. Twenty athletes is not a scale problem.
+**Neon Postgres when deployed, SQLite locally.** The deployed agent keeps its
+memory in Neon Postgres so cases survive restarts and redeploys. SQLite is used
+only for local development, the automated tests and the public demo's temporary
+in-memory database. The same storage code runs on both.
 
 **One coaching timeline.** Every `entries` row is one observation about one
 athlete at one moment. Sets carry a lift, status updates don't. Current phase and
@@ -355,8 +379,9 @@ suggestion and says see a physio. The agent tracks and withholds. It never
 advises on an injury, because the failure mode of getting that wrong is somebody
 getting hurt.
 
-**Phone number as identity.** No sign-up, no passwords. An athlete who changes
-handset keeps their history as long as they keep their number.
+**No passwords.** Coach-added athletes get a generated internal ID and connect
+through a single-use Telegram pairing link. The coach opens the console from a
+signed link the bot sends to the coach's own Telegram.
 
 **`.env` + `.gitignore`.** The key never reaches GitHub.
 
@@ -427,9 +452,8 @@ logs the set *and* raises the injury flag.
 
 ### 4. Connect permanent real messaging (Telegram)
 
-Telegram is the always-available portfolio channel. It has no provider trial,
-uses Telegram's official Bot API, and runs through the same parser, deterministic
-rules, coach approval queue and message ledger as WhatsApp.
+Telegram is the messaging channel the deployed agent uses. It needs no provider
+trial and uses Telegram's official Bot API.
 
 1. Open <https://t.me/BotFather>, send `/newbot`, and choose a name and username.
 2. In Render, add the token as `TELEGRAM_BOT_TOKEN` and the username without `@`
@@ -438,83 +462,25 @@ rules, coach approval queue and message ledger as WhatsApp.
 3. Redeploy. The application registers
    `https://training-log-agent.onrender.com/webhook/telegram` with Telegram on
    startup. Confirm `/health` shows `"telegram_integration": true`.
-4. Open an athlete in **Athletes / Roster** and select **Open secure pairing
-   link**. The athlete taps Start once. The signed link is single-use, cannot be
-   edited to claim another athlete, and each private chat can pair with only one athlete.
-5. The athlete sends a training, recovery or nutrition update. They receive a
-   neutral receipt immediately; the actual coaching recommendation waits in
-   **Messaging Desk → Needs approval**. Once approved, the next worker tick sends
-   the coach's exact wording through Telegram.
+4. In the console, choose **Add an athlete**, then **Copy Telegram invite** and send
+   it to the athlete. The athlete taps Start once. The signed link is single-use,
+   cannot be edited to claim another athlete, and each private chat can pair with
+   only one athlete.
+5. During a planned training day the agent answers within its limits and brings
+   exceptions to the coach. A message outside a training day gets a neutral receipt,
+   and any coaching reply waits in **Messaging Desk → Needs approval**.
 
 The coach can disconnect a Telegram chat from the athlete page before passing a
 demo profile to another reviewer. Unknown chats receive no athlete information
 and are instructed to request a pairing link.
 
-#### Optional real WhatsApp demo (Vonage Sandbox)
+#### Historical WhatsApp adapters (not used)
 
-Vonage is integrated directly — there is no provider picker in the product.
-When its four environment values are present, the Messaging Desk automatically
-changes from **Demo simulator** to **Real WhatsApp connected**. The simulator
-remains available so the portfolio can always be reviewed without an account.
-
-> **Free demo path, not production:** Vonage documents a 100-message/month fair
-> usage allowance for its Messages API Sandbox. An athlete must message the
-> sandbox first; free-form replies work during WhatsApp's 24-hour customer-care
-> window. The sandbox does not support proactive WhatsApp templates, so it is
-> ideal for a live portfolio demonstration, not reliable morning broadcasts.
-
-1. Create a Vonage account and open **Messaging → Messages Sandbox** at
-   <https://dashboard.nexmo.com/messages/sandbox>. Add WhatsApp and join the
-   displayed sandbox from the phone that will act as the athlete.
-2. In Render, add `VONAGE_API_KEY`, `VONAGE_API_SECRET`, and the displayed
-   WhatsApp number as `VONAGE_SANDBOX_NUMBER` (digits or E.164 both work).
-3. Read Render's generated `VONAGE_WEBHOOK_SECRET`, then set the Vonage sandbox
-   webhooks to:
-
-   - Inbound: `https://training-log-agent.onrender.com/webhook/vonage/inbound?token=<VONAGE_WEBHOOK_SECRET>`
-   - Status: `https://training-log-agent.onrender.com/webhook/vonage/status?token=<VONAGE_WEBHOOK_SECRET>`
-
-4. Redeploy and open
-   <https://training-log-agent.onrender.com/health>. It should show
-   `"whatsapp_integration": true` and `"whatsapp_transport": "Vonage Sandbox"`.
-5. Send `squat 3x5 at 140kg rpe 8` from the joined phone. The phone receives a
-   neutral acknowledgement immediately; the coaching recommendation appears in
-   **Messaging Desk → Needs approval**. Approve it and the audited delivery status
-   appears in the Sent tab.
-
-The API credentials remain only in Render. The public inbound and status URLs
-also require the independent webhook secret, so a reviewer cannot impersonate
-an athlete by posting arbitrary JSON.
-
-#### Legacy alternative: Twilio sandbox
-
-> **Resume/demo path, not permanently free production:** Twilio documents the
-> WhatsApp Sandbox as testing-only. A current free trial lasts 30 days and
-> includes 100 WhatsApp messages; trial recipients and outbound templates are
-> restricted. After that, Twilio charges per message. Keep the built-in web
-> simulator as the zero-cost permanent demo.
-
-1. Sign up at <https://console.twilio.com> (free trial, no WhatsApp Business
-   verification needed for the sandbox).
-2. **Messaging → Try it out → Send a WhatsApp message.** Join the sandbox by
-   texting the given `join <two-words>` code to the sandbox number.
-3. Expose the app. Locally:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ngrok http 8000
-   ```
-4. In the sandbox settings, set **"When a message comes in"** to
-   `https://<your-host>/webhook/whatsapp`, method `POST`.
-   Outgoing API messages automatically request delivery updates at
-   `https://<your-host>/webhook/whatsapp/status` when `PUBLIC_BASE_URL` is set.
-5. Copy `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, the sandbox sender shown by
-   Twilio as `TWILIO_WHATSAPP_FROM`, and your public URL into `.env` locally or
-   the Render environment settings. Set `PUBLIC_BASE_URL` to exactly the URL
-   you pasted into Twilio — behind a proxy the app sees a different host than
-   the one Twilio signed, and the signature check will fail on a mismatch.
-
-Text the sandbox number. It acknowledges the log immediately; the coaching
-response appears in the coach's Messaging Desk for approval.
+The repository still contains early Twilio and Vonage WhatsApp adapters
+(`/webhook/whatsapp` and `/webhook/vonage/*`). They were experiments that were
+never used successfully, the deployed product does not use them, and they are not
+maintained. Telegram is the only supported channel, so there are no setup steps for
+them here.
 
 ### 5. Deploy
 
@@ -549,7 +515,7 @@ Netlify, Vercel and similar static/serverless hosts cannot run this service:
 it is a long-lived Python process with a background scheduler, not a set of
 files plus short-lived functions. A `Dockerfile` is included for other hosts.
 
-### 6. Connect Google Calendar and travel time
+### 6. Optional: Google Calendar and travel time (not enabled on the hosted deployment)
 
 Enable Google Calendar API and Routes API in a Google Cloud project, create a
 web OAuth client, and register this callback:
@@ -558,7 +524,7 @@ web OAuth client, and register this callback:
 
 Add `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET`,
 `GOOGLE_MAPS_API_KEY`, `OAUTH_STATE_SECRET`, and
-`CALENDAR_TOKEN_ENCRYPTION_KEY` from `.env.example`. Then use WhatsApp:
+`CALENDAR_TOKEN_ENCRYPTION_KEY` from `.env.example`. Then message the bot:
 
 ```text
 connect my calendar
@@ -582,7 +548,7 @@ the log but do not grant scheduling authority.
 ## Tests
 
 ```bash
-pytest -q          # 357 tests, no network
+pytest -q          # no network; the live-Postgres test runs only with TEST_DATABASE_URL
 ```
 
 The decision layer is the part athletes act on, so it is tested exhaustively —
@@ -595,14 +561,14 @@ the suite never makes a network call.
 ## Security
 
 - The API key lives in `.env`, which is gitignored. Nothing secret is committed.
-- The webhook is a public URL that writes to a database. Vonage endpoints
-  require an independent high-entropy webhook secret; the legacy Twilio route
-  verifies Twilio's HMAC signature. Unauthenticated requests get a 403.
+- The webhooks are public URLs that write to a database, so unauthenticated
+  requests get a 403. The historical WhatsApp routes, which the deployed product
+  does not use, keep their own signature checks.
 - Telegram verifies its dedicated Bot API secret header before reading a
   message. Athlete pairing links are HMAC-signed, single-use, private-chat-only
   and cannot be edited to claim another athlete. Bot tokens are never written to logs.
-- Athlete data is keyed by phone number and never crosses between athletes; the
-  isolation is tested.
+- Athlete data is keyed by an internal athlete ID and never crosses between
+  athletes; the isolation is tested.
 - Calendar tokens and saved places are encrypted at rest. Event titles, descriptions, attendees
   and meeting content are not persisted or sent to the model.
 - Saved-place writes fail closed when the encryption key is absent. Canonical
@@ -610,8 +576,9 @@ the suite never makes a network call.
 - Athlete training, recovery and nutrition messages may reach the configured
   parsing provider. A suitable production data-processing agreement is a launch
   requirement, not an optional hardening task.
-- Calendar writes go only to an app-created calendar after explicit WhatsApp
-  confirmation. Athletes can disconnect Calendar and delete saved places by message.
+- Where calendar planning is enabled, calendar writes go only to an app-created
+  calendar after explicit confirmation from the athlete. Athletes can disconnect
+  Calendar and delete saved places by message.
 
 ---
 
@@ -657,7 +624,7 @@ sections:
 - **Athletes** — searchable status/readiness directory. Each athlete opens into
   training history and charts plus recovery, programming, scheduling, nutrition,
   supplements, and an evidence-based message draft.
-- **Messaging Desk** — Telegram and WhatsApp Inbox, Needs approval, Scheduled,
+- **Messaging Desk** — Telegram Inbox, Needs approval, Scheduled,
   and Sent views with the
   athlete conversation, unread feedback, exact drafts and delivery status.
 - **Analytics** — dated goal pacing across the squad: ahead, on track, or
@@ -665,7 +632,7 @@ sections:
 
 Athlete onboarding starts with bodyweight, all three 1RMs, training frequency,
 experience, current injuries, and an optional dated lift goal. A fresh injury
-opens four deterministic training-management paths for the coach to choose
+opens four fixed training-management paths for the coach to choose
 between; none diagnoses or clears the athlete, and any newer injury report makes
 the earlier choice stale.
 
@@ -730,8 +697,9 @@ approved drafts are sent — **and the athlete receives the coach's wording, not
 the agent's**. Drafting runs in each athlete's own local evening, so a squad
 spread across timezones is still reviewed the night before *their* morning.
 
-Unreviewed means unsent. A coach who is asleep, busy or away produces silence,
-not an unsupervised broadcast. This cannot be disabled by deployment configuration.
+For these free-text replies, unreviewed means unsent: a coach who is asleep, busy
+or away produces silence, not an unsupervised reply. The only messages the agent
+sends on its own are the fixed training-day templates described above.
 
 Every approval records who made it, when, and whether the wording was changed.
 Untouched morning prompts whose evidence has not changed can be approved as a
@@ -756,18 +724,19 @@ python scripts/clear_injury.py --list
 
 ## FAQ
 
-**Why SQLite?** Small structured data, zero setup, single file. Postgres buys
-concurrency this project doesn't need and costs a server to run.
+**Why both Neon Postgres and SQLite?** The deployed agent needs memory that
+survives restarts, so it uses Neon Postgres. SQLite needs no setup, so local
+development, the automated tests and the public demo's temporary database use it.
 
 **What's a tool call?** The model returns structured arguments matching a schema
 you defined, instead of prose. `{"lift": "squat", "sets": 3, "reps": 5,
 "weight": 140, "rpe": 9}` can be type-checked, range-checked and rejected before
 it reaches storage. A sentence cannot.
 
-**Why is the deload rule Python and not the model?** Because it must be
-deterministic and provable. Athletes act on it. The same log has to give the same
-answer today that it gave last week, and every line of the reply has to trace to
-a branch in `rules.py` and a row in the database.
+**Why is the deload rule Python and not the model?** Because athletes act on it.
+The same log has to give the same answer today that it gave last week, the answer
+has to be checkable in a test, and every line of the reply has to trace to a branch
+in `rules.py` and a row in the database.
 
 ---
 
@@ -775,13 +744,15 @@ a branch in `rules.py` and a row in the database.
 
 ```
 app/
-  agent/       Layer 1 — schemas, the Gemini call, an offline stub
-  storage/     Layer 2 — SQLite schema, queries, lift-name normalisation
-  coach/       Layer 4 — the roster view, coach auth, one audited write
-  decision/    Layer 3 — verdicts, readiness, prescriptions, reply templates
+  agent/       understand — schemas, the Gemini 2.5 Flash call, an offline stub
+  casework/    the training-day agent: case engine, policy, adaptation, public demo day
+  storage/     remember — schema and queries; pg.py runs them on Neon Postgres,
+               SQLite serves local development and tests
+  coach/       the coach console, public demo page, onboarding
+  decision/    decide — verdicts, readiness, prescriptions, reply templates
                guardian.py — the injury gate; issues the only SafetyClearance
-  programming/ Pure Python — five methods, selector, session structure
-  channels/    Telegram and WhatsApp adapters: identity, auth, delivery status
+  programming/ rule-based — five methods, selector, session structure
+  channels/    Telegram (active); historical WhatsApp adapters (unused)
   integrations/ Google Calendar OAuth/API and Google Routes travel facts
   scheduling/   slot search, sleep/travel gates, and the outbox review gate
   router.py    the seam: parse → store → decide → reply
@@ -792,5 +763,5 @@ docs/          programming, readiness and nutrition evidence/policy boundaries
 scripts/       clear_injury.py — COACH TOOL: list flagged athletes, close a flag
                check_gemini.py — prove Layer 1 against messy input
                bench_providers.py — score models against labelled cases
-tests/         357 tests, no network
+tests/         no network; browser test needs Chrome, live-Postgres test is opt-in
 ```
