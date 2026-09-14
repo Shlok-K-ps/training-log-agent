@@ -168,8 +168,8 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
     headers = {"X-Telegram-Bot-Api-Secret-Token": "webhook_secret-123"}
     with client as c:
         athlete_page = main._render_athlete("+919812340001", None)
-        assert "Connect this athlete to Telegram" in athlete_page
-        assert ">Connect Telegram</a>" in athlete_page
+        assert "Priya is not connected yet" in athlete_page
+        assert ">Connect Telegram</a>" not in athlete_page, "the console never opens the invite itself"
         assert token in athlete_page
         paired = c.post(
             "/webhook/telegram",
@@ -191,7 +191,9 @@ def test_pair_then_log_training_through_the_real_pipeline(tmp_path, monkeypatch)
         assert health["telegram_webhook_ready"] is True
         assert health["telegram_webhook_error"] is None
         assert "Telegram" in health["messaging_transport"]
-        assert "Telegram connected" in main._render_athlete("+919812340001", None)
+        connected_page = main._render_athlete("+919812340001", None)
+        assert 'data-status="telegram">Connected<' in connected_page
+        assert token not in connected_page
 
         desk = c.get("/coach/whatsapp")
         assert "Telegram is active" in desk.text
@@ -234,8 +236,8 @@ def test_plain_start_explains_that_an_athlete_pairing_link_is_required(
 
     assert response.status_code == 200
     assert sent[0][0] == "7001"
-    assert "plain /start cannot identify your athlete profile" in sent[0][1]
-    assert "press Connect Telegram" in sent[0][1]
+    assert "open the private invite link your coach sent you and press Start" in sent[0][1]
+    assert "typing /start on its own can't tell me who you are" in sent[0][1]
 
 
 def test_bad_telegram_webhook_secret_is_rejected(tmp_path, monkeypatch):

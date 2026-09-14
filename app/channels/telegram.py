@@ -42,29 +42,78 @@ def _decoded(value: str) -> str:
     return base64.urlsafe_b64decode(value + padding).decode("utf-8")
 
 
-def pairing_token(athlete_id: str, version: int = 1) -> str:
-    """Sign the athlete identity so a Telegram user cannot claim another profile."""
+# Telegram only passes a deep-link start parameter to the bot when it is made of
+# A-Z, a-z, 0-9, "_" and "-" and is at most 64 characters long
+# (https://core.telegram.org/bots/features#deep-linking). Anything else is
+# dropped, and the athlete's Start button sends a bare "/start".
+TELEGRAM_START_PARAMETER = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_SIGNATURE_CHARS = 16  # 12 HMAC bytes, base64url, no padding
+
+
+def _secret() -> bytes:
     secret = settings.telegram_link_secret
     if not secret:
         raise RuntimeError("TELEGRAM_LINK_SECRET is required")
+    return secret.encode("utf-8")
+
+
+def _signature(payload: str) -> str:
+    digest = hmac.new(_secret(), payload.encode("ascii"), hashlib.sha256).digest()[:12]
+    return base64.urlsafe_b64encode(digest).decode("ascii")
+
+
+def _legacy_signature(payload: str) -> str:
+    digest = hmac.new(_secret(), payload.encode("ascii"), hashlib.sha256).digest()[:12]
+    return _encoded(digest.hex())
+
+
+def pairing_token(athlete_id: str, version: int = 1) -> str:
+    """Sign the athlete identity so a Telegram user cannot claim another profile.
+
+    The token is the base64url payload followed by a fixed-length base64url
+    signature, with no separator, so Telegram accepts it as a start parameter.
+    """
     payload = _encoded(f"{athlete_id}|{int(version)}")
-    signature = hmac.new(
-        secret.encode("utf-8"), payload.encode("ascii"), hashlib.sha256
-    ).digest()[:12]
-    return f"{payload}.{_encoded(signature.hex())}"
+    token = payload + _signature(payload)
+    if not TELEGRAM_START_PARAMETER.fullmatch(token):
+        raise ValueError("this athlete identifier is too long for a Telegram invite")
+    return token
 
 
 def athlete_from_pairing_token(token: str) -> tuple[str, int] | None:
-    try:
-        payload, supplied = token.strip().split(".", 1)
-        athlete_id, version_raw = _decoded(payload).rsplit("|", 1)
-        version = int(version_raw)
-    except (ValueError, UnicodeError):
+    token = token.strip()
+    if "." in token:
+        # Invites generated before the Telegram-safe format. Telegram never delivers
+        # these from a link, but a pasted "/start <token>" is still verified safely.
+        try:
+            payload, supplied = token.split(".", 1)
+            expected = _legacy_signature(payload)
+        except ValueError:
+            return None
+    elif TELEGRAM_START_PARAMETER.fullmatch(token) and len(token) > _SIGNATURE_CHARS:
+        payload, supplied = token[:-_SIGNATURE_CHARS], token[-_SIGNATURE_CHARS:]
+        expected = _signature(payload)
+    else:
         return None
-    expected = pairing_token(athlete_id, version).split(".", 1)[1]
     if not hmac.compare_digest(expected, supplied):
         return None
-    return athlete_id, version
+    try:
+        athlete_id, version_raw = _decoded(payload).rsplit("|", 1)
+        return athlete_id, int(version_raw)
+    except (ValueError, UnicodeError):
+        return None
+
+
+# What the coach sees about the most recent pairing attempt. Never includes a
+# chat id, token or anything the athlete typed.
+PAIRING_OUTCOME_LABELS = {
+    "connected": "Connected successfully.",
+    "already_connected": "Opened an invite again while already connected.",
+    "link_replaced": "Used an invite that had already been used or was replaced by a newer one.",
+    "athlete_connected_elsewhere": "This athlete is already connected to a different Telegram account.",
+    "chat_connected_elsewhere": "The Telegram account used is already connected to another athlete.",
+    "invite_refreshed": "You created a new invite. Earlier invites stopped working.",
+}
 
 
 def pairing_url(athlete_id: str, version: int = 1) -> str | None:

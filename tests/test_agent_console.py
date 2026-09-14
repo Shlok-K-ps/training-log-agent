@@ -44,7 +44,7 @@ def test_the_coach_approves_a_plan_and_turns_on_autopilot_from_the_athlete_page(
     main, settings = console
     with TestClient(main.app) as client:
         page = client.get(f"/coach/athlete/{ATHLETE}")
-        assert "Training-day agent" in page.text
+        assert "Weekly plan" in page.text and "Add to weekly plan" in page.text
         assert "No approved plan yet" in page.text
 
         refused = client.post(f"/coach/athlete/{ATHLETE}/plan", data={

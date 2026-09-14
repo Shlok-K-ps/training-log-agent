@@ -84,13 +84,13 @@ def test_registering_needs_no_identifier_and_ends_on_a_telegram_invite(coach):
     soup = BeautifulSoup(page, "html.parser")
     assert "Priya Nair added" in page
     button = soup.select_one("button[data-copy]")
-    assert button.get_text(strip=True) == "Copy Telegram invite"
+    assert button.get_text(strip=True) == "Copy invite for Priya"
     invite = button["data-copy"]
     assert invite.startswith("https://t.me/PowerCoachTestBot?start=")
     athlete_id, _ = telegram.athlete_from_pairing_token(unquote(parse_qs(urlparse(invite).query)["start"][0]))
     assert db.is_generated_athlete_id(athlete_id)
+    assert "Priya is not connected yet" in page
     assert "Waiting for Priya to press Start" in page
-    assert "Next: " in page
     assert athlete_id not in visible_text(page), "the internal identifier stays out of the normal UI"
     assert athlete_id in soup.select_one("details#advanced").get_text()
 
@@ -125,7 +125,7 @@ def test_the_checklist_detects_each_step_and_links_to_the_right_screen(coach):
     conn.close()
     status = client.get(f"{athlete_url}/status.json").json()
     assert status["telegram_connected"] is True
-    assert status["next_step"] == {"label": "Add a training plan", "href": f"{athlete_url}#agent-plan"}
+    assert status["next_step"] == {"label": "Create weekly plan", "href": f"{athlete_url}#agent-plan"}
     assert steps(client.get("/coach").text)["paired"] == "done"
 
     client.post(f"{athlete_url}/plan", data={"weekday": "0", "lift": "squat", "sets": "4", "reps": "5", "rpe": "7"})
@@ -148,27 +148,27 @@ def test_the_athlete_page_answers_the_readiness_questions_and_shows_blockers(coa
 
     soup = BeautifulSoup(page.text, "html.parser")
     header = soup.select_one("#agent-status")
-    assert header.select_one(".status-badge").get_text(strip=True) == "Blocked"
+    assert header.select_one(".status-badge").get_text(strip=True) == "Setup needed"
     assert header.select_one('[data-status="telegram"]').get_text(strip=True) == "Not connected"
-    assert header.select_one('[data-status="training-plan"]').get_text(strip=True) == "Not configured"
+    assert header.select_one('[data-status="training-plan"]').get_text(strip=True) == "Not created"
     assert header.select_one('[data-status="autopilot"]').get_text(strip=True) == "Not decided"
-    assert "Telegram is not connected, so the agent cannot message Priya." in header.get_text()
-    actions = [node.get_text(strip=True) for node in header.select(".status-actions a, .status-actions span, .status-actions button")]
-    for label in ("Invite on Telegram", "Add a training plan", "Run a safe simulated test", "View the agent's timeline"):
-        assert label in actions
+    assert header.select_one('[data-status="next-action"]').get_text(strip=True) == (
+        "Nothing yet. The agent starts once the setup steps above are finished.")
+    assert not soup.select(".btn-disabled"), "no disabled buttons standing in for next steps"
 
     conn = db.connect(settings.database_path)
     db.link_telegram_chat(conn, chat_id="7001", athlete_id=athlete_id)
     conn.close()
     client.post(f"{athlete_url}/plan", data={"weekday": "0", "lift": "squat", "sets": "4", "reps": "5", "rpe": "7"})
     client.post(f"{athlete_url}/autopilot", data={"enabled": "on"})
-    header = BeautifulSoup(client.get(athlete_url).text, "html.parser").select_one("#agent-status")
+    soup = BeautifulSoup(client.get(athlete_url).text, "html.parser")
+    header = soup.select_one("#agent-status")
     assert header.select_one(".status-badge").get_text(strip=True) == "Ready"
     assert header.select_one('[data-status="telegram"]').get_text(strip=True) == "Connected"
     assert header.select_one('[data-status="autopilot"]').get_text(strip=True) == "On"
     assert header.select_one('[data-status="next-action"]').get_text(strip=True) == "Check-in today at 07:30."
-    assert header.select_one('[data-status="blocking"]').get_text(strip=True) == "Nothing"
-    assert "Disable autopilot" in header.get_text()
+    assert header.select_one('[data-status="blocking"]') is None
+    assert "Turn autopilot off" in soup.select_one("#autopilot").get_text()
 
     monkeypatch.setattr(deployment, "durable_storage_configured", lambda: False)
     header = BeautifulSoup(client.get(athlete_url).text, "html.parser").select_one("#agent-status")
