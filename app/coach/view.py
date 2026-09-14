@@ -628,7 +628,7 @@ def render_landing() -> str:
           <span>Read Source on GitHub &nearr;</span>
         </a>
       </div>
-      <p class="hero-lead" style="font-size:15px;margin-top:10px">A 60-second fictional training day. No login, no setup, nothing sent.</p>
+      <p class="hero-lead" style="font-size:15px;margin-top:10px">A 90-second fictional training day. No login, no setup, nothing sent.</p>
 
       <!-- Studio Specs Strip (Twilio) -->
       <div class="specs-strip">
@@ -729,7 +729,7 @@ def render_landing() -> str:
 
     <section id="walkthrough" class="content-section">
       <div class="section-head">
-        <span class="mac-eyebrow">See it in one minute</span>
+        <span class="mac-eyebrow">See it in 90 seconds</span>
         <h2 class="section-title">A simulated day, then <span class="serif">the real thing.</span></h2>
         <p class="section-desc">The public demo runs the real engine, rules and message templates on two fictional athletes in a throwaway database. Nothing is sent and no real data is involved. The real agent does the same work on Telegram for the coach's own athletes.</p>
       </div>
@@ -744,7 +744,7 @@ def render_landing() -> str:
       <div class="table-container"><table class="data-table"><thead><tr><th></th><th>Public simulation</th><th>Real Telegram agent</th></tr></thead><tbody>
         <tr><td>Athletes</td><td>Fictional</td><td>The coach's athletes</td></tr>
         <tr><td>Messages</td><td>Shown on the page</td><td>Sent on Telegram</td></tr>
-        <tr><td>Clock</td><td>One scripted day in a minute</td><td>Real time</td></tr>
+        <tr><td>Clock</td><td>One scripted day in about 90 seconds</td><td>Real time</td></tr>
         <tr><td>Storage</td><td>Throwaway, in memory</td><td>Durable Postgres</td></tr>
         <tr><td>Access</td><td>Public</td><td>Coach only, via a signed Telegram link</td></tr>
       </tbody></table></div>
@@ -779,7 +779,7 @@ def render_landing() -> str:
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
         <div class="feature-card"><span class="feature-badge badge-blue">PUBLIC VISITORS</span><h3>Watch the safe demo</h3>
-          <p>A 60-second fictional training day through the real agent. No login, nothing sent, no real data.</p>
+          <p>A 90-second fictional training day through the real agent. No login, nothing sent, no real data.</p>
           <p><a class="btn btn-mac-primary" href="/demo">Watch the safe demo</a></p></div>
         <div class="feature-card"><span class="feature-badge badge-yellow">TECHNICAL REVIEWERS</span><h3>View the source</h3>
           <p>The case engine, safety rules, tests and the Postgres verification are all in the repository.</p>

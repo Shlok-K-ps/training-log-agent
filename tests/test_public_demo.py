@@ -80,6 +80,7 @@ def test_the_demo_is_public_while_the_console_stays_locked(tmp_path, monkeypatch
         page = client.get("/demo")
         assert page.status_code == 200
         assert "Fictional simulation · nothing is sent · no login" in page.text
+        assert "const scale = 90000 / total;" in page.text
         for label in ("Interpretation", "Fixed rule", "Agent action", "Needs the coach", "Coach decision", "Outcome"):
             assert label in page.text
         assert "Day complete: here is the work the agent did" in page.text
@@ -102,7 +103,7 @@ def test_the_landing_page_explains_the_agent():
     html = render_landing()
     for text in (
         "The problem", 'aria-label="The closed agent loop"', "DOES ALONE", "ALWAYS ASKS THE COACH",
-        "Public simulation", "Real Telegram agent", "See it in one minute",
+        "Public simulation", "Real Telegram agent", "See it in 90 seconds",
         "Four parts of the agent", "1 &middot; PERCEIVE", "2 &middot; REASON", "3 &middot; ACT",
         "4 &middot; REMEMBER AND ADAPT", "It cannot invent training loads, clear injuries or modify safety policy.",
         "Ways to use Power AI", 'href="/demo">Watch the safe demo</a>', "View the source",

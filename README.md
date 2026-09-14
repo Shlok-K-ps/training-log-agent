@@ -44,7 +44,7 @@ No login, no setup, nothing sent.
 
 ![A fictional training day in progress: athlete chats on the left, the coach console and the agent's reasoning on the right](docs/screenshots/02-demo-in-progress.png)
 
-Two fictional athletes, one Monday, compressed to about a minute:
+Two fictional athletes, one Monday, compressed to about 90 seconds:
 
 1. **07:30** The agent checks in with Priya and Arjun on its own.
 2. **07:52** Priya replies. Her message becomes validated data, fixed rules score her
@@ -71,7 +71,7 @@ Postgres storage behind a console only the coach can open.
 |---|---|---|
 | Athletes | Fictional | The coach's athletes |
 | Messages | Shown on the page | Sent on Telegram |
-| Clock | One scripted day in a minute | Real time |
+| Clock | One scripted day in about 90 seconds | Real time |
 | Interpretation | Built-in offline parser, same schema | Gemini, limited to six validated actions |
 | Storage | Throwaway, in memory | Durable Postgres |
 | Access | Public | Coach only, via a signed Telegram link |
