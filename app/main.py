@@ -1,13 +1,17 @@
-"""FastAPI service: WhatsApp transport in, reviewed coaching messages out.
+"""FastAPI service for the Power AI training-day agent, served by Uvicorn on Render.
 
-    Vonage  ->  POST /webhook/vonage/inbound
-    Twilio  ->  POST /webhook/whatsapp (legacy fallback)
+    Telegram  ->  POST /webhook/telegram
                   |
-                  |-- Layer 1  app.agent      Gemini -> validated tool calls
-                  |-- Layer 2  app.storage    SQLite append
-                  |-- Layer 3  app.decision   verdict + reply text
+                  |-- app.agent      Gemini 2.5 Flash -> validated structured data
+                  |-- app.casework   the training-day case engine (the agent loop)
+                  |-- app.decision   fixed, tested coaching and safety rules
+                  |-- app.storage    Neon Postgres when deployed; SQLite locally and in tests
                   v
-                receipt + coach-approved delivery  ->  WhatsApp
+                check-ins, follow-ups, sessions and escalations  ->  Telegram
+
+GitHub Actions calls the signed /internal/agent/tick endpoint to wake the loop.
+The /webhook/whatsapp and /webhook/vonage routes are historical experiments with
+Twilio and Vonage; the deployed product does not use them.
 """
 
 from __future__ import annotations
@@ -233,7 +237,11 @@ def _send_morning_prompts() -> int:
 app = FastAPI(
     title="Power AI — Powerlifting Training-Log Agent",
     version="0.2.0",
-    description="WhatsApp powerlifting coach: structured logging, deterministic verdicts, coach desk review.",
+    description=(
+        "Training-day agent for a powerlifting coach: Telegram messaging, Gemini 2.5 Flash "
+        "message interpretation, tested rules for coaching and safety decisions, and Neon "
+        "Postgres memory."
+    ),
     lifespan=lifespan,
 )
 
@@ -1323,13 +1331,11 @@ async def health() -> dict[str, object]:
             "postgres (DATABASE_URL)" if storage["storage_backend"] == "postgres"
             else str(settings.db_file)
         ),
-        "signature_validation": (
-            bool(settings.vonage_webhook_secret)
-            if settings.vonage_configured
-            else settings.validate_twilio_signature
+        "messaging_channel": "telegram" if settings.telegram_configured else "not configured",
+        # Historical WhatsApp experiments; reported only so a misconfiguration is visible.
+        "legacy_whatsapp_adapter": (
+            settings.whatsapp_transport_name if settings.whatsapp_configured else "inactive"
         ),
-        "whatsapp_integration": settings.whatsapp_configured,
-        "whatsapp_transport": settings.whatsapp_transport_name,
         "telegram_integration": settings.telegram_configured,
         "telegram_webhook_ready": bool(
             getattr(app.state, "telegram_webhook_ready", False)

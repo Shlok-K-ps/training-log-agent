@@ -1,5 +1,9 @@
 # Calendar, location, sleep and daily-plan integration
 
+> **Status:** design notes from an earlier WhatsApp-based version. The deployed
+> agent uses Telegram and Neon Postgres, and calendar planning is not enabled on
+> the hosted deployment.
+
 Repository: <https://github.com/Shlok-K-ps/training-log-agent>
 
 ## Product behaviour

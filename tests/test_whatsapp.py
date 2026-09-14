@@ -75,7 +75,8 @@ def test_health_reports_which_parser_is_live(client):
     body = client.get("/health").json()
     assert body["status"] == "ok"
     assert body["model"] == "offline-stub"
-    assert body["whatsapp_integration"] is False
+    assert body["legacy_whatsapp_adapter"] == "inactive"
+    assert "whatsapp_transport" not in body and "signature_validation" not in body
 
 
 def test_the_webhook_logs_a_set_and_queues_coaching_for_review(client):

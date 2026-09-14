@@ -145,7 +145,7 @@ def coach_frame(
         f"<h1 {h1_style}>{escape(title)}</h1>"
         f"<p class='workspace-sub'>{escape(subtitle)}</p></div>"
         f"{body}<footer>Power AI &middot; Training Log Agent &middot; Recommendations shown here are assembled from the athlete's "
-        "record and deterministic coaching rules. The coach remains the approval gate."
+        "record and fixed, tested coaching rules. The coach decides anything outside the agent's limits."
         "</footer></main></div></body></html>"
     )
 
@@ -592,7 +592,7 @@ def render_landing() -> str:
       </a>
       <div class="header-status">
         <span class="pulse-dot"></span>
-        <span>Active &middot; Deterministic</span>
+        <span>Acts on its own &middot; Tested rules decide</span>
       </div>
       <nav class="site-nav">
         <a class="nav-link" style="white-space:nowrap" href="#how-it-works">How it works</a>
@@ -612,7 +612,7 @@ def render_landing() -> str:
       <div class="mac-pill-eyebrow"><span class="mac-pill-icon">⚡</span> A training-day agent for powerlifting coaches</div>
       <h1 class="hero-h1">
         The coach reads exceptions,<br>
-        <span class="serif">not twenty WhatsApp texts a day.</span>
+        <span class="serif">not twenty chat threads a day.</span>
       </h1>
       <p class="hero-lead">
         Power AI is an agent that owns each athlete's training day: it checks in on Telegram, reads the reply, adjusts the coach's session by fixed rules, follows up when an athlete goes quiet, stops and asks the coach when something is wrong, and closes the day only when it knows what happened.
@@ -630,31 +630,31 @@ def render_landing() -> str:
       </div>
       <p class="hero-lead" style="font-size:15px;margin-top:10px">A 90-second fictional training day. No login, no setup, nothing sent.</p>
 
-      <!-- Studio Specs Strip (Twilio) -->
+      <!-- What runs the live agent -->
       <div class="specs-strip">
         <div class="spec-col">
           <span class="spec-num">01</span>
-          <span class="spec-name">INGESTION</span>
-          <span class="spec-detail">Telegram &middot; Twilio &middot; Vonage</span>
+          <span class="spec-name">MESSAGING</span>
+          <span class="spec-detail">Telegram</span>
         </div>
         <div class="spec-col">
           <span class="spec-num">02</span>
-          <span class="spec-name">SCHEMA PARSER</span>
-          <span class="spec-detail">Gemini Flash</span>
+          <span class="spec-name">UNDERSTANDING</span>
+          <span class="spec-detail">Gemini 2.5 Flash</span>
         </div>
         <div class="spec-col">
           <span class="spec-num">03</span>
-          <span class="spec-name">DECISION ENGINE</span>
-          <span class="spec-detail">Pure Python Rules</span>
+          <span class="spec-name">DECISIONS</span>
+          <span class="spec-detail">Tested safety rules</span>
         </div>
         <div class="spec-col">
           <span class="spec-num">04</span>
-          <span class="spec-name">GROUND TRUTH</span>
-          <span class="spec-detail">Top 300 All-Time Dots</span>
+          <span class="spec-name">MEMORY</span>
+          <span class="spec-detail">Neon Postgres</span>
         </div>
       </div>
 
-      <!-- WhatsApp Simulation Showcase (macOS Window with traffic lights & segmented control) -->
+      <!-- Illustrative example: one message, interpreted -->
       <div id="protocols" class="showcase-container">
         <div class="messages-header">
           <span class="avatar" aria-hidden="true">{_BOLT}</span>
@@ -663,8 +663,8 @@ def render_landing() -> str:
         <div class="showcase-body">
           <div class="showcase-header">
             <div>
-              <span class="mac-eyebrow">WhatsApp Conversation Protocol</span>
-              <h3 style="font-size: 18px; margin-top: 4px; font-weight: 600;">Raw Lifter Notes &rarr; Structured Verdicts</h3>
+              <span class="mac-eyebrow">Illustrative example</span>
+              <h3 style="font-size: 18px; margin-top: 4px; font-weight: 600;">A lifter's note &rarr; structured facts &rarr; a rule-based verdict</h3>
             </div>
             <div class="scenario-pills">
               <button class="scenario-btn active" data-scenario="stall" onclick="switchScenario('stall')">Stalled Squat (140kg)</button>
@@ -687,6 +687,7 @@ def render_landing() -> str:
               <div class="chat-body-line">Flat at 140 kg for 2 sessions with RPE climbing &mdash; same bar, more effort.</div>
             </div>
           </div>
+          <p style="font-size:13px;opacity:.7;margin:10px 0 0">Gemini extracts the numbers; the verdict comes from fixed rules and is shown to the coach. The model never invents a load.</p>
         </div>
       </div>
     </section>
@@ -791,32 +792,29 @@ def render_landing() -> str:
       <p class="section-desc" style="margin-top:18px">The hosted real console is a <strong>private single-coach deployment</strong>. Public visitors cannot access real athletes, send Telegram messages or become coaches on this instance. An athlete invited by the coach uses the real Telegram agent through a secure, single-use pairing link.</p>
     </section>
 
-    <!-- 3-Layers Section -->
+    <!-- How it is built -->
     <section id="architecture" class="content-section">
       <div class="section-head">
-        <span class="mac-eyebrow">Architectural Separation</span>
-        <h2 class="section-title">The Core Separation <span class="serif">3 Layers</span></h2>
-        <p class="section-desc">
-          Messy input needs a language model; coaching advice real humans lift under must be provable, repeatable, and deterministic. The split is the whole design:
-        </p>
+        <span class="mac-eyebrow">How it is built</span>
+        <h2 class="section-title">The technology, <span class="serif">in plain terms.</span></h2>
+        <p class="section-desc">A language model reads the messages. Tested rules make the decisions. The rest keeps the agent running and remembering.</p>
       </div>
-
+      <div class="table-container"><table class="data-table"><thead><tr><th>Job</th><th>What does it</th></tr></thead><tbody>
+        <tr><td>Messaging</td><td><strong>Telegram</strong> receives athlete updates and sends the agent's messages.</td></tr>
+        <tr><td>Understanding messages</td><td><strong>Gemini 2.5 Flash</strong> interprets natural-language messages into validated structured data.</td></tr>
+        <tr><td>Coaching and safety decisions</td><td><strong>Deterministic Python rules</strong>, covered by automated tests.</td></tr>
+        <tr><td>Memory</td><td><strong>Neon Postgres</strong> is the deployed app's durable memory.</td></tr>
+        <tr><td>Local and test storage</td><td><strong>SQLite</strong>, used only for local development, automated tests and the public demo's temporary data.</td></tr>
+        <tr><td>Web application</td><td><strong>FastAPI</strong> and <strong>Uvicorn</strong>, running on <strong>Render</strong>.</td></tr>
+        <tr><td>The agent's clock</td><td><strong>GitHub Actions</strong> sends a recurring signed tick that wakes the agent loop.</td></tr>
+      </tbody></table></div>
       <div class="grid-3">
-        <div class="feature-card">
-          <span class="feature-badge badge-blue">LAYER 1 &middot; PARSE</span>
-          <h3>Gemini Flash</h3>
-          <p>Extracts unstructured English into 20 typed function schemas. Ceilings and ratios are range-checked. <em>The model cannot write reply text.</em></p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-badge badge-yellow">LAYER 2 &middot; STORE</span>
-          <h3>Single SQLite Timeline</h3>
-          <p>Every message is an immutable observation. Phone numbers serve as tenant identity. Calendar tokens and locations are encrypted at rest.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-badge badge-red">LAYER 3 &middot; DECIDE</span>
-          <h3>Pure Python Rules</h3>
-          <p>Zero model. Zero API calls. Zero randomness. Evaluates session deltas, RPE slides, deloads, and sleep recovery deterministically.</p>
-        </div>
+        <div class="feature-card"><span class="feature-badge badge-blue">WHAT &ldquo;ACTIVE&rdquo; MEANS</span><h3>It starts the work</h3>
+          <p>The agent sends scheduled check-ins, reminders, follow-ups and escalations on its own, without waiting for the coach to prompt it.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-yellow">WHAT &ldquo;DETERMINISTIC&rdquo; MEANS</span><h3>Same facts, same decision</h3>
+          <p>Important coaching and safety decisions follow tested, repeatable rules rather than being invented by the language model.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">WHAT GEMINI DOES NOT DO</span><h3>It reads; it does not decide</h3>
+          <p>Gemini interprets language. It does not independently clear injuries, invent training loads or change safety policies.</p></div>
       </div>
     </section>
 
@@ -826,7 +824,7 @@ def render_landing() -> str:
         <span class="mac-eyebrow">Safety Governance &amp; Boundaries</span>
         <h2 class="section-title">Authority Boundaries <span class="serif">Who Decides What</span></h2>
         <p class="section-desc">
-          Safety is enforced by immutable software boundaries, not system prompt guidelines. Neither the lifter nor the LLM has permission to override coaching gates.
+          Safety limits are written into the code and covered by tests, not left to instructions given to a language model. Neither the athlete nor Gemini can override them.
         </p>
       </div>
 
@@ -856,7 +854,7 @@ def render_landing() -> str:
             <tr>
               <td>Judge progressing / stalled / deload</td>
               <td>&mdash;</td>
-              <td><strong>&check; Deterministic</strong></td>
+              <td><strong>&check; Fixed, tested rules</strong></td>
               <td>&mdash;</td>
             </tr>
             <tr>
@@ -888,26 +886,26 @@ def render_landing() -> str:
         <span class="mac-eyebrow">Empirical Ground Truth</span>
         <h2 class="section-title">Grounded in Meet Data <span class="serif">Top 300 All-Time</span></h2>
         <p class="section-desc">
-          Validation bounds and plausibility checks are derived directly from OpenPowerlifting competition results (top 300 lifters by Dots, Raw+Wraps), recomputed by the test suite on every run so code cannot drift from empirical evidence.
+          The checks that catch misread numbers are derived from OpenPowerlifting competition results (the top ~300 lifters of all time by Dots, Raw+Wraps). The test suite recomputes them from that data on every run, so the code cannot drift from the evidence.
         </p>
       </div>
 
       <div class="stats-grid">
         <div class="stat-tile">
-          <span class="stat-val">300</span>
-          <span class="stat-lbl">All-Time Top Lifters</span>
+          <span class="stat-val">~300</span>
+          <span class="stat-lbl">All-time top lifters in the data</span>
         </div>
         <div class="stat-tile">
-          <span class="stat-val">500 kg</span>
-          <span class="stat-lbl">Max Plausible Squat</span>
+          <span class="stat-val">500.0 kg</span>
+          <span class="stat-lbl">Heaviest squat in the data</span>
         </div>
         <div class="stat-tile">
-          <span class="stat-val">365 kg</span>
-          <span class="stat-lbl">Max Plausible Bench</span>
+          <span class="stat-val">292.6 kg</span>
+          <span class="stat-lbl">Heaviest bench in the data</span>
         </div>
         <div class="stat-tile">
-          <span class="stat-val">460 kg</span>
-          <span class="stat-lbl">Max Plausible Deadlift</span>
+          <span class="stat-val">492.5 kg</span>
+          <span class="stat-lbl">Heaviest deadlift in the data</span>
         </div>
       </div>
     </section>
@@ -918,29 +916,29 @@ def render_landing() -> str:
         <span class="mac-eyebrow">WHY THIS IS AN AGENT, NOT A CHAT WINDOW</span>
         <h2 class="section-title">Conversation answers once. <span class="serif">This system keeps working.</span></h2>
         <p class="section-desc">
-          A normal Claude or ChatGPT conversation can discuss a programme, but it does not own the squad workflow. Power AI observes new athlete events, preserves longitudinal state, proposes bounded actions, waits for authority, executes approved messages, and verifies delivery.
+          A normal Claude or ChatGPT conversation can discuss a programme, but it does not own the squad workflow. Power AI keeps each athlete's training day open until it knows the outcome: it checks in on schedule, follows up, acts within limits the coach set, hands the coach what it may not decide, and records every step.
         </p>
       </div>
       <div class="grid-3">
-        <div class="feature-card"><span class="feature-badge badge-blue">PERSISTENT STATE</span><h3>Remembers the actual journey</h3><p>Sessions, sleep, nutrition, injuries, goals, calendar constraints, approvals and delivery events remain connected to the athlete—not to one chat transcript.</p></div>
-        <div class="feature-card"><span class="feature-badge badge-yellow">EVENT-DRIVEN</span><h3>Acts when facts change</h3><p>A morning check-in, missed log, fresh injury or new schedule conflict recomputes the relevant plan and opens a coach decision.</p></div>
-        <div class="feature-card"><span class="feature-badge badge-red">CONTROLLED ACTION</span><h3>Closes the loop</h3><p>The coach approves exact wording; the system schedules it, sends through the athlete's paired channel, records who approved it, and tracks delivery.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-blue">PERSISTENT STATE</span><h3>Remembers the actual journey</h3><p>Sessions, check-ins, injuries, goals, coach decisions and every message sent stay attached to the athlete in Neon Postgres, not to one chat transcript.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-yellow">EVENT-DRIVEN</span><h3>Acts when facts change</h3><p>A scheduled tick, a reply, silence or a reported injury moves the training day forward, and anything outside the agent's authority becomes a coach decision.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">CONTROLLED ACTION</span><h3>Closes the loop</h3><p>Within the coach's plan and autopilot setting it sends check-ins, follow-ups and sessions itself. Injuries and exceptions wait for a one-tap coach decision. Every message is recorded and sent once, even across restarts.</p></div>
       </div>
       <div class="table-container"><table class="data-table"><thead><tr><th>Capability</th><th>Normal chat</th><th>Power AI</th></tr></thead><tbody>
         <tr><td>Twenty-athlete longitudinal state</td><td>Manually supplied context</td><td><strong>Stored and continuously updated</strong></td></tr>
-        <tr><td>Proactive daily workflow</td><td>Waits for a prompt</td><td><strong>Drafts, schedules and surfaces exceptions</strong></td></tr>
+        <tr><td>Proactive daily workflow</td><td>Waits for a prompt</td><td><strong>Sends scheduled check-ins, follow-ups and escalations on its own</strong></td></tr>
         <tr><td>Safety authority</td><td>Prompt instruction</td><td><strong>Code-enforced injury and supplement gates</strong></td></tr>
-        <tr><td>External action</td><td>Produces prose</td><td><strong>Coach-approved messaging and calendar execution</strong></td></tr>
-        <tr><td>Audit</td><td>Read the transcript</td><td><strong>Evidence version, approver and delivery state</strong></td></tr>
+        <tr><td>External action</td><td>Produces prose</td><td><strong>Sends Telegram messages within limits the coach set</strong></td></tr>
+        <tr><td>Audit</td><td>Read the transcript</td><td><strong>A timestamped record of every observation, decision and message</strong></td></tr>
       </tbody></table></div>
     </section>
 
-    <!-- Transparent Engineering Note -->
+    <!-- Honest note -->
     <div class="mac-note-wrap">
       <div class="mac-note">
-        <span class="mac-note-badge">Pure Python &amp; SQLite</span>
+        <span class="mac-note-badge">Honest note</span>
         <span class="mac-note-text">
-          <strong>Transparent Note:</strong> This is a student-built engineering project for a 20-athlete powerlifting squad, not a venture-backed commercial SaaS. Zero trackers, zero analytics cookies, and no runtime framework beyond Python and SQLite.
+          The public demo uses fictional temporary data. The live agent uses Telegram, FastAPI and Neon Postgres. Gemini interprets messages, while tested Python rules control coaching and safety decisions.
         </span>
       </div>
     </div>
@@ -949,10 +947,10 @@ def render_landing() -> str:
     <section class="mac-cta-section">
       <div class="mac-eyebrow">Ready for Squad Deployment</div>
       <h2 class="mac-cta-headline">
-        The squad on WhatsApp.<br>
+        The squad on Telegram.<br>
         <span class="mac-cta-accent">The coach in control.</span>
       </h2>
-      <p class="mac-cta-sub">Deterministic rules, instant athlete triage, coach approval required for every message.</p>
+      <p class="mac-cta-sub">Routine check-ins and follow-ups handled for you. Injuries and exceptions always come back to the coach.</p>
       <div class="mac-cta-actions">
         <a class="btn btn-mac-primary btn-lg" href="/demo"><span>Watch the agent work</span></a>
         <a class="btn btn-ghost btn-lg" href="{coach_link}">
@@ -1025,10 +1023,11 @@ def render_privacy() -> str:
     <div class="legal-container">
       <div class="mac-eyebrow">Data Privacy &amp; Encryption Boundaries</div>
       <h1>Privacy Policy</h1>
-      <p>Calendar connection is optional. The service reads event start/end times and usable locations only to plan travel and training. It does not retain event titles, descriptions, attendees or meeting content.</p>
+      <p>Calendar connection is optional and is not enabled on the hosted deployment. Where it is enabled, the service reads event start/end times and usable locations only to plan travel and training. It does not retain event titles, descriptions, attendees or meeting content.</p>
       <p>OAuth tokens and saved places are encrypted at rest with Fernet cryptography when the calendar integration is configured. Confirmed workout references are stored until the athlete asks to delete them. Calendar data is never sold and is never sent to the language model.</p>
-      <p>Training, sleep, readiness and nutrition messages may be sent to the configured language-model provider for structured parsing. Coaching decisions are made by deterministic application rules in pure Python, not by that model.</p>
-      <p>Athletes can send <em>“disconnect calendar”</em> through Telegram or WhatsApp to delete stored calendar tokens, or <em>“forget my locations”</em> to erase saved home, office and gym places.</p>
+      <p>Athlete messages sent to the Telegram bot are passed to Google's Gemini 2.5 Flash only to turn them into structured data. Coaching and safety decisions are made by fixed, tested rules in the application, not by that model.</p>
+      <p>The public demo uses fictional, temporary data and sends nothing. Real athlete data is stored in the deployment's Postgres database.</p>
+      <p>Where calendar planning is enabled, athletes can send <em>“disconnect calendar”</em> to the bot to delete stored calendar tokens, or <em>“forget my locations”</em> to erase saved home, office and gym places.</p>
       <div class="legal-actions">
         <a href="/" class="btn btn-ghost">&larr; Return to Home</a>
       </div>
