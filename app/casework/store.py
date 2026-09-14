@@ -129,6 +129,13 @@ def agent_settings(conn, athlete_id: str) -> dict[str, Any]:
     return {"autopilot": bool(row["autopilot"]), "checkin_time": row["checkin_time"]}
 
 
+def autopilot_decided(conn, athlete_id: str) -> bool:
+    """Whether the coach has ever chosen autopilot on or off for this athlete."""
+    return conn.execute(
+        "SELECT 1 FROM agent_settings WHERE athlete_id = ?", (athlete_id,)
+    ).fetchone() is not None
+
+
 def _save_settings(conn, athlete_id: str, *, autopilot: bool, checkin_time: str | None,
                    updated_by: str, now: datetime) -> None:
     conn.execute(

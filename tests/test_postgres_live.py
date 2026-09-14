@@ -77,7 +77,9 @@ def live(monkeypatch):
 
     def fake_send(chat_id, body, reply_markup=None):
         sent.append({"chat": str(chat_id), "body": body, "markup": reply_markup})
-        return f"telegram:{chat_id}:{len(sent)}"
+        # Telegram numbers messages uniquely within a chat across both directions, so
+        # simulated outbound ids use their own range and never collide with inbound ones.
+        return f"telegram:{chat_id}:{900000 + len(sent)}"
 
     monkeypatch.setattr(main.telegram, "send_outbound", fake_send)
     monkeypatch.setattr(main.telegram, "answer_callback_query", lambda *_: None)
@@ -99,6 +101,70 @@ def _tick(client):
 def _say(client, chat: int, text: str, message_id: int):
     return client.post("/webhook/telegram", headers=HEADERS, json={"message": {
         "message_id": message_id, "text": text, "chat": {"id": chat, "type": "private"}}})
+
+
+def test_onboarding_on_real_postgres(live):
+    """Simple registration, generated IDs, pairing, the checklist and a real case, all on Postgres."""
+    from urllib.parse import parse_qs, unquote, urlparse
+
+    from bs4 import BeautifulSoup
+
+    from app.channels import telegram
+
+    main, sent, _ = live
+    with TestClient(main.app) as client:
+        assert "This is your private real-agent console." in client.get("/coach").text
+
+        landed = client.post("/coach/athletes/register", data={
+            "name": "Priya Nair", "timezone": "Asia/Kolkata", "checkin_time": "07:30", "training_time": "18:00"})
+        assert landed.status_code == 200 and "Priya Nair added" in landed.text
+        athlete_url = urlparse(str(landed.url)).path
+        athlete_id = athlete_url.rsplit("/", 1)[1]
+        assert db.is_generated_athlete_id(athlete_id)
+        assert _one("SELECT COUNT(*) FROM entries WHERE athlete_id = ?", athlete_id) == 2
+
+        invite = BeautifulSoup(landed.text, "html.parser").select_one("button[data-copy]")["data-copy"]
+        token = unquote(parse_qs(urlparse(invite).query)["start"][0])
+        assert telegram.athlete_from_pairing_token(token)[0] == athlete_id
+
+        def checklist(path: str = "/coach") -> dict[str, str]:
+            soup = BeautifulSoup(client.get(path).text, "html.parser")
+            return dict(item["data-step-state"].split(":") for item in soup.select("[data-step-state]"))
+
+        assert checklist() == {"coach": "todo", "athlete": "done", "paired": "todo", "plan": "todo",
+                               "autopilot": "todo", "ready": "todo"}
+
+        # The athlete opens the invite and presses Start: the real webhook pairs the chat.
+        paired = _say(client, 7101, f"/start {token}", 1)
+        assert paired.status_code == 200 and sent[-1]["body"].startswith("Connected to Power AI as Priya Nair")
+        assert client.get(f"{athlete_url}/status.json").json()["telegram_connected"] is True
+        _say(client, COACH_CHAT, "/coach setup-code-7731", 2)
+        client.post(f"{athlete_url}/plan", data={"weekday": "0", "lift": "squat", "sets": "4", "reps": "5", "rpe": "7"})
+        client.post(f"{athlete_url}/autopilot", data={"enabled": "on"})
+        assert checklist() == {}, "a finished setup is hidden from Today"
+        assert "Set up your agent" not in client.get("/coach").text
+        assert set(checklist("/coach/setup").values()) == {"done"} and len(checklist("/coach/setup")) == 6
+
+        header = BeautifulSoup(client.get(athlete_url).text, "html.parser").select_one("#agent-status")
+        assert header.select_one(".status-badge").get_text(strip=True) == "Ready"
+
+        cases_before = _one("SELECT COUNT(*) FROM agent_cases")
+        simulated = client.get(f"{athlete_url}/simulate").text
+        assert "Safe simulated test. Nothing was sent and nothing was saved." in simulated
+        assert _one("SELECT COUNT(*) FROM agent_cases") == cases_before == 0
+
+        report = _tick(client).json()
+        assert report["opened"] == 1 and report["actions"] == 1
+        assert _tick(client).json()["actions"] == 0
+        assert _one("SELECT athlete_id FROM agent_cases") == athlete_id
+        assert _one("SELECT state FROM agent_cases") == "awaiting_checkin"
+        assert sent[-1]["chat"] == "7101" and "training day" in sent[-1]["body"]
+
+        _say(client, 7101, "slept 8h readiness 8", 3)
+        assert _one("SELECT state FROM agent_cases") == "awaiting_outcome"
+        assert "Squat 4×5 @ RPE 7" in sent[-1]["body"]
+        assert "Awaiting" not in BeautifulSoup(client.get(athlete_url).text, "html.parser").select_one(
+            '[data-status="next-action"]').get_text()
 
 
 def test_the_agent_loop_survives_restarts_on_real_postgres(live):

@@ -149,39 +149,6 @@ def coach_frame(
         "</footer></main></div></body></html>"
     )
 
-def _register_form(today: date) -> str:
-    earliest_goal = today.isoformat()
-    latest_goal = date(today.year + 10, 12, 31).isoformat()
-    return f"""
-<section class="register"><h2>Add an athlete</h2>
-<details class="onboarding" open><summary>Initial coaching profile</summary>
-<form class="onboarding-form" method="post" action="/coach/athletes/register">
-  <div class="onboarding-grid">
-    <label>Name<input type="text" name="name" required maxlength="60" placeholder="Athlete name"></label>
-    <label>Athlete phone / ID<input type="tel" name="athlete_id" required maxlength="22"
-      inputmode="tel" pattern="[+][1-9][0-9 ()-]{{7,20}}" placeholder="+91 98123 40001"></label>
-    <label>Bodyweight (kg)<input type="number" name="bodyweight_kg" min="30" max="400" step="0.1" required></label>
-    <label>Squat 1RM (kg)<input type="number" name="squat_1rm_kg" min="1" max="600" step="0.5" required></label>
-    <label>Bench 1RM (kg)<input type="number" name="bench_1rm_kg" min="1" max="400" step="0.5" required></label>
-    <label>Deadlift 1RM (kg)<input type="number" name="deadlift_1rm_kg" min="1" max="600" step="0.5" required></label>
-    <label>Training days / week<input type="number" name="training_days" min="1" max="7" required></label>
-    <label>Experience<select name="experience" required><option value="novice">Novice</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
-    <label>Goal lift<select name="goal_lift"><option value="">No numeric goal yet</option><option value="squat">Squat</option><option value="bench press">Bench press</option><option value="deadlift">Deadlift</option></select></label>
-    <label>Goal 1RM (kg)<input type="number" name="goal_target_kg" min="1" max="700" step="0.5"></label>
-    <label>Goal / meet date<span class="calendar-control">
-      <input id="goal-target-date" type="date" name="goal_target_date"
-        min="{earliest_goal}" max="{latest_goal}" aria-label="Goal or meet date">
-      <button class="calendar-trigger" type="button"
-        onclick="const field=document.getElementById('goal-target-date'); if(field.showPicker){{field.showPicker();}} else {{field.focus();}}">Choose date</button>
-    </span></label>
-    <label class="onboarding-wide">Current injury or restriction<input type="text" name="injury_note" maxlength="240" placeholder="Leave blank if none"></label>
-  </div>
-  <button type="submit">Create athlete profile</button>
-  <p class="hint">These are coach-entered starting facts. They create the baseline for programme selection and goal pacing; they do not clear or diagnose injuries.</p>
-</form></details></section>
-"""
-
-
 def initials(name: str) -> str:
     """Up to two initials for an avatar, e.g. 'Priya Kulkarni' -> 'PK'."""
     parts = [part for part in name.split() if part[:1].isalpha()]
@@ -343,8 +310,16 @@ def render(
     injury_plans: tuple[tuple[RosterEntry, str | None], ...] = (),
     agent_board: str = "",
     extra_style: str = "",
+    setup_html: str = "",
+    empty_html: str = "",
 ) -> str:
-    """Today: the agent's work and exceptions first, then the legacy approvals."""
+    """Today: setup if unfinished, the agent's work and exceptions, then the legacy approvals."""
+    if empty_html:
+        return coach_frame(
+            f"{banner(message)}{empty_html}{setup_html}", active="overview", coach=coach, title="Today",
+            subtitle="Your private training-day agent console.",
+            today=roster.reviewed_on.isoformat(), pending_count=pending_count, extra_style=extra_style,
+        )
     counts = {bucket: len(roster.bucket(bucket)) for bucket in BUCKET_ORDER}
     tiles = (
         ("act", "Needs you", Bucket.NEEDS_YOU),
@@ -463,7 +438,7 @@ def render(
     body = (
         f"{banner(message)}"
         '<div class="today-grid"><div class="today-main">'
-        f"{agent_board}{legacy_title}{summary_tiles}"
+        f"{setup_html}{agent_board}{legacy_title}{summary_tiles}"
         f"{empty_roster}{all_clear}{decision_section}{approval_section}"
         f'{listed("Watch", watch, "watch")}{listed("Meet prep", meet, "meet_prep")}{fine_section}'
         '</div><aside class="today-side">'
@@ -518,7 +493,7 @@ def render_athletes(
             f'<div class="directory-row athlete-record" data-bucket="{entry.bucket.value}" '
             f'data-search="{escape(haystack)}">'
             f'<div><span class="dot-count {dot_cls}">●</span> <a class="athlete-name" href="/coach/athlete/{escape(entry.athlete_id)}">{escape(entry.display_name)}</a>'
-            f'<div class="muted">{escape(entry.athlete_id)}</div>{channel}</div>'
+            f'{channel}</div>'
             f'<div><strong>{escape(entry.training_summary or "No training baseline")}</strong>'
             f'<div class="muted">{escape(status)}</div></div>{readiness}'
             f'<div class="muted row-last"><span class="mobile-label">Last log </span>'
@@ -562,8 +537,12 @@ if(preset&&[...filter.options].some(option=>option.value===preset)){filter.value
         telegram_notice = ""
     body = (
         f"{banner(message)}{telegram_notice}"
-        f"{_demo_controls(roster, has_demo, return_to='/coach/athletes')}{tools}{directory}"
-        f"{_register_form(roster.reviewed_on)}{script}"
+        '<div class="directory-add" style="display:flex;justify-content:space-between;align-items:center;'
+        'gap:1rem;flex-wrap:wrap;margin:0 0 1rem"><p class="muted" style="margin:0">Add an athlete with a name '
+        'and their usual times. You get a Telegram invite straight away.</p>'
+        '<a class="btn btn-primary" href="/coach/athletes/new">Add an athlete</a></div>'
+        f"{tools}{directory}"
+        f"{_demo_controls(roster, has_demo, return_to='/coach/athletes')}{script}"
     )
     return coach_frame(
         body, active="athletes", coach=coach, title="Athletes",
@@ -608,20 +587,19 @@ def render_landing() -> str:
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
         </div>
-        <span class="brand-name">Power AI</span>
-        <span class="brand-badge">Training Log Agent</span>
+        <span class="brand-name" style="white-space:nowrap">Power AI</span>
+        <span class="brand-badge" style="white-space:nowrap">Training Log Agent</span>
       </a>
       <div class="header-status">
         <span class="pulse-dot"></span>
         <span>Active &middot; Deterministic</span>
       </div>
       <nav class="site-nav">
-        <a class="nav-link" href="#protocols">Protocols</a>
-        <a class="nav-link" href="#architecture">Architecture</a>
-        <a class="nav-link" href="#boundaries">Boundaries</a>
-        <a class="nav-link" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">GitHub &nearr;</a>
-        <a class="btn btn-mac-primary" href="{coach_link}">
-          <span>{coach_text}</span>
+        <a class="nav-link" style="white-space:nowrap" href="#how-it-works">How it works</a>
+        <a class="nav-link" style="white-space:nowrap" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">GitHub &nearr;</a>
+        <a class="nav-link" style="white-space:nowrap" href="{coach_link}">Coach console</a>
+        <a class="btn btn-mac-primary" style="white-space:nowrap" href="/demo">
+          <span>Watch the agent work</span>
           {arrow_svg}
         </a>
       </nav>
@@ -631,22 +609,26 @@ def render_landing() -> str:
   <main class="wrapper">
     <!-- Hero Section -->
     <section class="hero">
-      <div class="mac-pill-eyebrow"><span class="mac-pill-icon">⚡</span> WhatsApp Powerlifting Intelligence</div>
+      <div class="mac-pill-eyebrow"><span class="mac-pill-icon">⚡</span> A training-day agent for powerlifting coaches</div>
       <h1 class="hero-h1">
         The coach reads exceptions,<br>
         <span class="serif">not twenty WhatsApp texts a day.</span>
       </h1>
       <p class="hero-lead">
-        A WhatsApp agent for a 20-athlete powerlifting squad. Athletes text their sessions, sleep, and soreness; deterministic Python evaluates progress and readiness; the coach triages exceptions and approves drafted morning messages.
+        Power AI is an agent that owns each athlete's training day: it checks in on Telegram, reads the reply, adjusts the coach's session by fixed rules, follows up when an athlete goes quiet, stops and asks the coach when something is wrong, and closes the day only when it knows what happened.
       </p>
       <div class="cta-row">
-        <a class="btn btn-mac-primary btn-lg" href="{coach_link}">
-          <span>{coach_text} &rarr;</span>
+        <a class="btn btn-mac-primary btn-lg" href="/demo" data-primary-cta>
+          <span>Watch the agent work &rarr;</span>
+        </a>
+        <a class="btn btn-ghost btn-lg" href="{coach_link}">
+          <span>{coach_text}</span>
         </a>
         <a class="btn btn-ghost btn-lg" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">
           <span>Read Source on GitHub &nearr;</span>
         </a>
       </div>
+      <p class="hero-lead" style="font-size:15px;margin-top:10px">A 60-second fictional training day. No login, no setup, nothing sent.</p>
 
       <!-- Studio Specs Strip (Twilio) -->
       <div class="specs-strip">
@@ -707,6 +689,106 @@ def render_landing() -> str:
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- The problem and the closed loop -->
+    <style>
+      .loop-steps{{list-style:none;padding:0;margin:28px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;counter-reset:loop}}
+      .loop-steps li{{counter-increment:loop;background:var(--card,#fff);border-radius:18px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.04)}}
+      .loop-steps li::before{{content:counter(loop);display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:#0a64d6;color:#fff;font-weight:700;font-size:13px;margin-bottom:8px}}
+      .loop-steps b{{display:block;margin-bottom:4px}}
+      .loop-steps span{{font-size:14px;color:var(--secondary-label,#6e6e73)}}
+      .authority-split{{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:24px}}
+      .authority-split ul{{margin:10px 0 0;padding-left:18px;line-height:1.7}}
+      .walkthrough{{margin:24px 0;padding-left:22px;line-height:1.8;max-width:760px}}
+    </style>
+    <section id="how-it-works" class="content-section">
+      <div class="section-head">
+        <span class="mac-eyebrow">The problem</span>
+        <h2 class="section-title">Every training day needs chasing. <span class="serif">Twenty athletes at a time.</span></h2>
+        <p class="section-desc">
+          Ask how they slept. Wait. Chase the ones who went quiet. Ease off after a bad night. Notice the knee that hurts before they train on it. Find out afterwards whether the session happened. It is the same loop every day for every athlete, and it is the first thing to slip when a coach is busy. Power AI runs that loop and hands the coach only the decisions that need a coach.
+        </p>
+      </div>
+      <ol class="loop-steps" aria-label="The closed agent loop">
+        <li><b>Opens the day</b><span>From the coach-approved weekly plan.</span></li>
+        <li><b>Checks in</b><span>At the athlete's own time, on Telegram.</span></li>
+        <li><b>Follows up</b><span>At most twice, then closes the day without guidance.</span></li>
+        <li><b>Interprets</b><span>Gemini turns the reply into validated data.</span></li>
+        <li><b>Decides</b><span>Fixed rules hold or reduce the session. Never increase it.</span></li>
+        <li><b>Acts or escalates</b><span>Routine days go out alone; injuries go to the coach.</span></li>
+        <li><b>Closes</b><span>Only when it knows whether training happened.</span></li>
+      </ol>
+      <div class="authority-split">
+        <div class="feature-card"><span class="feature-badge badge-blue">DOES ALONE</span><h3>Routine, bounded work</h3>
+          <ul><li>Sends check-ins and at most two follow-ups</li><li>Asks once for missing numbers</li><li>Delivers the coach's session, held or reduced, when autopilot is on</li><li>Asks whether training happened and closes the day</li><li>Moves a check-in later for athletes who always reply late, within limits</li></ul></div>
+        <div class="feature-card"><span class="feature-badge badge-red">ALWAYS ASKS THE COACH</span><h3>Anything outside its authority</h3>
+          <ul><li>Any injury or pain report: guidance stops immediately</li><li>Recovery in the red</li><li>Every session while autopilot is off</li><li>No session report after one reminder</li><li>Two silent days in a row, or a message it could not deliver</li></ul></div>
+      </div>
+    </section>
+
+    <section id="walkthrough" class="content-section">
+      <div class="section-head">
+        <span class="mac-eyebrow">See it in one minute</span>
+        <h2 class="section-title">A simulated day, then <span class="serif">the real thing.</span></h2>
+        <p class="section-desc">The public demo runs the real engine, rules and message templates on two fictional athletes in a throwaway database. Nothing is sent and no real data is involved. The real agent does the same work on Telegram for the coach's own athletes.</p>
+      </div>
+      <ol class="walkthrough">
+        <li><b>07:30</b> The agent checks in with Priya and Arjun on its own.</li>
+        <li><b>07:52</b> Priya replies. Her message becomes validated data, fixed rules score her readiness, and her session goes out without the coach.</li>
+        <li><b>09:01</b> Arjun has not replied, so the agent follows up.</li>
+        <li><b>09:18</b> Arjun mentions knee pain. Guidance stops at once and the coach gets the evidence with one-tap options.</li>
+        <li><b>09:30</b> The coach taps a plan. The agent sends it.</li>
+        <li><b>20:31</b> It asks both athletes whether training happened, and closes each day on their answer.</li>
+      </ol>
+      <div class="table-container"><table class="data-table"><thead><tr><th></th><th>Public simulation</th><th>Real Telegram agent</th></tr></thead><tbody>
+        <tr><td>Athletes</td><td>Fictional</td><td>The coach's athletes</td></tr>
+        <tr><td>Messages</td><td>Shown on the page</td><td>Sent on Telegram</td></tr>
+        <tr><td>Clock</td><td>One scripted day in a minute</td><td>Real time</td></tr>
+        <tr><td>Storage</td><td>Throwaway, in memory</td><td>Durable Postgres</td></tr>
+        <tr><td>Access</td><td>Public</td><td>Coach only, via a signed Telegram link</td></tr>
+      </tbody></table></div>
+      <div class="cta-row" style="margin-top:20px"><a class="btn btn-mac-primary btn-lg" href="/demo"><span>Watch the agent work &rarr;</span></a></div>
+    </section>
+
+    <!-- Four parts of the agent -->
+    <section id="four-parts" class="content-section">
+      <div class="section-head">
+        <span class="mac-eyebrow">Four parts of the agent</span>
+        <h2 class="section-title">Perceive, reason, act, <span class="serif">remember and adapt.</span></h2>
+        <p class="section-desc">Each part has one job and fixed limits. The language model is only the first part, and it has no authority.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+        <div class="feature-card"><span class="feature-badge badge-blue">1 &middot; PERCEIVE</span><h3>Understands the athlete</h3>
+          <p>Telegram receives natural-language updates. Gemini converts them into validated facts: sleep, readiness, sets, pain, whether the session happened.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-yellow">2 &middot; REASON</span><h3>Decides what happens next</h3>
+          <p>A persistent case engine tracks each training day, and fixed safety rules decide whether the day is routine or needs the coach.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">3 &middot; ACT</span><h3>Does the work itself</h3>
+          <p>The agent independently sends check-ins, follow-ups, permitted session guidance, outcome questions and coach escalations.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-blue">4 &middot; REMEMBER AND ADAPT</span><h3>Keeps going across days</h3>
+          <p>Postgres preserves every case across restarts. Bounded adaptation safely adjusts communication timing from measured response history.</p></div>
+      </div>
+      <p class="section-desc" style="margin-top:18px"><strong>Gemini interprets language; it does not decide.</strong> It cannot invent training loads, clear injuries or modify safety policy. Sessions come only from the coach's plan, held or reduced by fixed rules; injuries are cleared only by a named person through the coach console.</p>
+    </section>
+
+    <!-- Ways to use Power AI -->
+    <section id="use-power-ai" class="content-section">
+      <div class="section-head">
+        <span class="mac-eyebrow">Ways to use Power AI</span>
+        <h2 class="section-title">Watch it, read it, <span class="serif">or run your own.</span></h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
+        <div class="feature-card"><span class="feature-badge badge-blue">PUBLIC VISITORS</span><h3>Watch the safe demo</h3>
+          <p>A 60-second fictional training day through the real agent. No login, nothing sent, no real data.</p>
+          <p><a class="btn btn-mac-primary" href="/demo">Watch the safe demo</a></p></div>
+        <div class="feature-card"><span class="feature-badge badge-yellow">TECHNICAL REVIEWERS</span><h3>View the source</h3>
+          <p>The case engine, safety rules, tests and the Postgres verification are all in the repository.</p>
+          <p><a class="btn btn-ghost" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">View the source &nearr;</a></p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">ANOTHER COACH</span><h3>Deploy your own private agent</h3>
+          <p>Run your own instance for your team with your own Telegram bot and Postgres database, following the deployment guide.</p>
+          <p><a class="btn btn-ghost" href="https://github.com/Shlok-K-ps/training-log-agent#5-deploy" target="_blank" rel="noopener">Deploy your own private agent &nearr;</a></p></div>
+      </div>
+      <p class="section-desc" style="margin-top:18px">The hosted real console is a <strong>private single-coach deployment</strong>. Public visitors cannot access real athletes, send Telegram messages or become coaches on this instance. An athlete invited by the coach uses the real Telegram agent through a secure, single-use pairing link.</p>
     </section>
 
     <!-- 3-Layers Section -->
@@ -872,7 +954,8 @@ def render_landing() -> str:
       </h2>
       <p class="mac-cta-sub">Deterministic rules, instant athlete triage, coach approval required for every message.</p>
       <div class="mac-cta-actions">
-        <a class="btn btn-mac-primary btn-lg" href="{coach_link}">
+        <a class="btn btn-mac-primary btn-lg" href="/demo"><span>Watch the agent work</span></a>
+        <a class="btn btn-ghost btn-lg" href="{coach_link}">
           <span>{coach_text}</span>
           {arrow_svg}
         </a>
@@ -928,8 +1011,8 @@ def render_privacy() -> str:
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
         </div>
-        <span class="brand-name">Power AI</span>
-        <span class="brand-badge">Training Log Agent</span>
+        <span class="brand-name" style="white-space:nowrap">Power AI</span>
+        <span class="brand-badge" style="white-space:nowrap">Training Log Agent</span>
       </a>
       <nav class="site-nav">
         <a class="nav-link" href="/">&larr; Return to Home</a>
@@ -980,8 +1063,8 @@ def render_terms() -> str:
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
           </svg>
         </div>
-        <span class="brand-name">Power AI</span>
-        <span class="brand-badge">Training Log Agent</span>
+        <span class="brand-name" style="white-space:nowrap">Power AI</span>
+        <span class="brand-badge" style="white-space:nowrap">Training Log Agent</span>
       </a>
       <nav class="site-nav">
         <a class="nav-link" href="/">&larr; Return to Home</a>

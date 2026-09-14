@@ -19,6 +19,7 @@ import logging
 import re
 import secrets
 from datetime import date
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from contextlib import asynccontextmanager
 from contextlib import suppress
 from functools import lru_cache
@@ -31,10 +32,12 @@ from starlette.concurrency import run_in_threadpool
 
 from app.agent.offline import OfflineClient
 from app.agent.parser import GeminiClient, ModelClient
-from app import access, deployment
+from app import access, deployment, public_demo
 from app.agent.schemas import LOOP_TOOL_NAMES
 from app.casework import board as agent_board
 from app.casework import clock, demo_day, engine
+from app.casework import status as agent_status
+from app.coach import demo_view, onboarding_view
 from app.casework import store as case_store
 from app.coach import agent_view
 from app.coach.view import banner, coach_frame
@@ -244,6 +247,13 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def product_home() -> Response:
     return HTMLResponse(render_landing())
+
+
+@app.get("/demo", response_class=HTMLResponse)
+async def watch_the_agent() -> Response:
+    """Public, fictional, self-contained: runs the real agent in a throwaway database."""
+    trace = await run_in_threadpool(public_demo.public_demo)
+    return HTMLResponse(demo_view.render_public_demo(trace))
 
 
 # --- Coach console ------------------------------------------------------------
@@ -471,6 +481,10 @@ def _render_console(message: tuple[str, str] | None) -> str:
             if any(flag.kind == "injured" for flag in entry.flags)
         )
         board = agent_board.snapshot(conn, clock.utcnow())
+        steps = agent_status.setup_checklist(
+            conn, clock.utcnow(), telegram_available=settings.telegram_configured,
+            agent_blocker=deployment.agent_blocker(),
+        )
     finally:
         conn.close()
     return render_roster(
@@ -478,7 +492,9 @@ def _render_console(message: tuple[str, str] | None) -> str:
         has_demo=any(is_demo(a) for a in roster_ids),
         pending_count=len(pending), pending=pending, injury_plans=injury_plans,
         agent_board=agent_view.agent_board(board, blocker=deployment.agent_blocker()),
-        extra_style=agent_view.AGENT_STYLE,
+        extra_style=agent_view.AGENT_STYLE + onboarding_view.ONBOARDING_STYLE,
+        setup_html=onboarding_view.setup_checklist(steps),
+        empty_html=onboarding_view.empty_state() if not roster_ids else "",
     )
 
 
@@ -698,10 +714,11 @@ def _clear_demo() -> tuple[str, str]:
 
 
 @app.get("/coach/athlete/{athlete_id}", response_class=HTMLResponse)
-async def coach_athlete(athlete_id: str, request: Request) -> Response:
-    """One athlete: what they did, what the rules make of it, what to say back."""
+async def coach_athlete(athlete_id: str, request: Request, welcome: str = "") -> Response:
+    """One athlete: whether the agent can work, then evidence, plan and conversation."""
     return _page(
-        request, await run_in_threadpool(_render_athlete, athlete_id, _take_flash(request))
+        request,
+        await run_in_threadpool(_render_athlete, athlete_id, _take_flash(request), welcome == "1"),
     )
 
 
@@ -785,13 +802,114 @@ def _approve_injury_plan(
     return ("ok", f"“{option.title}” is now the plan. The message is scheduled and {channel}.")
 
 
+@app.get("/coach/athletes/new", response_class=HTMLResponse)
+async def coach_new_athlete(request: Request) -> Response:
+    """Add an athlete with a name and usual times. No identifiers to invent."""
+    message = _take_flash(request)
+
+    def render() -> str:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            pending_count = _pending_count(conn)
+        finally:
+            conn.close()
+        return onboarding_view.new_athlete_page(
+            coach=settings.coach_name, today=date.today(), pending_count=pending_count, message=message
+        )
+
+    return _page(request, await run_in_threadpool(render))
+
+
 @app.post("/coach/athletes/register", response_class=HTMLResponse)
 async def coach_register_athlete(request: Request) -> Response:
     form = dict(await request.form())
-    message = await run_in_threadpool(
+    message, athlete_id = await run_in_threadpool(
         _register, {str(key): str(value) for key, value in form.items()}
     )
-    return _redirect("/coach/athletes", message)
+    if athlete_id is None:
+        return _redirect("/coach/athletes/new", message)
+    return _redirect(f"/coach/athlete/{quote(athlete_id)}?welcome=1#telegram", message)
+
+
+@app.get("/coach/setup", response_class=HTMLResponse)
+async def coach_setup(request: Request) -> Response:
+    message = _take_flash(request)
+
+    def render() -> str:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            steps = agent_status.setup_checklist(
+                conn, clock.utcnow(), telegram_available=settings.telegram_configured,
+                agent_blocker=deployment.agent_blocker(),
+            )
+            pending_count = _pending_count(conn)
+        finally:
+            conn.close()
+        return onboarding_view.setup_page(
+            steps, coach=settings.coach_name, today=date.today(), pending_count=pending_count,
+            bot_username=settings.telegram_bot_username, telegram_available=settings.telegram_configured,
+            message=message,
+        )
+
+    return _page(request, await run_in_threadpool(render))
+
+
+def _athlete_status(conn, athlete_id: str):
+    return agent_status.athlete_status(
+        conn, athlete_id, clock.utcnow(), telegram_available=settings.telegram_configured,
+        agent_blocker=deployment.agent_blocker(),
+    )
+
+
+@app.get("/coach/athlete/{athlete_id}/status.json")
+async def coach_athlete_status(athlete_id: str) -> Response:
+    def read() -> dict | None:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            if athlete_id not in db.list_athletes(conn):
+                return None
+            status = _athlete_status(conn, athlete_id)
+        finally:
+            conn.close()
+        label, href = agent_status.next_setup_step(status)
+        return {
+            "telegram_connected": status.telegram_connected, "ready": status.ready,
+            "plan": status.plan, "autopilot": status.autopilot if status.autopilot_decided else None,
+            "next_action": status.next_action, "blockers": status.blockers,
+            "next_step": {"label": label, "href": href},
+        }
+
+    data = await run_in_threadpool(read)
+    if data is None:
+        return Response(status_code=404, content="no such athlete")
+    return Response(content=json.dumps(data), media_type="application/json")
+
+
+@app.get("/coach/athlete/{athlete_id}/simulate", response_class=HTMLResponse)
+async def coach_simulate_athlete(athlete_id: str, request: Request) -> Response:
+    """A safe test: the athlete's next planned day, played in a throwaway database."""
+
+    def render() -> str | None:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            if athlete_id not in db.list_athletes(conn):
+                return None
+            status = _athlete_status(conn, athlete_id)
+            trace = public_demo.simulate_athlete(
+                conn, athlete_id, now=clock.utcnow(), coach_name=settings.coach_name
+            )
+            pending_count = _pending_count(conn)
+        finally:
+            conn.close()
+        return onboarding_view.simulate_page(
+            trace, status, coach=settings.coach_name, today=date.today(), pending_count=pending_count
+        )
+
+    return _page(request, await run_in_threadpool(render))
 
 
 def _approved_outbound(conn) -> list:
@@ -828,7 +946,9 @@ def _reviewable(conn, today: date) -> tuple:
     return tuple(item for item in items if item.message_kind != MORNING)
 
 
-def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | None:
+def _render_athlete(
+    athlete_id: str, message: tuple[str, str] | None, welcome: bool = False
+) -> str | None:
     conn = db.connect()
     try:
         db.init_db(conn)
@@ -844,11 +964,27 @@ def _render_athlete(athlete_id: str, message: tuple[str, str] | None) -> str | N
             row for row in _approved_outbound(conn) if str(row["athlete_id"]) == athlete_id
         ]
         agent_state = agent_board.athlete_agent_state(conn, athlete_id)
+        status = _athlete_status(conn, athlete_id)
     finally:
         conn.close()
+    pairing_url = telegram.pairing_url(athlete_id, telegram_pairing_version)
+    telegram_ready = bool(getattr(app.state, "telegram_webhook_ready", False))
+    next_step = agent_status.next_setup_step(status)
+    local_weekday = clock.utcnow().astimezone(engine._zone(status.timezone)).weekday()
     return render_athlete(
         detail,
-        agent_panel=agent_view.athlete_agent_panel(athlete_id, agent_state),
+        agent_panel=agent_view.athlete_agent_panel(athlete_id, agent_state, default_weekday=local_weekday),
+        status_html=onboarding_view.athlete_status_header(
+            status, next_step=next_step, simulate_href=f"/coach/athlete/{quote(athlete_id)}/simulate"
+        ),
+        invite_html=onboarding_view.invite_section(
+            status, pairing_url=pairing_url, telegram_ready=telegram_ready, welcome=welcome,
+            next_step=next_step,
+        ),
+        advanced_html=onboarding_view.advanced_section(
+            athlete_id, telegram_connected=telegram_chat is not None
+        ),
+        welcome=welcome,
         coach=settings.coach_name,
         suggested=suggest_message(detail, coach=settings.coach_name),
         message=message,
@@ -933,8 +1069,20 @@ def _goal_date_from_form(form: dict[str, str]) -> str | None:
         raise ValueError("goal date must be a valid calendar date") from exc
 
 
-def _register(form: dict[str, str]) -> tuple[str, str]:
-    athlete_id = re.sub(r"[\s()-]", "", form.get("athlete_id", ""))
+def _clock_field(raw: str, label: str) -> str | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    match = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", value)
+    if match is None:
+        raise ValueError(f"{label} must be a time like 07:30")
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
+def _register(form: dict[str, str]) -> tuple[tuple[str, str], str | None]:
+    """Add an athlete. The internal identifier is generated unless a WhatsApp number is given."""
+    supplied = re.sub(r"[\s()-]", "", form.get("athlete_id", ""))
+    athlete_id = supplied or db.new_athlete_id()
     name = form.get("name", "")
     injury_note = form.get("injury_note", "").strip()
     if injury_note.casefold() in {"no", "none", "nothing", "nil", "n/a", "na"}:
@@ -942,6 +1090,16 @@ def _register(form: dict[str, str]) -> tuple[str, str]:
     conn = db.connect()
     try:
         db.init_db(conn)
+        timezone_name = form.get("timezone", "").strip() or None
+        if timezone_name:
+            try:
+                ZoneInfo(timezone_name)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError("choose a timezone from the list") from None
+        checkin = _clock_field(form.get("checkin_time", ""), "check-in time")
+        training = _clock_field(form.get("training_time", ""), "training time")
+        if checkin and training and checkin >= training:
+            raise ValueError("the check-in must be earlier in the day than training")
         db.register_athlete(
             conn,
             athlete_id,
@@ -959,11 +1117,17 @@ def _register(form: dict[str, str]) -> tuple[str, str]:
             goal_target_date=_goal_date_from_form(form),
             created_by=settings.coach_name,
         )
+        if timezone_name or checkin or training:
+            db.insert_entry(conn, db.Entry(
+                athlete_id=athlete_id, kind="status", timezone=timezone_name,
+                morning_checkin_time=checkin, training_time=training,
+                session_date=date.today().isoformat(),
+            ))
     except ValueError as exc:
-        return ("err", f"Not added: {exc}")
+        return ("err", f"Not added: {exc}"), None
     finally:
         conn.close()
-    return ("ok", f"{name.strip()} added. They appear once they text, or right away here.")
+    return ("ok", f"{name.strip()} added. Send them the Telegram invite below."), athlete_id
 
 
 @app.get("/coach/outbox", include_in_schema=False)

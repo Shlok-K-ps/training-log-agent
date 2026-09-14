@@ -304,6 +304,10 @@ def render_athlete(
     awaiting: int = 0,
     pending_count: int = 0,
     agent_panel: str = "",
+    status_html: str = "",
+    invite_html: str | None = None,
+    advanced_html: str = "",
+    welcome: bool = False,
 ) -> str:
     banner = ""
     if message:
@@ -451,12 +455,18 @@ def render_athlete(
         "</form></div>"
     )
 
+    channel = (
+        invite_html if invite_html is not None
+        else _telegram_panel(detail, telegram_pairing_url, telegram_linked, telegram_ready)
+    )
     body = (
-        f"{banner}{_hero(detail, plan=plan, awaiting=awaiting)}"
+        # Straight after registration the invite comes first; otherwise the readiness answers do.
+        f"{banner}{channel + status_html if welcome else status_html + channel}"
+        f"{_hero(detail, plan=plan, awaiting=awaiting)}"
         '<nav class="section-nav" aria-label="Athlete sections">'
-        '<a href="#agent-plan">Agent</a><a href="#evidence">Evidence</a><a href="#plan">Plan</a>'
+        '<a href="#agent-status">Status</a><a href="#agent-plan">Agent plan</a>'
+        '<a href="#evidence">Evidence</a><a href="#plan">Profile</a>'
         '<a href="#messages">Messages</a></nav>'
-        f"{_telegram_panel(detail, telegram_pairing_url, telegram_linked, telegram_ready)}"
         f"{_injury_clearance_panel(detail)}"
         f"{'' if detail.clearance_requested else _injury_plan_panel(detail, coach=coach, plan=plan)}"
         f"{agent_panel}"
@@ -464,11 +474,18 @@ def render_athlete(
         f'<div class="profile-main">{evidence}{plan_section}</div>'
         f'<aside id="messages" class="profile-side">{thread}{compose}</aside>'
         '</div>'
+        f"{advanced_html}"
     )
+    if status_html:
+        from app.coach.onboarding_view import ONBOARDING_STYLE
+
+        style = AGENT_STYLE + ONBOARDING_STYLE
+    else:
+        style = AGENT_STYLE if agent_panel else ""
     return coach_frame(
         body, active="athletes", coach=coach, title=detail.display_name,
-        subtitle=f"{detail.athlete_id} · evidence, plan and conversation",
+        subtitle="Agent status, evidence, profile and conversation",
         today=detail.reviewed_on.isoformat(), back=("/coach/athletes", "Athletes"),
         athlete_id=detail.athlete_id, pending_count=pending_count,
-        extra_style=AGENT_STYLE if agent_panel else "",
+        extra_style=style,
     )
