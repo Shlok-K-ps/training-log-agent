@@ -476,14 +476,18 @@ def invite_section(
         '<span class="setup-eyebrow">Telegram</span>'
     welcome_class = " welcome" if welcome else ""
     if not pairing_url:
+        # No invite can exist yet, so point at work that is possible meanwhile, never back at this card.
+        meanwhile = (
+            f'<p class="invite-next">Meanwhile you can <a href="{escape(status.url)}#agent-plan">create the weekly '
+            "plan</a>.</p>" if not status.plan else ""
+        )
         return (
             f'<section id="telegram" class="invite-card{welcome_class}">{eyebrow}'
             "<h2>Telegram isn't set up on this deployment</h2>"
             f"<p>The agent reaches athletes on Telegram, so {first} can't be invited until the bot is configured "
             "(<code>TELEGRAM_BOT_TOKEN</code>, <code>TELEGRAM_BOT_USERNAME</code>, <code>TELEGRAM_WEBHOOK_SECRET</code>, "
             "<code>TELEGRAM_LINK_SECRET</code>, <code>PUBLIC_BASE_URL</code>).</p>"
-            f'<p class="invite-status">Telegram: not connected</p>'
-            f'<p class="invite-next">Meanwhile: <a href="{escape(next_step[1])}">{escape(next_step[0])}</a></p></section>'
+            f'<p class="invite-status">Telegram: not connected</p>{meanwhile}</section>'
         )
     quoted = escape(quote(status.athlete_id))
     url = escape(pairing_url)

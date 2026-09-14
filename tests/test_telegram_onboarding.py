@@ -294,6 +294,17 @@ def test_the_connection_card_guides_the_coach_without_exposing_the_link(env):
     assert "Telegram connected." not in client.get(f"{url}?connected=1").text, "the banner needs a real connection"
 
 
+def test_without_a_bot_username_the_card_explains_and_points_at_possible_work(env, monkeypatch):
+    client, settings, _ = env
+    url = _register(settings)
+    monkeypatch.setattr(settings, "telegram_bot_username", "")
+    card = BeautifulSoup(client.get(url).text, "html.parser").select_one("#telegram")
+    assert card.select_one("h2").get_text(strip=True) == "Telegram isn't set up on this deployment"
+    assert card.select_one("button[data-copy]") is None
+    links = [unquote(a["href"]) for a in card.select("a")]
+    assert links == [f"{url}#agent-plan"], "never a link back to this same card"
+
+
 # --- Coach notes: queued once, sent once ---------------------------------------
 
 

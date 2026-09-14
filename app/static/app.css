@@ -3530,10 +3530,31 @@ dialog form button {
   }
 }
 
+@media (max-width: 900px) {
+  /* The compact top bar is fixed on phones and tablets: in-page links land below it. */
+  .athlete-top > section,
+  .athlete-lower > section,
+  #agent-status,
+  #telegram,
+  #agent-plan,
+  #autopilot,
+  #outbox {
+    scroll-margin-top: calc(64px + env(safe-area-inset-top));
+  }
+}
+
 @media (max-width: 640px) {
   .athlete-lower {
     gap: 24px;
     margin-top: 24px;
+  }
+
+  /* Keep values such as dates on one line instead of breaking at the hyphen. */
+  .profile-section .tile .v {
+    font-size: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .field-day,
