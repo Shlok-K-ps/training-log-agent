@@ -751,6 +751,46 @@ def render_landing() -> str:
       <div class="cta-row" style="margin-top:20px"><a class="btn btn-mac-primary btn-lg" href="/demo"><span>Watch the agent work &rarr;</span></a></div>
     </section>
 
+    <!-- Four parts of the agent -->
+    <section id="four-parts" class="content-section">
+      <div class="section-head">
+        <span class="mac-eyebrow">Four parts of the agent</span>
+        <h2 class="section-title">Perceive, reason, act, <span class="serif">remember and adapt.</span></h2>
+        <p class="section-desc">Each part has one job and fixed limits. The language model is only the first part, and it has no authority.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+        <div class="feature-card"><span class="feature-badge badge-blue">1 &middot; PERCEIVE</span><h3>Understands the athlete</h3>
+          <p>Telegram receives natural-language updates. Gemini converts them into validated facts: sleep, readiness, sets, pain, whether the session happened.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-yellow">2 &middot; REASON</span><h3>Decides what happens next</h3>
+          <p>A persistent case engine tracks each training day, and fixed safety rules decide whether the day is routine or needs the coach.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">3 &middot; ACT</span><h3>Does the work itself</h3>
+          <p>The agent independently sends check-ins, follow-ups, permitted session guidance, outcome questions and coach escalations.</p></div>
+        <div class="feature-card"><span class="feature-badge badge-blue">4 &middot; REMEMBER AND ADAPT</span><h3>Keeps going across days</h3>
+          <p>Postgres preserves every case across restarts. Bounded adaptation safely adjusts communication timing from measured response history.</p></div>
+      </div>
+      <p class="section-desc" style="margin-top:18px"><strong>Gemini interprets language; it does not decide.</strong> It cannot invent training loads, clear injuries or modify safety policy. Sessions come only from the coach's plan, held or reduced by fixed rules; injuries are cleared only by a named person through the coach console.</p>
+    </section>
+
+    <!-- Ways to use Power AI -->
+    <section id="use-power-ai" class="content-section">
+      <div class="section-head">
+        <span class="mac-eyebrow">Ways to use Power AI</span>
+        <h2 class="section-title">Watch it, read it, <span class="serif">or run your own.</span></h2>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px">
+        <div class="feature-card"><span class="feature-badge badge-blue">PUBLIC VISITORS</span><h3>Watch the safe demo</h3>
+          <p>A 60-second fictional training day through the real agent. No login, nothing sent, no real data.</p>
+          <p><a class="btn btn-mac-primary" href="/demo">Watch the safe demo</a></p></div>
+        <div class="feature-card"><span class="feature-badge badge-yellow">TECHNICAL REVIEWERS</span><h3>View the source</h3>
+          <p>The case engine, safety rules, tests and the Postgres verification are all in the repository.</p>
+          <p><a class="btn btn-ghost" href="https://github.com/Shlok-K-ps/training-log-agent" target="_blank" rel="noopener">View the source &nearr;</a></p></div>
+        <div class="feature-card"><span class="feature-badge badge-red">ANOTHER COACH</span><h3>Deploy your own private agent</h3>
+          <p>Run your own instance for your team with your own Telegram bot and Postgres database, following the deployment guide.</p>
+          <p><a class="btn btn-ghost" href="https://github.com/Shlok-K-ps/training-log-agent#5-deploy" target="_blank" rel="noopener">Deploy your own private agent &nearr;</a></p></div>
+      </div>
+      <p class="section-desc" style="margin-top:18px">The hosted real console is a <strong>private single-coach deployment</strong>. Public visitors cannot access real athletes, send Telegram messages or become coaches on this instance. An athlete invited by the coach uses the real Telegram agent through a secure, single-use pairing link.</p>
+    </section>
+
     <!-- 3-Layers Section -->
     <section id="architecture" class="content-section">
       <div class="section-head">

@@ -101,6 +101,36 @@ database), and view the agent's timeline.
 Screenshots are regenerated from a fictional local instance with
 `python scripts/capture_screenshots.py`.
 
+## Four parts of the agent
+
+| Part | What it does |
+|---|---|
+| **Perceive** | Telegram receives natural-language updates; Gemini converts them into validated facts (sleep, readiness, sets, pain, whether the session happened). |
+| **Reason** | The persistent case engine and fixed safety rules determine what happens next: routine, or the coach decides. |
+| **Act** | The agent independently sends check-ins, follow-ups, permitted session guidance, outcome questions and coach escalations. |
+| **Remember and adapt** | Postgres preserves cases across restarts, and bounded adaptation safely adjusts communication timing from measured response history. |
+
+**Gemini interprets language; it does not decide.** It cannot invent training loads,
+clear injuries or modify safety policy. Sessions come only from the coach's approved
+plan, held or reduced by fixed rules, and an injury is cleared only by a named person
+recorded through the coach console.
+
+## Ways to use Power AI
+
+- **Watch the safe demo** (public visitors): open `/demo` on the live site. A
+  fictional training day through the real agent. No login, nothing sent, no real data.
+- **View the source** (technical reviewers): this repository, including the case
+  engine, safety rules, the browser-level usability tests and the live Postgres
+  verification.
+- **Deploy your own private agent** (another coach): run your own instance with your
+  own Telegram bot and Postgres database. See [Deploy](#5-deploy).
+
+The hosted real console is a **private single-coach deployment**. Public visitors
+cannot access real athletes, send Telegram messages or become coaches on this
+instance. An athlete invited by the coach uses the real Telegram agent through a
+secure, single-use pairing link. Public coach registration and multi-tenancy are
+deliberately out of scope for this project.
+
 ## The training-day agent
 
 The core of the system is an agent that owns one athlete's scheduled training day

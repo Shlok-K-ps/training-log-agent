@@ -103,5 +103,10 @@ def test_the_landing_page_explains_the_agent():
     for text in (
         "The problem", 'aria-label="The closed agent loop"', "DOES ALONE", "ALWAYS ASKS THE COACH",
         "Public simulation", "Real Telegram agent", "See it in one minute",
+        "Four parts of the agent", "1 &middot; PERCEIVE", "2 &middot; REASON", "3 &middot; ACT",
+        "4 &middot; REMEMBER AND ADAPT", "It cannot invent training loads, clear injuries or modify safety policy.",
+        "Ways to use Power AI", 'href="/demo">Watch the safe demo</a>', "View the source",
+        "Deploy your own private agent", "private single-coach deployment",
+        "Public visitors cannot access real athletes, send Telegram messages or become coaches on this instance.",
     ):
         assert text in html
