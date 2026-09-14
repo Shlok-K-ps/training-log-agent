@@ -14,6 +14,7 @@ from app.coach.athlete import AthleteDetail, progress_series
 from app.coach.view import coach_frame, conversation_bubbles, initials
 from app.decision.injury_pivot import InjuryPivot, pivot_message
 from app.scheduling.outbox import message_kind_label
+from app.storage.db import normalized_message
 
 _BUCKET_TONE = {"needs_you": "act", "watch": "watch", "meet_prep": "meet", "fine": "fine"}
 _BUCKET_BADGE = {
@@ -49,7 +50,7 @@ def _hero(detail: AthleteDetail, *, plan: InjuryPivot | None, awaiting: int) -> 
     elif awaiting:
         action = ("/coach/whatsapp?tab=approval", f"Approve {awaiting} message{'s' if awaiting != 1 else ''}")
     else:
-        action = (f"/coach/athlete/{athlete}#messages", "Message athlete")
+        action = None  # nothing needs attention; setup and messages have their own sections
     meta = [
         ("Readiness", f"{detail.readiness_score}/100" if detail.readiness_score is not None else "not checked in"),
         ("Last log", detail.last_activity or "never"),
@@ -66,8 +67,9 @@ def _hero(detail: AthleteDetail, *, plan: InjuryPivot | None, awaiting: int) -> 
         f'<span class="badge {badge_cls}">{badge_text}</span>'
         f'<p class="hero-status">{escape(status)}</p>'
         f'<div class="hero-meta">{meta_html}</div></div>'
-        f'<div class="hero-action"><a class="btn btn-primary" href="{action[0]}">{escape(action[1])}</a></div>'
-        '</section>'
+        + (f'<div class="hero-action"><a class="btn btn-primary" href="{action[0]}">{escape(action[1])}</a></div>'
+           if action else "")
+        + '</section>'
     )
 
 
@@ -263,13 +265,12 @@ def _telegram_panel(
             '</form></section>'
         )
     if pairing_url and ready:
+        # No link to open here: whoever opens an invite and presses Start becomes this athlete.
         return (
             '<section class="channel-callout"><div><span class="channel-label">Athlete channel · Action needed</span>'
-            '<h2>Connect this athlete to Telegram</h2>'
-            '<p>Open the signed link, press Start in Telegram, and this private chat '
-            'will be paired to the athlete profile.</p></div>'
-            f'<a class="approve" href="{escape(pairing_url)}" '
-            'target="_blank" rel="noopener">Connect Telegram</a></section>'
+            '<h2>This athlete is not connected yet</h2>'
+            '<p>Send the athlete their private invite. They open it with their own Telegram '
+            'and press Start.</p></div></section>'
         )
     if pairing_url:
         return (
@@ -278,6 +279,86 @@ def _telegram_panel(
             'Render has not confirmed its webhook. Check the deployment log before pairing.</p></div></section>'
         )
     return ""
+
+
+def _row_value(row, key: str):
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return None
+
+
+def _delivery_state(row, today: str) -> tuple[str, str]:
+    """(label, tone) for one outbound message: scheduled, awaiting approval, sent, failed or cancelled."""
+    status = str(row["status"])
+    resolution = _row_value(row, "resolution")
+    if status == "sent":
+        return ("Sent", "sent")
+    if status == "pending":
+        return ("Awaiting approval", "pending")
+    if status == "approved":
+        local_date = str(row["local_date"])
+        return (f"Scheduled for {local_date}" if local_date > today else "Scheduled", "scheduled")
+    if resolution == "failed":
+        return ("Failed", "failed")
+    if resolution == "duplicate":
+        return ("Duplicate, not sent", "cancelled")
+    if resolution == "cancelled":
+        return ("Cancelled", "cancelled")
+    return ("Skipped", "cancelled")
+
+
+def _outbox(rows, *, athlete_id: str, first_name: str, today: str) -> str:
+    """Every recent outbound message with its delivery state. Identical duplicates collapse into one line."""
+    def identity(row) -> tuple[str, str, str]:
+        kind = str(row["message_kind"]).split(":", 1)[0]
+        return (str(row["local_date"]), kind, normalized_message(str(row["body"])))
+
+    originals = {identity(row) for row in rows if _row_value(row, "resolution") != "duplicate"}
+    duplicates: dict[tuple[str, str, str], int] = {}
+    kept = []
+    for row in rows:
+        key = identity(row)
+        if _row_value(row, "resolution") == "duplicate" and key in originals:
+            duplicates[key] = duplicates.get(key, 0) + 1
+        else:
+            kept.append((key, row))
+
+    items = []
+    noted: set[tuple[str, str, str]] = set()
+    for key, row in kept:
+        label, tone = _delivery_state(row, today)
+        notes = []
+        if duplicates.get(key) and key not in noted:
+            count = duplicates[key]
+            notes.append(f"{count} identical duplicate{'s' if count != 1 else ''} blocked, not sent.")
+            noted.add(key)
+        if tone == "failed":
+            notes.append("Delivery failed and is not retried automatically. Queue it again if it should still go out.")
+        cancel = (
+            f'<form class="outbox-cancel" method="post" action="/coach/athlete/{escape(athlete_id)}/messages/cancel">'
+            f'<input type="hidden" name="message_kind" value="{escape(str(row["message_kind"]))}">'
+            f'<input type="hidden" name="local_date" value="{escape(str(row["local_date"]))}">'
+            '<button class="btn btn-ghost btn-sm" type="submit">Cancel message</button></form>'
+            if str(row["status"]) in {"pending", "approved"} else ""
+        )
+        note_html = "".join(f"<span>{escape(note)}</span>" for note in notes)
+        foot = f'<div class="outbox-foot"><div class="outbox-notes">{note_html}</div>{cancel}</div>' \
+            if note_html or cancel else ""
+        items.append(
+            f'<li class="outbox-item" data-delivery="{tone}">'
+            f'<div class="outbox-top"><span>{escape(message_kind_label(str(row["message_kind"])))} · '
+            f'{escape(str(row["local_date"]))}</span><span class="delivery-badge {tone}">{escape(label)}</span></div>'
+            f'<p class="outbox-body">{escape(str(row["body"]))}</p>{foot}</li>'
+        )
+    content = (
+        f'<ul class="outbox">{"".join(items)}</ul>' if items
+        else f'<p class="empty">Nothing scheduled or sent to {escape(first_name)} yet.</p>'
+    )
+    return (
+        '<section class="context-card outbox-card" id="outbox"><h2>Scheduled and sent</h2>'
+        f"{content}</section>"
+    )
 
 
 def _facts(items: list[tuple[str, object]]) -> str:
@@ -301,6 +382,8 @@ def render_athlete(
     telegram_ready: bool | None = None,
     conversation=(),
     scheduled=(),
+    outbox=None,
+    today: str | None = None,
     awaiting: int = 0,
     pending_count: int = 0,
     agent_panel: str = "",
@@ -416,17 +499,17 @@ def render_athlete(
         ("Approved supplements", supplement_text),
     ]) + '</div>'
     plan_section = (
-        '<section id="plan" class="profile-section"><h2>Plan</h2>'
+        '<section id="plan" class="profile-section"><h2>Profile</h2>'
         f'<div class="context-grid">{recovery_panel}{program_panel}{schedule_panel}{nutrition_panel}</div>'
         '</section>'
     )
 
     # --- Messages: the conversation, what is scheduled, and a note to send ---
     first_name = detail.display_name.split()[0] if detail.name else "the athlete"
-    scheduled_html = "".join(
-        f'<div><span>{escape(message_kind_label(str(row["message_kind"])))} · '
-        f'{escape(str(row["local_date"]))}</span>{escape(str(row["body"]))}</div>'
-        for row in scheduled
+    outbox_html = _outbox(
+        list(scheduled) if outbox is None else list(outbox),
+        athlete_id=detail.athlete_id, first_name=first_name,
+        today=today or detail.reviewed_on.isoformat(),
     )
     thread = (
         '<section class="context-card thread-card"><h2>Conversation</h2>'
@@ -434,7 +517,6 @@ def render_athlete(
             f'<div class="chat-stream">{conversation_bubbles(conversation)}</div>'
             if conversation else f'<p class="empty">No messages with {escape(first_name)} yet.</p>'
         )
-        + (f'<div class="scheduled-mini"><h3>Scheduled to send</h3>{scheduled_html}</div>' if scheduled else "")
         + "</section>"
     )
     compose = (
@@ -449,32 +531,41 @@ def render_athlete(
         '<div class="section-caption">Preview</div>'
         f'<div id="live-preview-bubble" class="chat-bubble">{escape(suggested)}</div>'
         '</div>'
-        '<div class="btns"><button class="btn btn-primary" type="submit">Approve and queue</button></div>'
+        '<div class="btns"><button class="btn btn-primary" type="submit">Queue message</button></div>'
         '<p class="hint">Built from this athlete\'s record and current trend. Edit freely. '
-        "The exact approved wording is what will be sent.</p>"
+        "The exact wording you queue is what will be sent, once: the same message is never "
+        "queued or sent twice on one day.</p>"
         "</form></div>"
+    )
+    messages = (
+        '<section id="messages" class="profile-section messages-section"><h2>Messages</h2>'
+        f'<div class="messages-grid"><div class="messages-col">{thread}</div>'
+        f'<div class="messages-col">{compose}{outbox_html}</div></div></section>'
     )
 
     channel = (
         invite_html if invite_html is not None
         else _telegram_panel(detail, telegram_pairing_url, telegram_linked, telegram_ready)
     )
+    nav_links = (
+        ([("#agent-status", "Setup")] if status_html else [])
+        + ([("#agent-plan", "Plan"), ("#autopilot", "Autopilot")] if agent_panel else [])
+        + [("#evidence", "Evidence"), ("#messages", "Messages"), ("#plan", "Profile")]
+    )
+    nav = (
+        '<nav class="section-nav athlete-nav" aria-label="Athlete sections">'
+        + "".join(f'<a href="{href}">{label}</a>' for href, label in nav_links)
+        + "</nav>"
+    )
+    # Who this is and whether they need attention; then setup (Telegram, plan,
+    # autopilot, what happens next); only then the evidence and conversation.
     body = (
-        # Straight after registration the invite comes first; otherwise the readiness answers do.
-        f"{banner}{channel + status_html if welcome else status_html + channel}"
-        f"{_hero(detail, plan=plan, awaiting=awaiting)}"
-        '<nav class="section-nav" aria-label="Athlete sections">'
-        '<a href="#agent-status">Status</a><a href="#agent-plan">Agent plan</a>'
-        '<a href="#evidence">Evidence</a><a href="#plan">Profile</a>'
-        '<a href="#messages">Messages</a></nav>'
+        f"{banner}"
+        f'<div class="athlete-top">{_hero(detail, plan=plan, awaiting=awaiting)}{nav}'
         f"{_injury_clearance_panel(detail)}"
         f"{'' if detail.clearance_requested else _injury_plan_panel(detail, coach=coach, plan=plan)}"
-        f"{agent_panel}"
-        '<div class="profile-grid">'
-        f'<div class="profile-main">{evidence}{plan_section}</div>'
-        f'<aside id="messages" class="profile-side">{thread}{compose}</aside>'
-        '</div>'
-        f"{advanced_html}"
+        f"{status_html}{channel}{agent_panel}</div>"
+        f'<div class="athlete-lower">{evidence}{messages}{plan_section}{advanced_html}</div>'
     )
     if status_html:
         from app.coach.onboarding_view import ONBOARDING_STYLE

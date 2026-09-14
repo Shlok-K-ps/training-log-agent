@@ -16,6 +16,8 @@ from app.casework.agent_view_labels import WEEKDAY_SHORT
 from app.coach.demo import is_demo
 from app.storage import db
 
+WAITING_FOR_DECISION = "Today's training day is waiting for your decision."
+
 
 @dataclass
 class AthleteStatus:
@@ -34,6 +36,8 @@ class AthleteStatus:
     training_time: str
     next_action: str
     blockers: list[str] = field(default_factory=list)
+    # The blockers that are simply unfinished setup steps (no Telegram, no plan).
+    setup_gaps: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     latest_case_id: int | None = None
     waiting_case_id: int | None = None
@@ -98,16 +102,21 @@ def athlete_status(
     if agent_blocker:
         status.blockers.append(agent_blocker)
     if not status.reachable:
-        status.blockers.append(
-            f"Telegram is not connected, so the agent cannot message {first}."
-            if telegram_available else
-            "The Telegram bot is not configured on this deployment, so the agent cannot message real athletes."
-        )
+        if telegram_available:
+            gap = f"Telegram is not connected, so the agent cannot message {first}."
+            status.blockers.append(gap)
+            status.setup_gaps.append(gap)
+        else:
+            status.blockers.append(
+                "The Telegram bot is not configured on this deployment, so the agent cannot message real athletes."
+            )
     if not plan:
-        status.blockers.append(f"No training plan yet, so the agent has no training days to run for {first}.")
+        gap = f"No training plan yet, so the agent has no training days to run for {first}."
+        status.blockers.append(gap)
+        status.setup_gaps.append(gap)
     if open_case is not None and open_case["state"] == "needs_coach":
         status.waiting_case_id = int(open_case["id"])
-        status.blockers.append("Today's training day is waiting for your decision.")
+        status.blockers.append(WAITING_FOR_DECISION)
 
     if plan and not decided:
         status.notes.append("Autopilot not decided yet: every session will wait for your approval.")
@@ -116,9 +125,13 @@ def athlete_status(
     if injured:
         status.notes.append("Injury open: the agent sends no training guidance until you decide.")
 
-    setup_blockers = [b for b in status.blockers if b != "Today's training day is waiting for your decision."]
+    setup_blockers = [b for b in status.blockers if b != WAITING_FOR_DECISION]
     if setup_blockers:
-        status.next_action = "Nothing until the blocking items below are fixed."
+        status.next_action = (
+            "Nothing yet. The agent starts once the setup steps above are finished."
+            if setup_blockers == status.setup_gaps else
+            "Nothing until the blocking items above are fixed."
+        )
     elif open_case is not None:
         if open_case["state"] == "needs_coach":
             status.next_action = "Waiting for your decision on today's training day."
@@ -156,11 +169,11 @@ def _next_training_day(conn, athlete_id, local_now, weekdays, checkin, training)
 
 def next_setup_step(status: AthleteStatus) -> tuple[str, str]:
     if not status.reachable:
-        return ("Invite on Telegram", f"{status.url}#telegram")
+        return ("Send the Telegram invite", f"{status.url}#telegram")
     if not status.plan:
-        return ("Add a training plan", f"{status.url}#agent-plan")
+        return ("Create weekly plan", f"{status.url}#agent-plan")
     if not status.autopilot_decided:
-        return ("Decide on autopilot", f"{status.url}#agent-status")
+        return ("Choose autopilot", f"{status.url}#autopilot")
     return ("Run a safe simulated test", f"{status.url}/simulate")
 
 
@@ -215,7 +228,7 @@ def setup_checklist(conn, now: datetime, *, telegram_available: bool, agent_bloc
             "key": "autopilot", "label": "Autopilot decision made", "done": decided is not None,
             "detail": f"{decided.first_name}: autopilot {'on' if decided.autopilot else 'off'}." if decided
             else "Choose whether routine days go out without you.",
-            "href": f"{to_decide.url}#agent-status" if to_decide else (f"{to_plan.url}#agent-plan" if to_plan else add_url),
+            "href": f"{to_decide.url}#autopilot" if to_decide else (f"{to_plan.url}#agent-plan" if to_plan else add_url),
             "action": "Decide on autopilot",
         },
         {

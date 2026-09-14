@@ -55,9 +55,7 @@ AGENT_STYLE = """
 .learned{background:linear-gradient(135deg,rgba(142,68,173,.08),rgba(0,122,255,.06));border-radius:18px;padding:1rem 1.1rem;margin:0 0 .75rem}
 .learned b{font-variant-numeric:tabular-nums}
 .plan-table{width:100%;border-collapse:collapse;font-size:.9rem}
-.plan-table th,.plan-table td{text-align:left;padding:.45rem .3rem;border-top:1px solid rgba(60,60,67,.12)}
-.plan-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(7rem,1fr));gap:.5rem;align-items:end;margin-top:.75rem}
-.plan-form label{display:flex;flex-direction:column;font-size:.75rem;gap:.2rem}
+.plan-table th,.plan-table td{text-align:left;padding:.45rem .3rem;border-top:1px solid var(--separator)}
 @media (max-width:720px){.agent-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
 .timeline li{grid-template-columns:4.5rem 1fr}.timeline li .kind{grid-column:2}}
 """
@@ -330,22 +328,27 @@ def render_case_body(case, events, *, athlete_name: str, message_banner: str) ->
     )
 
 
-def athlete_agent_panel(athlete_id: str, state: dict, *, default_weekday: int | None = None) -> str:
+def athlete_agent_panel(
+    athlete_id: str, state: dict, *, default_weekday: int | None = None, autopilot_decided: bool = True
+) -> str:
+    """The coach-approved weekly plan (current plan, then the add form) and the autopilot choice."""
     quoted = escape(athlete_id)
     settings = state["settings"]
-    autopilot = settings["autopilot"]
-    rows = "".join(
-        f"<tr><td>{WEEKDAYS[int(row['weekday'])]}</td><td>{escape(str(row['lift']).title())}</td>"
-        f"<td>{int(row['sets'])}×{int(row['reps'])}</td><td>RPE {float(row['rpe']):g}</td>"
-        f"<td><form method='post' action='/coach/athlete/{quoted}/plan/retire'>"
+    autopilot = bool(settings["autopilot"])
+    items = "".join(
+        "<li>"
+        f"<span class='plan-day'>{WEEKDAYS[int(row['weekday'])]}</span>"
+        f"<span class='plan-lift'>{escape(str(row['lift']).title())}</span>"
+        f"<span class='plan-dose'>{int(row['sets'])}×{int(row['reps'])} · RPE {float(row['rpe']):g}</span>"
+        f"<form method='post' action='/coach/athlete/{quoted}/plan/retire'>"
         f"<input type='hidden' name='session_id' value='{int(row['id'])}'>"
-        "<button class='btn btn-ghost btn-sm' type='submit'>Remove</button></form></td></tr>"
+        f"<button class='btn btn-ghost btn-sm' type='submit' aria-label='Remove {escape(str(row['lift']).title())} "
+        f"on {WEEKDAYS[int(row['weekday'])]}'>Remove</button></form></li>"
         for row in state["plan"]
     )
-    table = (
-        f"<table class='plan-table'><thead><tr><th>Day</th><th>Lift</th><th>Sets×reps</th><th>Target</th><th></th></tr></thead>"
-        f"<tbody>{rows}</tbody></table>"
-        if rows else "<p class='section-note'>No approved plan yet, so the agent will not open training days.</p>"
+    current = (
+        f"<ul class='plan-list'>{items}</ul>" if items else
+        "<p class='plan-empty'>No approved plan yet, so the agent has no training days to run.</p>"
     )
     weekday_options = "".join(
         f"<option value='{i}'{' selected' if i == default_weekday else ''}>"
@@ -354,19 +357,45 @@ def athlete_agent_panel(athlete_id: str, state: dict, *, default_weekday: int | 
     )
     add_form = (
         f"<form class='plan-form' method='post' action='/coach/athlete/{quoted}/plan'>"
-        f"<label>Day<select name='weekday'>{weekday_options}</select></label>"
-        "<label>Lift<input name='lift' required maxlength='40' placeholder='squat'></label>"
-        "<label>Sets<input name='sets' type='number' min='1' max='20' value='3' required></label>"
-        "<label>Reps<input name='reps' type='number' min='1' max='30' value='5' required></label>"
-        "<label>RPE<input name='rpe' type='number' min='5' max='10' step='0.5' value='7' required></label>"
-        "<button class='btn btn-primary btn-sm' type='submit'>Approve lift</button></form>"
+        "<h3>Add a session</h3><div class='plan-fields'>"
+        f"<div class='field field-day'><label for='plan-weekday'>Day</label>"
+        f"<select id='plan-weekday' name='weekday'>{weekday_options}</select></div>"
+        "<div class='field field-lift'><label for='plan-lift'>Lift</label>"
+        "<input id='plan-lift' name='lift' type='text' required maxlength='40' placeholder='e.g. Squat' "
+        "autocomplete='off'></div>"
+        "<div class='field field-num'><label for='plan-sets'>Sets</label>"
+        "<input id='plan-sets' name='sets' type='number' inputmode='numeric' min='1' max='20' value='3' required></div>"
+        "<div class='field field-num'><label for='plan-reps'>Reps</label>"
+        "<input id='plan-reps' name='reps' type='number' inputmode='numeric' min='1' max='30' value='5' required></div>"
+        "<div class='field field-num'><label for='plan-rpe'>RPE</label>"
+        "<input id='plan-rpe' name='rpe' type='number' inputmode='decimal' min='5' max='10' step='0.5' value='7' "
+        "required></div></div>"
+        "<div class='plan-form-foot'><p>Only sessions you add here can ever be delivered.</p>"
+        "<button class='btn btn-primary' type='submit'>Add to weekly plan</button></div></form>"
     )
-    toggle = (
-        f"<form method='post' action='/coach/athlete/{quoted}/autopilot'>"
-        f"<input type='hidden' name='enabled' value='{'off' if autopilot else 'on'}'>"
-        f"<button class='btn {'btn-ghost' if autopilot else 'btn-primary'} btn-sm' type='submit'>"
-        f"{'Turn autopilot off' if autopilot else 'Turn autopilot on'}</button></form>"
-    )
+
+    def autopilot_form(value: str, label: str, primary: bool) -> str:
+        return (
+            f"<form method='post' action='/coach/athlete/{quoted}/autopilot'>"
+            f"<input type='hidden' name='enabled' value='{value}'>"
+            f"<button class='btn {'btn-primary' if primary else 'btn-ghost'} btn-sm' type='submit'>{label}</button></form>"
+        )
+
+    if not autopilot_decided:
+        badge = "<span class='status-badge'>Not decided</span>"
+        summary = ("<b>Autopilot not decided.</b> Until you choose, every session waits for your approval "
+                   "before it is sent.")
+        controls = autopilot_form("on", "Turn autopilot on", True) + autopilot_form("off", "Keep autopilot off", False)
+    elif autopilot:
+        badge = ("<span class='status-badge ready'>On</span>" if state["plan"]
+                 else "<span class='status-badge'>On, idle</span>")
+        summary = ("<b>Autopilot on.</b> Routine days are delivered without you; the agent can only hold or "
+                   "reduce an approved session.")
+        controls = autopilot_form("off", "Turn autopilot off", False)
+    else:
+        badge = "<span class='status-badge off'>Off</span>"
+        summary = "<b>Autopilot off.</b> Every session waits for your approval before it is sent."
+        controls = autopilot_form("on", "Turn autopilot on", False)
     adaptation = state["adaptation"]
     checkin_note = (
         f"Check-in adapted to {escape(adaptation['new_value'])} (was {escape(adaptation['old_value'])}). "
@@ -379,12 +408,17 @@ def athlete_agent_panel(athlete_id: str, state: dict, *, default_weekday: int | 
         for case in state["cases"]
     ) or "<li>No training days yet.</li>"
     return (
-        "<section class='panel' id='agent-plan'>"
-        "<div class='panel-head'><h2>Training-day agent</h2></div>"
-        f"<p class='section-note'><b>Autopilot {'on' if autopilot else 'off'}.</b> "
-        + ("Routine days are delivered without you; the session is only ever held or reduced. "
-           if autopilot else "Every session waits for your approval before it is sent. ")
-        + f"{checkin_note}</p>{toggle}"
-        f"<h3>Approved weekly plan</h3>{table}{add_form}"
+        "<div class='agent-panels'>"
+        "<section class='panel agent-panel' id='agent-plan'>"
+        "<div class='panel-head'><h2>Weekly plan</h2></div>"
+        "<p class='section-note'>The agent only delivers sessions you have approved here. It never writes "
+        "training of its own; on a bad day it can only hold or reduce one.</p>"
+        f"<div class='plan-layout'><div class='plan-current'><h3>Current plan</h3>{current}</div>{add_form}</div>"
+        "</section>"
+        "<section class='panel agent-panel' id='autopilot'>"
+        f"<div class='panel-head'><h2>Autopilot</h2>{badge}</div>"
+        f"<p class='section-note'>{summary}</p><div class='status-actions'>{controls}</div>"
+        f"<p class='case-meta autopilot-checkin'>{checkin_note}</p>"
         f"<h3>Recent training days</h3><ul class='case-evidence'>{cases}</ul></section>"
+        "</div>"
     )

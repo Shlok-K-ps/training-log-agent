@@ -346,6 +346,16 @@ CREATE TABLE IF NOT EXISTS agent_lease (
     holder      TEXT NOT NULL,
     expires_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS telegram_pairing_attempts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id  TEXT NOT NULL,
+    outcome     TEXT NOT NULL,
+    occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_telegram_pairing_attempts_athlete
+    ON telegram_pairing_attempts (athlete_id, id);
 """
 
 INJURY_COLUMNS = {
@@ -411,6 +421,11 @@ SUPPLEMENT_COLUMNS = {
 
 OUTBOUND_DRAFT_COLUMNS = {
     "evidence_version": "INTEGER NOT NULL DEFAULT 0",
+    # Why a draft will never be sent, kept instead of deleting the record:
+    # 'cancelled' by the coach, 'duplicate' of an identical message, or 'failed'.
+    "resolution": "TEXT",
+    "resolved_at": "TEXT",
+    "last_error": "TEXT",
 }
 
 ATHLETE_PROFILE_COLUMNS = {
@@ -1449,24 +1464,45 @@ def record_whatsapp_message(
     return int(cur.lastrowid)
 
 
+class PairingError(ValueError):
+    """A Telegram pairing that must not happen, with a code the UI can explain."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 def link_telegram_chat(
     conn: sqlite3.Connection,
     *,
     chat_id: str,
     athlete_id: str,
     pairing_version: int | None = None,
-) -> None:
-    """Bind one private Telegram chat to one existing athlete, without takeover."""
+) -> str:
+    """Bind one private Telegram chat to one existing athlete, without takeover.
+
+    Returns "linked", or "already" when this chat is already this athlete's.
+    One chat belongs to one athlete and one athlete to one chat; nothing here
+    lets a link move either.
+    """
     if athlete_id not in list_athletes(conn):
-        raise ValueError("that athlete is not enrolled")
+        raise PairingError("not_enrolled", "that athlete is not enrolled")
     current_chat = telegram_chat_id(conn, athlete_id)
     current_athlete = telegram_athlete_id(conn, chat_id)
-    if current_chat not in (None, chat_id) or current_athlete not in (None, athlete_id):
-        raise ValueError("this athlete or Telegram chat is already paired")
+    if current_chat == str(chat_id) and current_athlete == athlete_id:
+        return "already"
+    if current_athlete not in (None, athlete_id):
+        raise PairingError(
+            "chat_connected_elsewhere", "this Telegram chat is already paired with another athlete"
+        )
+    if current_chat not in (None, str(chat_id)):
+        raise PairingError(
+            "athlete_connected_elsewhere", "this athlete is already paired with a different Telegram chat"
+        )
     if pairing_version is not None:
         current_version = telegram_pairing_version(conn, athlete_id)
         if pairing_version != current_version:
-            raise ValueError("this pairing link has already been used or replaced")
+            raise PairingError("link_replaced", "this pairing link has already been used or replaced")
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn.execute(
         "INSERT INTO telegram_links (chat_id, athlete_id, linked_at) VALUES (?, ?, ?) "
@@ -1481,6 +1517,35 @@ def link_telegram_chat(
             (athlete_id,),
         )
     conn.commit()
+    return "linked"
+
+
+def rotate_telegram_pairing(conn: sqlite3.Connection, athlete_id: str) -> int:
+    """Invalidate every earlier invite for this athlete. Returns the new version."""
+    telegram_pairing_version(conn, athlete_id)
+    conn.execute(
+        "UPDATE telegram_pairing_state SET version = version + 1 WHERE athlete_id = ?",
+        (athlete_id,),
+    )
+    conn.commit()
+    return telegram_pairing_version(conn, athlete_id)
+
+
+def record_pairing_attempt(conn: sqlite3.Connection, athlete_id: str, outcome: str) -> None:
+    """Remember what happened for the coach. Stores no chat id and no token."""
+    conn.execute(
+        "INSERT INTO telegram_pairing_attempts (athlete_id, outcome, occurred_at) VALUES (?, ?, ?)",
+        (athlete_id, outcome, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+    )
+    conn.commit()
+
+
+def latest_pairing_attempt(conn: sqlite3.Connection, athlete_id: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT outcome, occurred_at FROM telegram_pairing_attempts WHERE athlete_id = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (athlete_id,),
+    ).fetchone()
 
 
 def telegram_pairing_version(conn: sqlite3.Connection, athlete_id: str) -> int:
@@ -1741,6 +1806,97 @@ def mark_draft_sent(
         (athlete_id, message_kind, local_date),
     )
     conn.commit()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def normalized_message(body: str) -> str:
+    """Two messages are the same message if they differ only in spacing or case."""
+    return " ".join(str(body).split()).casefold()
+
+
+def claim_draft_for_send(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> bool:
+    """Atomically move an approved draft to sent before it leaves.
+
+    Only one worker can win the claim, so concurrent or repeated ticks can never
+    deliver the same draft twice. If the send then fails, the draft is marked
+    failed rather than retried, because the provider may already have accepted it.
+    """
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'sent', resolved_at = ? "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'",
+        (_now_iso(), athlete_id, message_kind, local_date),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def mark_draft_failed(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str, error: str
+) -> None:
+    conn.execute(
+        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'failed', resolved_at = ?, "
+        "last_error = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
+        (_now_iso(), error[:200], athlete_id, message_kind, local_date),
+    )
+    conn.commit()
+
+
+def mark_draft_duplicate(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+) -> bool:
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'duplicate', resolved_at = ? "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
+        "AND status IN ('pending', 'approved')",
+        (_now_iso(), athlete_id, message_kind, local_date),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def cancel_draft(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str, *, cancelled_by: str
+) -> bool:
+    """Cancel a message that has not left yet. False if it was already sent or resolved."""
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'cancelled', resolved_at = ?, "
+        "reviewed_by = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
+        "AND status IN ('pending', 'approved')",
+        (_now_iso(), (cancelled_by or "Coach")[:80], athlete_id, message_kind, local_date),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def athlete_drafts(conn: sqlite3.Connection, athlete_id: str, *, limit: int = 20) -> list[sqlite3.Row]:
+    """This athlete's outbound messages, newest first, whatever their state."""
+    return list(conn.execute(
+        "SELECT * FROM outbound_drafts WHERE athlete_id = ? "
+        "ORDER BY local_date DESC, created_at DESC LIMIT ?",
+        (athlete_id, max(1, min(int(limit), 100))),
+    ))
+
+
+def identical_note(
+    conn: sqlite3.Connection, athlete_id: str, local_date: str, body: str, *, prefix: str,
+    statuses: tuple[str, ...] = ("pending", "approved"), exclude_kind: str | None = None,
+) -> sqlite3.Row | None:
+    """A message with the same text for the same athlete and day, in one of `statuses`."""
+    wanted = normalized_message(body)
+    placeholders = ", ".join("?" for _ in statuses)
+    for row in conn.execute(
+        "SELECT * FROM outbound_drafts WHERE athlete_id = ? AND local_date = ? "
+        f"AND message_kind LIKE ? AND status IN ({placeholders}) ORDER BY created_at",
+        (athlete_id, local_date, prefix + "%", *statuses),
+    ):
+        if str(row["message_kind"]) != exclude_kind and normalized_message(row["body"]) == wanted:
+            return row
+    return None
 
 
 def list_scheduled_athletes(conn: sqlite3.Connection) -> list[str]:

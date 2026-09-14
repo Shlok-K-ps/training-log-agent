@@ -15,7 +15,7 @@ silence, not an unsupervised broadcast. This is a product invariant, not configu
 
 from __future__ import annotations
 
-import secrets
+import hashlib
 import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -31,9 +31,30 @@ FEEDBACK_REPLY = "feedback_reply:"
 INJURY_PLAN = FEEDBACK_REPLY + "injury:"
 
 
-def new_coach_note_kind() -> str:
-    """Each coach note gets its own key, so two notes on one day both go out."""
-    return f"{COACH_NOTE}:{secrets.token_hex(6)}"
+def coach_note_kind(body: str) -> str:
+    """The key of a coach note is its content.
+
+    Different notes on one day get different keys, so both go out. The same note
+    typed or submitted twice gets the same key, so the database can hold it only
+    once, even when two requests arrive together.
+    """
+    digest = hashlib.sha256(db.normalized_message(body).encode("utf-8")).hexdigest()[:12]
+    return f"{COACH_NOTE}:{digest}"
+
+
+def _deliver(conn: sqlite3.Connection, row, sender: Callable[[str, str], None]) -> bool:
+    """Claim, then send. A draft that loses the claim or fails to send is never retried."""
+    athlete_id, message_kind, local_date = (
+        str(row["athlete_id"]), str(row["message_kind"]), str(row["local_date"])
+    )
+    if not db.claim_draft_for_send(conn, athlete_id, message_kind, local_date):
+        return False  # already sent by another worker, cancelled, or resolved
+    try:
+        sender(athlete_id, str(row["body"]))
+    except Exception as exc:  # noqa: BLE001 - one failed send must not stop the others
+        db.mark_draft_failed(conn, athlete_id, message_kind, local_date, type(exc).__name__)
+        return False
+    return True
 
 
 def message_kind_label(message_kind: str) -> str:
@@ -137,17 +158,28 @@ def send_approved_notes(
     """
     now_utc = now_utc or datetime.now(timezone.utc)
     sent = 0
+    handled: set[tuple[str, str, str]] = set()
     for row in db.approved_drafts_with_prefix(conn, COACH_NOTE):
         athlete_id = str(row["athlete_id"])
+        message_kind, local_date = str(row["message_kind"]), str(row["local_date"])
         resolved = _local_now(conn, athlete_id, now_utc)
         local_today = (
             resolved[0].date().isoformat() if resolved else now_utc.date().isoformat()
         )
-        if str(row["local_date"]) > local_today:
+        if local_date > local_today:
             continue
-        sender(athlete_id, str(row["body"]))
-        db.mark_draft_sent(conn, athlete_id, str(row["message_kind"]), str(row["local_date"]))
-        sent += 1
+        identity = (athlete_id, local_date, db.normalized_message(row["body"]))
+        already_sent = db.identical_note(
+            conn, athlete_id, local_date, str(row["body"]), prefix=COACH_NOTE,
+            statuses=("sent",), exclude_kind=message_kind,
+        )
+        if identity in handled or already_sent is not None:
+            # An identical note for this athlete and day is already on its way.
+            db.mark_draft_duplicate(conn, athlete_id, message_kind, local_date)
+            continue
+        handled.add(identity)
+        if _deliver(conn, row, sender):
+            sent += 1
     return sent
 
 
@@ -165,7 +197,6 @@ def send_approved_feedback(
             conn, athlete_id, message_kind, local_date
         ):
             continue
-        sender(athlete_id, str(row["body"]))
-        db.mark_draft_sent(conn, athlete_id, message_kind, local_date)
-        sent += 1
+        if _deliver(conn, row, sender):
+            sent += 1
     return sent

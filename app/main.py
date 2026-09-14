@@ -59,7 +59,7 @@ from app.scheduling.outbox import (
     FEEDBACK_REPLY,
     INJURY_PLAN,
     MORNING,
-    new_coach_note_kind,
+    coach_note_kind,
     send_approved_feedback,
     send_approved_notes,
 )
@@ -85,6 +85,40 @@ logging.basicConfig(
 log = logging.getLogger("power-agent")
 
 FEEDBACK_ACK = "Got it — I’ve logged your update and sent it to your coach for review."
+# What the bot says when pairing cannot happen. Each names the athlete's next step.
+PLAIN_START_REPLY = (
+    "Hi! To connect to Power AI, open the private invite link your coach sent you and press "
+    "Start. Opening the bot or typing /start on its own can't tell me who you are."
+)
+INVALID_INVITE_REPLY = (
+    "This invite link isn't valid. Ask your coach to send you a fresh invite from Power AI, "
+    "then open it and press Start."
+)
+UNPAIRED_CHAT_REPLY = (
+    "This Telegram account isn't connected to Power AI yet. Open the private invite link your "
+    "coach sent you and press Start. Opening the bot or typing /start on its own can't connect you."
+)
+
+
+def _pairing_failure_reply(code: str, name: str) -> str:
+    if code == "link_replaced":
+        return (
+            "This invite has already been used or was replaced by a newer one. Ask your coach "
+            "for a fresh invite, then open it and press Start."
+        )
+    if code == "athlete_connected_elsewhere":
+        return (
+            f"{name} is already connected to a different Telegram account. If that's wrong, ask "
+            "your coach to disconnect it and send you a fresh invite."
+        )
+    if code == "chat_connected_elsewhere":
+        return (
+            f"This Telegram account is already connected to another athlete, so it can't also be "
+            f"connected to {name}. Open the invite from your own Telegram account, or ask your coach."
+        )
+    return INVALID_INVITE_REPLY
+
+
 # Channels where the training-day agent reads the message and may answer itself.
 AGENT_CHANNELS = frozenset({"telegram", "simulator"})
 INJURY_ACK = "Your injury update is logged. Training guidance is paused and your coach has been notified."
@@ -722,11 +756,15 @@ def _clear_demo() -> tuple[str, str]:
 
 
 @app.get("/coach/athlete/{athlete_id}", response_class=HTMLResponse)
-async def coach_athlete(athlete_id: str, request: Request, welcome: str = "") -> Response:
+async def coach_athlete(
+    athlete_id: str, request: Request, welcome: str = "", connected: str = ""
+) -> Response:
     """One athlete: whether the agent can work, then evidence, plan and conversation."""
     return _page(
         request,
-        await run_in_threadpool(_render_athlete, athlete_id, _take_flash(request), welcome == "1"),
+        await run_in_threadpool(
+            _render_athlete, athlete_id, _take_flash(request), welcome == "1", connected == "1"
+        ),
     )
 
 
@@ -738,6 +776,29 @@ async def coach_message_athlete(athlete_id: str, request: Request) -> Response:
         _queue_note, athlete_id, str(form.get("body", ""))
     )
     return _redirect(_athlete_url(athlete_id, "messages"), message)
+
+
+@app.post("/coach/athlete/{athlete_id}/messages/cancel", response_class=HTMLResponse)
+async def coach_cancel_message(athlete_id: str, request: Request) -> Response:
+    """Stop a message before it leaves. The record stays, marked cancelled."""
+    form = dict(await request.form())
+    message_kind = str(form.get("message_kind", "")).strip()
+    local_date = str(form.get("local_date", "")).strip()
+
+    def cancel() -> tuple[str, str]:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            cancelled = db.cancel_draft(
+                conn, athlete_id, message_kind, local_date, cancelled_by=settings.coach_name
+            )
+        finally:
+            conn.close()
+        if cancelled:
+            return ("ok", "Cancelled. That message will not be sent.")
+        return ("err", "Nothing to cancel: that message was already sent or cancelled.")
+
+    return _redirect(_athlete_url(athlete_id, "messages"), await run_in_threadpool(cancel))
 
 
 @app.post("/coach/athlete/{athlete_id}/injury-plan", response_class=HTMLResponse)
@@ -880,6 +941,7 @@ async def coach_athlete_status(athlete_id: str) -> Response:
             if athlete_id not in db.list_athletes(conn):
                 return None
             status = _athlete_status(conn, athlete_id)
+            attempt = _pairing_attempt_summary(conn, athlete_id)
         finally:
             conn.close()
         label, href = agent_status.next_setup_step(status)
@@ -888,6 +950,7 @@ async def coach_athlete_status(athlete_id: str) -> Response:
             "plan": status.plan, "autopilot": status.autopilot if status.autopilot_decided else None,
             "next_action": status.next_action, "blockers": status.blockers,
             "next_step": {"label": label, "href": href},
+            "last_attempt": attempt,
         }
 
     data = await run_in_threadpool(read)
@@ -954,8 +1017,23 @@ def _reviewable(conn, today: date) -> tuple:
     return tuple(item for item in items if item.message_kind != MORNING)
 
 
+def _pairing_attempt_summary(conn, athlete_id: str) -> dict | None:
+    """What the coach may see about the latest invite attempt: an outcome and a time, nothing else."""
+    row = db.latest_pairing_attempt(conn, athlete_id)
+    if row is None:
+        return None
+    label = telegram.PAIRING_OUTCOME_LABELS.get(str(row["outcome"]))
+    if label is None:
+        return None
+    return {
+        "outcome": str(row["outcome"]), "label": label,
+        "when": agent_view.when(str(row["occurred_at"]), "UTC", "%d %b, %H:%M UTC"),
+    }
+
+
 def _render_athlete(
-    athlete_id: str, message: tuple[str, str] | None, welcome: bool = False
+    athlete_id: str, message: tuple[str, str] | None, welcome: bool = False,
+    connected: bool = False,
 ) -> str | None:
     conn = db.connect()
     try:
@@ -968,26 +1046,36 @@ def _render_athlete(
         telegram_pairing_version = db.telegram_pairing_version(conn, athlete_id)
         conversation = db.whatsapp_messages(conn, athlete_id, limit=40)
         pending = _visible_drafts(conn)
-        scheduled = [
-            row for row in _approved_outbound(conn) if str(row["athlete_id"]) == athlete_id
+        outbox = [
+            row for row in db.athlete_drafts(conn, athlete_id, limit=30)
+            if _legacy_checkins_visible() or str(row["message_kind"]) != MORNING
         ]
         agent_state = agent_board.athlete_agent_state(conn, athlete_id)
         status = _athlete_status(conn, athlete_id)
+        attempt = _pairing_attempt_summary(conn, athlete_id)
     finally:
         conn.close()
-    pairing_url = telegram.pairing_url(athlete_id, telegram_pairing_version)
+    try:
+        pairing_url = None if telegram_chat else telegram.pairing_url(athlete_id, telegram_pairing_version)
+    except ValueError:
+        pairing_url = None
     telegram_ready = bool(getattr(app.state, "telegram_webhook_ready", False))
     next_step = agent_status.next_setup_step(status)
     local_weekday = clock.utcnow().astimezone(engine._zone(status.timezone)).weekday()
+    if connected and telegram_chat is not None and message is None:
+        message = ("ok", f"Telegram connected. {status.first_name} can now receive the agent's messages.")
     return render_athlete(
         detail,
-        agent_panel=agent_view.athlete_agent_panel(athlete_id, agent_state, default_weekday=local_weekday),
+        agent_panel=agent_view.athlete_agent_panel(
+            athlete_id, agent_state, default_weekday=local_weekday,
+            autopilot_decided=status.autopilot_decided,
+        ),
         status_html=onboarding_view.athlete_status_header(
             status, next_step=next_step, simulate_href=f"/coach/athlete/{quote(athlete_id)}/simulate"
         ),
         invite_html=onboarding_view.invite_section(
             status, pairing_url=pairing_url, telegram_ready=telegram_ready, welcome=welcome,
-            next_step=next_step,
+            next_step=next_step, last_attempt=attempt,
         ),
         advanced_html=onboarding_view.advanced_section(
             athlete_id, telegram_connected=telegram_chat is not None
@@ -996,13 +1084,12 @@ def _render_athlete(
         coach=settings.coach_name,
         suggested=suggest_message(detail, coach=settings.coach_name),
         message=message,
-        telegram_pairing_url=telegram.pairing_url(
-            athlete_id, telegram_pairing_version
-        ),
+        telegram_pairing_url=pairing_url,
         telegram_linked=telegram_chat is not None,
-        telegram_ready=bool(getattr(app.state, "telegram_webhook_ready", False)),
+        telegram_ready=telegram_ready,
         conversation=conversation,
-        scheduled=scheduled,
+        outbox=outbox,
+        today=today.isoformat(),
         awaiting=sum(1 for row in pending if str(row["athlete_id"]) == athlete_id),
         pending_count=len(pending),
     )
@@ -1014,26 +1101,71 @@ async def coach_unlink_telegram(athlete_id: str) -> Response:
     try:
         db.init_db(conn)
         removed = db.unlink_telegram_chat(conn, athlete_id)
+        if removed:
+            # An invite shared before the disconnect must not quietly re-bind someone.
+            db.rotate_telegram_pairing(conn, athlete_id)
+            db.record_pairing_attempt(conn, athlete_id, "invite_refreshed")
     finally:
         conn.close()
     message = (
-        ("ok", "Telegram was disconnected. The next pairing link can bind a new chat.")
+        ("ok", "Telegram was disconnected and earlier invites stopped working. Copy the new invite to reconnect.")
         if removed
         else ("err", "This athlete did not have a Telegram chat connected.")
     )
-    return _redirect(_athlete_url(athlete_id), message)
+    return _redirect(_athlete_url(athlete_id, "telegram"), message)
+
+
+@app.post("/coach/athlete/{athlete_id}/telegram/refresh-invite", response_class=HTMLResponse)
+async def coach_refresh_invite(athlete_id: str) -> Response:
+    """Replace the athlete's invite. Every earlier invite stops working at once."""
+
+    def rotate() -> tuple[str, str]:
+        conn = db.connect()
+        try:
+            db.init_db(conn)
+            if athlete_id not in db.list_athletes(conn):
+                return ("err", "No such athlete.")
+            first = (db.athlete_name(conn, athlete_id) or "This athlete").split()[0]
+            if db.telegram_chat_id(conn, athlete_id):
+                return ("err", f"{first} is already connected. Disconnect Telegram under Advanced before creating a new invite.")
+            db.rotate_telegram_pairing(conn, athlete_id)
+            db.record_pairing_attempt(conn, athlete_id, "invite_refreshed")
+        finally:
+            conn.close()
+        return ("ok", f"New invite created. Earlier invites for {first} no longer work, so copy and send this one.")
+
+    return _redirect(_athlete_url(athlete_id, "telegram"), await run_in_threadpool(rotate))
 
 
 def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
+    """Queue a coach note once: the same text for the same athlete and day is never queued twice.
+
+    The note's key is its content, so even two requests arriving together meet the
+    database's primary key and only one row can exist.
+    """
     body = body.strip()
     if not body:
         return ("err", "Nothing to send — the message was empty.")
+    already = ("ok", "That exact message is already scheduled for today, so it was not added again.")
     conn = db.connect()
     try:
         db.init_db(conn)
         today = date.today().isoformat()
-        message_kind = new_coach_note_kind()
-        db.create_draft(conn, athlete_id, message_kind, today, body)
+        if db.identical_note(conn, athlete_id, today, body, prefix=COACH_NOTE) is not None:
+            return already
+        if db.identical_note(
+            conn, athlete_id, today, body, prefix=COACH_NOTE, statuses=("sent",)
+        ) is not None:
+            return ("err", "That exact message was already sent today, so it was not queued again. "
+                           "Change the wording if you want to send another.")
+        base_kind = message_kind = coach_note_kind(body)
+        attempt = 1
+        while db.draft(conn, athlete_id, message_kind, today) is not None:
+            # An earlier identical note was cancelled or failed; keep that record as it is.
+            attempt += 1
+            message_kind = f"{base_kind}:{attempt}"
+        if not db.create_draft(conn, athlete_id, message_kind, today, body):
+            return already  # a simultaneous request queued it first
         db.review_draft(
             conn, athlete_id, message_kind, today,
             status="approved", reviewed_by=settings.coach_name, body=body,
@@ -1660,32 +1792,36 @@ async def telegram_webhook(request: Request) -> Response:
             pairing = telegram.athlete_from_pairing_token(pieces[1]) if len(pieces) == 2 else None
             athlete_id = pairing[0] if pairing is not None else None
             if len(pieces) == 1:
-                reply = (
-                    "Power AI is ready, but a plain /start cannot identify your athlete "
-                    "profile. Ask your coach to open your athlete page and press Connect "
-                    "Telegram, then use that secure link."
-                )
-            elif pairing is None:
-                reply = "This pairing link is invalid or expired. Ask your coach for a fresh link."
+                reply = PLAIN_START_REPLY
+            elif pairing is None or athlete_id not in db.list_athletes(conn):
+                athlete_id = None
+                reply = INVALID_INVITE_REPLY
             else:
+                name = db.athlete_name(conn, athlete_id) or "your athlete profile"
                 try:
-                    db.link_telegram_chat(
+                    outcome = db.link_telegram_chat(
                         conn, chat_id=chat_id, athlete_id=athlete_id,
                         pairing_version=pairing[1],
                     )
-                    name = db.athlete_name(conn, athlete_id) or "your athlete profile"
-                    reply = (
-                        f"Connected to Power AI as {name}. Send your training, sleep, "
-                        "readiness or nutrition update whenever you're ready."
-                    )
-                    db.record_whatsapp_message(
-                        conn, athlete_id=athlete_id, direction="inbound",
-                        body="Telegram pairing accepted", status="received",
-                        provider_sid=inbound_sid, message_kind="channel_pairing",
-                        channel="telegram",
-                    )
-                except ValueError as exc:
-                    reply = f"Telegram could not be connected: {exc}."
+                except db.PairingError as exc:
+                    db.record_pairing_attempt(conn, athlete_id, exc.code)
+                    reply = _pairing_failure_reply(exc.code, name)
+                else:
+                    if outcome == "already":
+                        db.record_pairing_attempt(conn, athlete_id, "already_connected")
+                        reply = f"You're already connected to Power AI as {name}. Nothing else to do."
+                    else:
+                        db.record_pairing_attempt(conn, athlete_id, "connected")
+                        reply = (
+                            f"Connected to Power AI as {name}. Send your training, sleep, "
+                            "readiness or nutrition update whenever you're ready."
+                        )
+                        db.record_whatsapp_message(
+                            conn, athlete_id=athlete_id, direction="inbound",
+                            body="Telegram pairing accepted", status="received",
+                            provider_sid=inbound_sid, message_kind="channel_pairing",
+                            channel="telegram",
+                        )
             try:
                 outbound_sid = await run_in_threadpool(
                     telegram.send_outbound, chat_id, reply
@@ -1710,8 +1846,7 @@ async def telegram_webhook(request: Request) -> Response:
         await run_in_threadpool(
             telegram.send_outbound,
             chat_id,
-            "This chat is not paired. Ask your coach to open your athlete page and "
-            "send you the secure Telegram pairing link.",
+            UNPAIRED_CHAT_REPLY,
         )
         return Response(status_code=200, content="not paired")
 

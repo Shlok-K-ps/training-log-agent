@@ -214,8 +214,12 @@ def test_a_new_coach_follows_setup_to_a_ready_agent(site, monkeypatch):
     browser.loaded("/coach/athlete/athlete-")
 
     assert "Priya Nair added" in browser.text()
+    assert browser.text("#telegram h2") == "Priya is not connected yet"
+    assert browser.eval("!document.querySelector('.invite-raw').open && "
+                        "!document.querySelector('input.invite-link').checkVisibility()"), "raw link stays folded away"
     browser.send("Browser.grantPermissions", origin=base,
                  permissions=["clipboardReadWrite", "clipboardSanitizedWrite"])
+    assert browser.text("button[data-copy]") == "Copy invite for Priya"
     browser.click("button[data-copy]")
     copied = browser.wait_for("window.__powerCopied")
     assert copied == browser.eval("document.querySelector('button[data-copy]').dataset.copy")
@@ -224,13 +228,18 @@ def test_a_new_coach_follows_setup_to_a_ready_agent(site, monkeypatch):
     assert athlete_id not in browser.text(), "the internal ID is not visible on the page"
 
     assert browser.text('[data-status="telegram"]') == "Not connected"
-    assert browser.text("#agent-status .status-badge") == "Blocked"
+    assert browser.text("#agent-status .status-badge") == "Setup needed"
+    browser.click("button[data-check-connection]")
+    browser.wait_for("document.querySelector('[data-telegram-status]').innerText.startsWith('Not connected yet')")
 
     conn = db.connect(settings.database_path)
     db.link_telegram_chat(conn, chat_id="7001", athlete_id=athlete_id)  # Priya presses Start
     conn.close()
-    browser.wait_for("document.querySelector('[data-telegram-status]').innerText.includes('Connected')", timeout=15)
-    assert browser.eval("!document.querySelector('[data-next-step]').hidden")
+    # The page notices by itself and reloads, so every section shows the connection.
+    browser.wait_for("location.search.includes('connected=1') && document.readyState === 'complete' && "
+                     "document.querySelector('[data-status=\"telegram\"]')?.innerText === 'Connected'", timeout=15)
+    assert browser.eval("document.getElementById('telegram') === null")
+    assert "Telegram connected." in browser.text(".msg.ok")
 
     browser.goto(base + "/coach")
     assert browser.eval("!!document.querySelector('[data-step-state=\"paired:done\"]')")
@@ -243,8 +252,9 @@ def test_a_new_coach_follows_setup_to_a_ready_agent(site, monkeypatch):
     browser.wait_for("!!document.querySelector('.msg.ok')")
     assert browser.text('[data-status="training-plan"]').startswith("Mon")
 
-    browser.eval("""[...document.querySelectorAll('#agent-status button')]
-      .find(button => button.innerText === 'Enable autopilot').click(); true""")
+    assert browser.text("#agent-status .status-actions a") == "Choose autopilot"
+    browser.eval("""[...document.querySelectorAll('#autopilot button')]
+      .find(button => button.innerText === 'Turn autopilot on').click(); true""")
     browser.wait_for("document.querySelector('[data-status=\"autopilot\"]')?.innerText === 'On'")
     assert browser.text("#agent-status .status-badge") == "Ready"
     assert browser.text('[data-status="next-action"]') == "Check-in today at 07:30."
@@ -259,3 +269,50 @@ def test_a_new_coach_follows_setup_to_a_ready_agent(site, monkeypatch):
     assert browser.text("#agent-status .status-badge") == "Blocked"
     assert "DATABASE_URL" in browser.text("#agent-status")
     assert deployment.agent_blocker() is not None
+
+
+LAYOUT_CHECK = """(() => {
+  const width = window.innerWidth;
+  const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+  const inside = (selector) => { const r = box(selector); return r.width > 0 && r.left >= -1 && r.right <= width + 1; };
+  const top = (selector) => box(selector).top + window.scrollY;
+  return {
+    overflow: document.documentElement.scrollWidth - width,
+    copyInside: inside('button[data-copy]'),
+    checkInside: inside('button[data-check-connection]'),
+    fieldsInside: ['#plan-weekday', '#plan-lift', '#plan-sets', '#plan-reps', '#plan-rpe'].every(inside),
+    addInside: inside('#agent-plan form.plan-form button[type=submit]'),
+    liftWidth: box('#plan-lift').width, setsWidth: box('#plan-sets').width,
+    labelled: ['plan-weekday', 'plan-lift', 'plan-sets', 'plan-reps', 'plan-rpe']
+      .every(id => document.querySelector('label[for="' + id + '"]')),
+    order: ['#agent-status', '#telegram', '#agent-plan', '#autopilot', '#evidence', '#messages', '#plan'].map(top),
+    sticky: [...document.querySelectorAll('.athlete-top *, .athlete-lower *')]
+      .filter(node => ['sticky', 'fixed'].includes(getComputedStyle(node).position)).length,
+    stepperColumns: getComputedStyle(document.querySelector('.stepper')).gridTemplateColumns.split(' ').length,
+  };
+})()"""
+
+
+def test_athlete_onboarding_page_works_on_a_laptop_and_a_phone(site):
+    base, browser, _ = site
+    registered = httpx.post(f"{base}/coach/athletes/register", data={
+        "name": "Nikash Rao", "timezone": "Asia/Kolkata", "checkin_time": "07:30", "training_time": "18:00",
+    })
+    athlete_url = base + urlparse(registered.headers["location"]).path
+    try:
+        for width, height, mobile, columns in ((1280, 900, False, 4), (375, 812, True, 2)):
+            browser.send("Emulation.setDeviceMetricsOverride", width=width, height=height,
+                         deviceScaleFactor=1, mobile=mobile)
+            browser.goto(athlete_url)
+            layout = browser.eval(LAYOUT_CHECK)
+            assert layout["overflow"] <= 1, (width, layout)
+            assert layout["copyInside"] and layout["checkInside"], (width, layout)
+            assert layout["fieldsInside"] and layout["addInside"] and layout["labelled"], (width, layout)
+            assert layout["order"] == sorted(layout["order"]), (width, "setup comes before evidence and messages")
+            assert layout["sticky"] == 0, (width, "nothing sticks over the setup cards or conversation")
+            assert layout["stepperColumns"] == columns, (width, layout)
+            if not mobile:
+                assert layout["liftWidth"] > 1.8 * layout["setsWidth"], layout
+            assert browser.text("#telegram h2") == "Nikash is not connected yet"
+    finally:
+        browser.send("Emulation.clearDeviceMetricsOverride")
