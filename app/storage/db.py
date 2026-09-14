@@ -1202,6 +1202,25 @@ def approved_drafts(conn: sqlite3.Connection, message_kind: str) -> list[sqlite3
     )
 
 
+GENERATED_ID_PREFIX = "athlete-"
+
+
+def new_athlete_id() -> str:
+    """An internal identifier for athletes added by the coach. Never shown in normal UI."""
+    import secrets
+
+    return GENERATED_ID_PREFIX + secrets.token_hex(5)
+
+
+def is_generated_athlete_id(athlete_id: str) -> bool:
+    suffix = athlete_id[len(GENERATED_ID_PREFIX):]
+    return (
+        athlete_id.startswith(GENERATED_ID_PREFIX)
+        and len(suffix) == 10
+        and all(char in "0123456789abcdef" for char in suffix)
+    )
+
+
 def register_athlete(
     conn: sqlite3.Connection,
     athlete_id: str,
@@ -1223,7 +1242,7 @@ def register_athlete(
     """Create an athlete before they have texted, so the coach can set the roster up."""
     athlete_id = athlete_id.strip()
     name = name.strip()
-    if not athlete_id.startswith("+") or len(athlete_id) < 8:
+    if not (athlete_id.startswith("+") and len(athlete_id) >= 8) and not is_generated_athlete_id(athlete_id):
         raise ValueError("an athlete id must be a phone number in E.164 form, e.g. +919812340001")
     if not name:
         raise ValueError("an athlete needs a name")

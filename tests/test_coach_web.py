@@ -56,18 +56,25 @@ def test_sign_out_ends_the_console_session():
         assert "coach_session" in resp.headers.get("set-cookie", "")
 
 
-def test_coach_console_opens_without_signing_in():
+def test_coach_console_opens_without_signing_in(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "database_path", str(tmp_path / "console.db"))
     with TestClient(app) as client:
         resp = client.get("/coach")
         assert resp.status_code == 200
         assert "Coach Rao" in resp.text
-        assert "Roster" in resp.text
         assert "Today" in resp.text
+        assert ("This is your private real-agent console. Start by inviting an athlete, "
+                "or watch the fictional demo first.") in resp.text
+        assert "Sign out" not in resp.text
+
+        client.post("/coach/demo/seed")
+        resp = client.get("/coach")
+        assert "Roster" in resp.text
         assert "Daily agent loop" in resp.text
         assert "Approval queue" in resp.text
-        assert "Load a demo squad" in resp.text or "Remove demo athletes" in resp.text
+        assert "Remove demo athletes" in resp.text
         assert "Open tutorial" in resp.text
-        assert "Sign out" not in resp.text
+        assert "Set up your agent" in resp.text, "demo athletes do not count as real setup"
 
 
 def test_athlete_directory_is_a_separate_workspace():
@@ -78,15 +85,23 @@ def test_athlete_directory_is_a_separate_workspace():
         assert 'id="athlete-search"' in resp.text
         assert 'id="athlete-filter"' in resp.text
         assert "/coach/whatsapp" in resp.text
-        assert 'name="squat_1rm_kg"' in resp.text
-        assert 'name="bench_1rm_kg"' in resp.text
-        assert 'name="deadlift_1rm_kg"' in resp.text
-        assert 'name="bodyweight_kg"' in resp.text
-        assert 'type="date" name="goal_target_date"' in resp.text
-        assert "showPicker" in resp.text
-        assert ">Choose date</button>" in resp.text
-        assert 'min="' in resp.text
-        assert 'max="' in resp.text
+        assert 'href="/coach/athletes/new"' in resp.text
+        assert 'name="athlete_id"' not in resp.text
+
+        page = client.get("/coach/athletes/new").text
+        assert 'name="athlete_id"' not in page, "the coach never invents an identifier"
+        for field in ('name="name"', 'name="timezone"', 'name="checkin_time"', 'name="training_time"'):
+            assert field in page
+        # Optional coaching details stay available, folded away.
+        assert 'name="squat_1rm_kg"' in page
+        assert 'name="bench_1rm_kg"' in page
+        assert 'name="deadlift_1rm_kg"' in page
+        assert 'name="bodyweight_kg"' in page
+        assert 'type="date" name="goal_target_date"' in page
+        assert "showPicker" in page
+        assert ">Choose date</button>" in page
+        assert 'min="' in page
+        assert 'max="' in page
 
 
 def test_goal_date_controls_build_a_real_calendar_date():

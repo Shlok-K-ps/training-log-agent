@@ -330,7 +330,7 @@ def render_case_body(case, events, *, athlete_name: str, message_banner: str) ->
     )
 
 
-def athlete_agent_panel(athlete_id: str, state: dict) -> str:
+def athlete_agent_panel(athlete_id: str, state: dict, *, default_weekday: int | None = None) -> str:
     quoted = escape(athlete_id)
     settings = state["settings"]
     autopilot = settings["autopilot"]
@@ -347,7 +347,11 @@ def athlete_agent_panel(athlete_id: str, state: dict) -> str:
         f"<tbody>{rows}</tbody></table>"
         if rows else "<p class='section-note'>No approved plan yet, so the agent will not open training days.</p>"
     )
-    weekday_options = "".join(f"<option value='{i}'>{name}</option>" for i, name in enumerate(WEEKDAYS))
+    weekday_options = "".join(
+        f"<option value='{i}'{' selected' if i == default_weekday else ''}>"
+        f"{name}{' (today)' if i == default_weekday else ''}</option>"
+        for i, name in enumerate(WEEKDAYS)
+    )
     add_form = (
         f"<form class='plan-form' method='post' action='/coach/athlete/{quoted}/plan'>"
         f"<label>Day<select name='weekday'>{weekday_options}</select></label>"

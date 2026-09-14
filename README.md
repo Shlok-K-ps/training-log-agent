@@ -37,6 +37,70 @@ attention today.
 > consenting test users. It is not a production medical or health-data system and
 > gives no medical advice.
 
+## See it in 60 seconds
+
+Open the live site and press **Watch the agent work**, or go straight to `/demo`.
+No login, no setup, nothing sent.
+
+![A fictional training day in progress: athlete chats on the left, the coach console and the agent's reasoning on the right](docs/screenshots/02-demo-in-progress.png)
+
+Two fictional athletes, one Monday, compressed to about a minute:
+
+1. **07:30** The agent checks in with Priya and Arjun on its own.
+2. **07:52** Priya replies. Her message becomes validated data, fixed rules score her
+   readiness, and her session goes out without the coach.
+3. **09:01** Arjun hasn't replied, so the agent follows up.
+4. **09:18** Arjun mentions knee pain. Training guidance stops immediately and the coach
+   gets the evidence with one-tap options.
+5. **09:30** The coach taps a plan; the agent sends it.
+6. **20:31** It asks both athletes whether training happened and closes each day on
+   their answer, then reports the work it did.
+
+Every step is colour-coded: **interpretation** (the language model), **fixed rule**,
+**agent action**, **needs the coach**, **coach decision** and **outcome**.
+
+![The report at the end of the demo](docs/screenshots/03-demo-report.png)
+
+**Public simulation vs the real agent.** The demo runs the real engine, rules and
+message templates on fictional athletes inside a throwaway in-memory database. It
+never opens the production database and never contacts Telegram. The coach's own
+athletes get the same behaviour for real on Telegram, in real time, with durable
+Postgres storage behind a console only the coach can open.
+
+| | Public simulation | Real Telegram agent |
+|---|---|---|
+| Athletes | Fictional | The coach's athletes |
+| Messages | Shown on the page | Sent on Telegram |
+| Clock | One scripted day in a minute | Real time |
+| Interpretation | Built-in offline parser, same schema | Gemini, limited to six validated actions |
+| Storage | Throwaway, in memory | Durable Postgres |
+| Access | Public | Coach only, via a signed Telegram link |
+
+### Setting up a real athlete
+
+An empty console offers two choices: **Set up a real athlete** or **Watch the safe
+demo**. A **Set up your agent** checklist then tracks six steps and ticks each one off
+automatically: coach Telegram linked, first athlete added, athlete Telegram paired,
+training plan added, autopilot decision made, first training day ready.
+
+![The setup checklist](docs/screenshots/07-setup-checklist.png)
+
+Adding an athlete takes a name, timezone and usual check-in and training times. The
+internal identifier is generated and kept out of sight. The next screen has a large
+**Copy Telegram invite** button, tells the coach what the athlete should do, and turns
+to **Connected** by itself when the athlete presses Start.
+
+![An athlete's status and Telegram invite](docs/screenshots/06-athlete-status-and-invite.png)
+
+Every athlete page opens with the same five answers: is Telegram connected, is a plan
+configured, is autopilot on, when will the agent act next, and is anything blocking
+it. It also has buttons to invite or reconnect, add today's plan, switch autopilot,
+**run a safe simulated test** (that athlete's next planned day, played in a throwaway
+database), and view the agent's timeline.
+
+Screenshots are regenerated from a fictional local instance with
+`python scripts/capture_screenshots.py`.
+
 ## The training-day agent
 
 The core of the system is an agent that owns one athlete's scheduled training day
