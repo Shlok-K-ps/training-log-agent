@@ -552,7 +552,12 @@ if(preset&&[...filter.options].some(option=>option.value===preset)){filter.value
 
 
 def render_landing() -> str:
-    """Render the public landing page with Power AI design system."""
+    """Compatibility wrapper for the focused public landing page."""
+    from app.coach.landing_view import render_landing as render_lean_landing
+
+    return render_lean_landing()
+
+    # Kept temporarily below while the new page is reviewed; unreachable at runtime.
     coach_link = "/coach"
     coach_text = "Open Coach Desk"
     arrow_svg = (
