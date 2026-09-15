@@ -253,6 +253,20 @@ def _advance(conn, case, *, now, transport, coach_name, report) -> None:
     tz_name = str(case["timezone"])
 
     if state == "scheduled":
+        # Never ask for what the athlete already told us: a same-day pain report or
+        # check-in goes straight into the case instead of a check-in request.
+        athlete_id, local_date = str(case["athlete_id"]), str(case["local_date"])
+        pain = db.injury_reported_on(conn, athlete_id, local_date)
+        if pain is not None:
+            _handle_injury(conn, case, LogStatus(phase=None, injured=True, injury_note=pain, athlete_name=None),
+                           now=now, transport=transport, coach_name=coach_name, report=report)
+            return
+        received = db.latest_checkin(conn, athlete_id, local_date)
+        if received is not None:
+            values = {name: getattr(received, name, None) for name in CHECKIN_FIELDS}
+            _handle_checkin(conn, case, LogCheckIn(checked_on=local_date, **values),
+                            now=now, transport=transport, coach_name=coach_name, report=report)
+            return
         body = messages.checkin(first, date.fromisoformat(case["local_date"]), _plan(case))
         if _send(conn, case, step="checkin", code="checkin_sent", body=body,
                  summary="Sent the morning check-in.", now=now, transport=transport,
@@ -430,6 +444,17 @@ def local_today(conn, athlete_id: str, now: datetime) -> date:
     """The athlete's own calendar date, so "today" in a message means their day."""
     schedule = db.latest_schedule_settings(conn, athlete_id)
     return now.astimezone(_zone(str(schedule.get("timezone") or "UTC"))).date()
+
+
+def open_today_case(conn, athlete_id: str, now: datetime):
+    """Open today's training day for one athlete if it is still eligible, and return it.
+
+    The scheduled tick normally opens the day, but an athlete who pairs or writes
+    first must not fall outside the agent just because that tick has not run yet.
+    A day past its last opening time stays closed, so nothing retroactive is sent.
+    """
+    _open_training_days(conn, now, TickReport(), athlete_ids=[athlete_id], simulated=False)
+    return store.open_case_for_day(conn, athlete_id, local_today(conn, athlete_id, now).isoformat())
 
 
 def observe_message(

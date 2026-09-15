@@ -265,10 +265,14 @@ def _row_value(row, key: str):
         return None
 
 
-def _delivery_state(row, today: str) -> tuple[str, str]:
+def _delivery_state(row, today: str, stale_reason: str | None = None) -> tuple[str, str]:
     """(label, tone) for one outbound message: scheduled, awaiting approval, sent, failed or cancelled."""
     status = str(row["status"])
     resolution = _row_value(row, "resolution")
+    if stale_reason and status in {"pending", "approved"}:
+        return ("Outdated—new athlete information received", "failed")
+    if resolution == "superseded":
+        return ("Outdated, not sent", "cancelled")
     if status == "sent":
         return ("Sent", "sent")
     if status == "pending":
@@ -285,7 +289,7 @@ def _delivery_state(row, today: str) -> tuple[str, str]:
     return ("Skipped", "cancelled")
 
 
-def _outbox(rows, *, athlete_id: str, first_name: str, today: str) -> str:
+def _outbox(rows, *, athlete_id: str, first_name: str, today: str, stale: dict | None = None) -> str:
     """Recent outbound messages with their delivery state. Identical duplicates collapse into one line."""
     def identity(row) -> tuple[str, str, str]:
         kind = str(row["message_kind"]).split(":", 1)[0]
@@ -303,14 +307,20 @@ def _outbox(rows, *, athlete_id: str, first_name: str, today: str) -> str:
 
     items = []
     noted: set[tuple[str, str, str]] = set()
+    stale = stale or {}
     for key, row in kept:
-        label, tone = _delivery_state(row, today)
+        stale_reason = stale.get((str(row["message_kind"]), str(row["local_date"])))
+        label, tone = _delivery_state(row, today, stale_reason)
         notes = []
         if duplicates.get(key) and key not in noted:
             count = duplicates[key]
             notes.append(f"{count} identical duplicate{'s' if count != 1 else ''} blocked, not sent.")
             noted.add(key)
-        if tone == "failed":
+        if stale_reason:
+            notes.append(f"{stale_reason} It will not be sent.")
+        elif _row_value(row, "resolution") == "superseded" and _row_value(row, "reason"):
+            notes.append(str(_row_value(row, "reason")))
+        elif tone == "failed":
             notes.append("Not retried automatically. Queue it again if it should still go out.")
         cancel = (
             f'<form class="outbox-cancel" method="post" action="/coach/athlete/{escape(athlete_id)}/messages/cancel">'
@@ -536,6 +546,7 @@ def render_athlete(
     conversation=(),
     scheduled=(),
     outbox=None,
+    outbox_stale: dict | None = None,
     today: str | None = None,
     awaiting: int = 0,
     pending_count: int = 0,
@@ -558,7 +569,7 @@ def render_athlete(
     outbox_html = _outbox(
         list(scheduled) if outbox is None else list(outbox),
         athlete_id=detail.athlete_id, first_name=first_name,
-        today=today or detail.reviewed_on.isoformat(),
+        today=today or detail.reviewed_on.isoformat(), stale=outbox_stale,
     )
     history = list(conversation)
     latest, earlier = history[:LATEST_MESSAGES], history[LATEST_MESSAGES:]

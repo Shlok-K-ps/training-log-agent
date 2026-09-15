@@ -260,30 +260,38 @@ class PendingMessage:
     original_body: str
     athlete: RosterEntry
     bulk_eligible: bool = False
+    # Why an automated draft can no longer be approved; None while it still stands.
+    stale_reason: str | None = None
 
     @property
     def edited(self) -> bool:
         return self.body.strip() != self.original_body.strip()
 
 
-def pending_reviews(conn: sqlite3.Connection, *, today: date) -> tuple[PendingMessage, ...]:
+def pending_reviews(
+    conn: sqlite3.Connection, *, today: date, legacy_checkins_retired: bool = False
+) -> tuple[PendingMessage, ...]:
     """Everything waiting on the coach tonight, each with the athlete's summary.
 
     The summary is the point: approving a message is a judgement about that
     athlete, and the coach should not have to open another screen to make it.
+    Drafts overtaken by newer athlete information carry the reason, so they are
+    never shown as ordinary approvable messages.
     """
-    return tuple(
-        PendingMessage(
+    items = []
+    for row in db.pending_drafts(conn):
+        stale = db.stale_draft_reason(conn, row, legacy_checkins_retired=legacy_checkins_retired)
+        items.append(PendingMessage(
             athlete_id=str(row["athlete_id"]),
             message_kind=str(row["message_kind"]),
             local_date=str(row["local_date"]),
             body=str(row["body"]),
             original_body=str(row["original_body"]),
             athlete=review_athlete(conn, str(row["athlete_id"]), today=today),
-            bulk_eligible=db.draft_is_bulk_eligible(conn, row),
-        )
-        for row in db.pending_drafts(conn)
-    )
+            bulk_eligible=stale is None and db.draft_is_bulk_eligible(conn, row),
+            stale_reason=stale,
+        ))
+    return tuple(items)
 
 
 def build_roster(conn: sqlite3.Connection, *, today: date) -> Roster:

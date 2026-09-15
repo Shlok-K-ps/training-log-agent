@@ -721,8 +721,33 @@ sends on its own are the fixed training-day templates described above.
 Every approval records who made it, when, and whether the wording was changed.
 Untouched morning prompts whose evidence has not changed can be approved as a
 safe batch. New readiness data, an injury, a schedule update, an edit, or any
-other newer athlete fact forces individual review. If evidence changes after
-approval but before sending, the approval is invalidated automatically.
+other newer athlete fact forces individual review.
+
+#### Message freshness (causal ordering)
+
+Every automated draft stores the evidence version (newest log entry) and inbound
+version (newest athlete message) it was written against. Approval never refreshes
+those versions. A draft is **outdated** when the athlete has since reported pain,
+sent sleep/readiness for that day, sent any newer message or fact, or connected
+Telegram after it was drafted. Outdated drafts:
+
+- show as *Outdated—new athlete information received* and cannot be approved;
+  an approval attempt is refused, the draft is retired and the reason recorded;
+- are rechecked atomically at send time (the claim `UPDATE` compares versions),
+  so a draft approved before new information arrives is never delivered;
+- keep their row with `status=skipped`, `resolution=superseded` and a `reason`.
+
+Coach-written notes stay valid after new evidence because the coach wrote them
+knowingly. Approved messages leave oldest first, and each keeps its send,
+duplicate, failure or retirement reason.
+
+With the training-day agent on, it owns check-ins. At startup and on every send
+pass, legacy `morning_checkin` drafts still pending or approved are retired rather
+than delivered, and none are deleted. Pairing Telegram retires the athlete's
+unsent automated backlog. When an athlete writes during an eligible planned day,
+the day's case opens *before* the message is interpreted: pain goes straight to
+the fixed injury hold and a coach decision, and a check-in already received is
+never asked for again.
 
 To test the workflow without an external messaging account, load the fictional demo squad from
 Overview, open **Messaging Desk → Inbox → Test the messaging workflow**, and submit a

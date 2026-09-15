@@ -62,6 +62,7 @@ from app.scheduling.outbox import (
     coach_note_kind,
     send_approved_feedback,
     send_approved_notes,
+    send_approved_outbound,
 )
 from app.coach import (
     build_roster,
@@ -120,6 +121,8 @@ def _pairing_failure_reply(code: str, name: str) -> str:
 # Channels where the training-day agent reads the message and may answer itself.
 AGENT_CHANNELS = frozenset({"telegram", "simulator"})
 INJURY_ACK = "Your injury update is logged. Training guidance is paused and your coach has been notified."
+# When today's training day already owns the conversation and the message needs no agent step.
+CASE_ACK = "Got it. Your coach can see this message, and today's training day carries on as planned."
 
 
 @lru_cache(maxsize=1)
@@ -140,6 +143,11 @@ def get_model_client() -> ModelClient:
 async def lifespan(app: FastAPI):
     conn = db.connect()
     db.init_db(conn)
+    if settings.enable_agent_loop:
+        # The agent owns check-ins, so an old legacy morning draft must never be approved or sent.
+        retired = db.retire_legacy_checkins(conn)
+        if retired:
+            log.info("retired %d legacy morning check-in draft(s) without sending", retired)
     conn.close()
     log.info("database ready (%s)", deployment.storage_backend())
     app.state.telegram_webhook_ready = False
@@ -236,12 +244,13 @@ def _recorded_sender(conn):
 
 
 def _send_approved_coach_messages() -> int:
-    """Send notes the coach wrote and replies the coach approved. Never check-ins."""
+    """Send notes the coach wrote and replies the coach approved, oldest first. Never check-ins."""
     conn = db.connect()
     try:
         db.init_db(conn)
-        sender = _recorded_sender(conn)
-        return send_approved_notes(conn, sender) + send_approved_feedback(conn, sender)
+        if settings.enable_agent_loop:
+            db.retire_legacy_checkins(conn)
+        return send_approved_outbound(conn, _recorded_sender(conn))
     finally:
         conn.close()
 
@@ -255,6 +264,9 @@ def _send_morning_prompts() -> int:
     conn = db.connect()
     try:
         db.init_db(conn)
+        if settings.enable_agent_loop:
+            db.retire_legacy_checkins(conn)
+            return 0
         drafted = draft_upcoming_prompts(conn)
         if drafted:
             log.info("queued %d morning message(s) for coach review", len(drafted))
@@ -1029,7 +1041,7 @@ def _pending_count(conn) -> int:
 
 
 def _reviewable(conn, today: date) -> tuple:
-    items = pending_reviews(conn, today=today)
+    items = pending_reviews(conn, today=today, legacy_checkins_retired=settings.enable_agent_loop)
     if _legacy_checkins_visible():
         return items
     return tuple(item for item in items if item.message_kind != MORNING)
@@ -1068,6 +1080,7 @@ def _render_athlete(
             row for row in db.athlete_drafts(conn, athlete_id, limit=30)
             if _legacy_checkins_visible() or str(row["message_kind"]) != MORNING
         ]
+        outbox_stale = _stale_reasons(conn, outbox, key=lambda row: (str(row["message_kind"]), str(row["local_date"])))
         agent_state = agent_board.athlete_agent_state(conn, athlete_id)
         status = _athlete_status(conn, athlete_id)
         attempt = _pairing_attempt_summary(conn, athlete_id)
@@ -1107,6 +1120,7 @@ def _render_athlete(
         telegram_ready=telegram_ready,
         conversation=conversation,
         outbox=outbox,
+        outbox_stale=outbox_stale,
         today=today.isoformat(),
         awaiting=sum(1 for row in pending if str(row["athlete_id"]) == athlete_id),
         pending_count=len(pending),
@@ -1178,7 +1192,10 @@ def _queue_note(athlete_id: str, body: str) -> tuple[str, str]:
                            "Change the wording if you want to send another.")
         base_kind = message_kind = coach_note_kind(body)
         attempt = 1
-        while db.draft(conn, athlete_id, message_kind, today) is not None:
+        while (existing := db.draft(conn, athlete_id, message_kind, today)) is not None:
+            if str(existing["status"]) in {"pending", "approved", "sent"}:
+                # Another request queued (or already sent) this exact note a moment ago.
+                return already
             # An earlier identical note was cancelled or failed; keep that record as it is.
             attempt += 1
             message_kind = f"{base_kind}:{attempt}"
@@ -1333,7 +1350,8 @@ async def coach_whatsapp_review(request: Request) -> Response:
         str(form.get("message_kind", "")).strip(),
         str(form.get("local_date", "")).strip(),
         str(form.get("decision", "")).strip(),
-        str(form.get("body", "")),
+        # A form without a body field (such as Retire unsent) keeps the drafted text.
+        None if form.get("body") is None else str(form.get("body")),
     )
     return _redirect(_return_to(form, "/coach/whatsapp?tab=approval"), result)
 
@@ -1419,6 +1437,8 @@ def _render_whatsapp(
             (candidate, name) for candidate, name in names.items() if is_demo(candidate)
         )
         scheduled = _approved_outbound(conn)
+        stale = _stale_reasons(conn, scheduled, key=lambda row: (
+            str(row["athlete_id"]), str(row["message_kind"]), str(row["local_date"])))
         sent = [
             row for row in db.whatsapp_messages(conn, limit=300)
             if row["direction"] == "outbound"
@@ -1437,11 +1457,24 @@ def _render_whatsapp(
         transport_name=settings.messaging_transport_name,
         names=names,
         legacy_checkins=_legacy_checkins_visible(),
+        stale=stale,
     )
 
 
+def _stale_reasons(conn, rows, *, key) -> dict:
+    """Why each unsent automated draft can no longer go out, keyed for the view."""
+    reasons = {}
+    for row in rows:
+        if str(row["status"]) not in {"pending", "approved"}:
+            continue
+        reason = db.stale_draft_reason(conn, row, legacy_checkins_retired=settings.enable_agent_loop)
+        if reason is not None:
+            reasons[key(row)] = reason
+    return reasons
+
+
 def _review_draft(
-    athlete_id: str, message_kind: str, local_date: str, decision: str, body: str
+    athlete_id: str, message_kind: str, local_date: str, decision: str, body: str | None
 ) -> tuple[str, str]:
     conn = db.connect()
     try:
@@ -1450,7 +1483,10 @@ def _review_draft(
         db.review_draft(
             conn, athlete_id, message_kind, local_date,
             status=decision, reviewed_by=settings.coach_name, body=body,
+            legacy_checkins_retired=settings.enable_agent_loop,
         )
+    except db.StaleDraftError as exc:
+        return ("err", f"Not approved. Outdated—new athlete information received. {exc.reason} It was retired and will not be sent.")
     except ValueError as exc:
         return ("err", f"Not saved: {exc}")
     finally:
@@ -1589,6 +1625,9 @@ def _process(
         )
         now = clock.utcnow()
         agent_owned = deployment.agent_loop_active() and channel in AGENT_CHANNELS
+        # Establish today's training day before reading the message, so an athlete who
+        # pairs or writes before the scheduled tick is still handled by the agent.
+        case = engine.open_today_case(conn, athlete_id, now) if agent_owned else None
         reply, actions = handle_message_with_actions(
             conn, athlete_id, body, get_model_client(),
             today=engine.local_today(conn, athlete_id, now) if agent_owned else None,
@@ -1599,6 +1638,17 @@ def _process(
             transport=LiveTransport(), coach_name=settings.coach_name,
         ):
             return None
+        injured, _ = db.injury_state(conn, athlete_id)
+        if case is not None:
+            # The day's case owns the conversation: no automated reply is queued to go
+            # out later, where it could arrive after newer messages.
+            acknowledgement = INJURY_ACK if injured else CASE_ACK
+            db.record_whatsapp_message(
+                conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
+                status="queued", message_kind="receipt", reply_to_sid=provider_sid or None,
+                channel=channel,
+            )
+            return acknowledgement
         identity = provider_sid or hashlib.sha256(
             f"{athlete_id}|{date.today().isoformat()}|{body}".encode("utf-8")
         ).hexdigest()[:20]
@@ -1606,7 +1656,6 @@ def _process(
             conn, athlete_id, FEEDBACK_REPLY + identity,
             date.today().isoformat(), reply,
         )
-        injured, _ = db.injury_state(conn, athlete_id)
         acknowledgement = INJURY_ACK if injured else FEEDBACK_ACK
         db.record_whatsapp_message(
             conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
@@ -1830,6 +1879,8 @@ async def telegram_webhook(request: Request) -> Response:
                         reply = f"You're already connected to Power AI as {name}. Nothing else to do."
                     else:
                         db.record_pairing_attempt(conn, athlete_id, "connected")
+                        # Automated messages prepared before this account existed must not flood in now.
+                        db.retire_automated_drafts(conn, athlete_id, db.BEFORE_PAIRING_REASON)
                         reply = (
                             f"Connected to Power AI as {name}. Send your training, sleep, "
                             "readiness or nutrition update whenever you're ready."

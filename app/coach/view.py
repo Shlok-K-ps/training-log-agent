@@ -259,6 +259,30 @@ def _athlete_row(entry: RosterEntry, note: str = "") -> str:
 def approval_card(item: PendingMessage, *, return_to: str = "/coach/whatsapp?tab=approval") -> str:
     """One drafted message with the evidence behind it and the controls to decide."""
     a = item.athlete
+    if item.stale_reason:
+        # Overtaken by newer athlete information: it can be retired, never approved.
+        return (
+            '<article class="message-card approval-card is-stale" data-stale>'
+            '<header class="approval-head">'
+            f'<span class="avatar" aria-hidden="true">{escape(initials(a.display_name))}</span>'
+            '<div class="approval-who">'
+            f'<a class="athlete-name" href="/coach/athlete/{escape(item.athlete_id)}">{escape(a.display_name)}</a>'
+            f'<span class="muted">{escape(message_kind_label(item.message_kind))} · for {escape(item.local_date)}</span></div>'
+            '<div class="approval-state"><span class="readiness-pill red">Outdated</span></div>'
+            '</header>'
+            '<p class="stale-note"><strong>Outdated—new athlete information received.</strong> '
+            f'{escape(item.stale_reason)} It cannot be approved.</p>'
+            f'<blockquote class="stale-body">{escape(item.body)}</blockquote>'
+            '<form method="post" action="/coach/whatsapp/review">'
+            f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
+            f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
+            f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
+            f'<input type="hidden" name="return_to" value="{escape(return_to)}">'
+            '<div class="card-actions">'
+            '<button class="btn btn-ghost" type="submit" name="decision" value="skipped">Retire unsent</button>'
+            f'<a class="btn btn-ghost" href="/coach/athlete/{escape(item.athlete_id)}#messages">Open conversation</a>'
+            '</div></form></article>'
+        )
     reasons = " · ".join(f.detail for f in a.flags) or "Nothing flagged"
     readiness = (
         f"{a.readiness_score}/100 · {a.readiness_band}"

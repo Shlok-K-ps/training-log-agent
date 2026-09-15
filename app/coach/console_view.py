@@ -264,7 +264,30 @@ def _failure_card(failure: dict, row: AthleteRow | None) -> str:
     )
 
 
+def _stale_card(item: PendingMessage, row: AthleteRow | None) -> str:
+    """An automated draft overtaken by newer athlete information: retire it, never approve it."""
+    href = f"/coach/athlete/{quote(item.athlete_id)}"
+    form = (
+        '<form method="post" action="/coach/whatsapp/review">'
+        f'<input type="hidden" name="athlete_id" value="{escape(item.athlete_id)}">'
+        f'<input type="hidden" name="message_kind" value="{escape(item.message_kind)}">'
+        f'<input type="hidden" name="local_date" value="{escape(item.local_date)}">'
+        '<input type="hidden" name="return_to" value="/coach">'
+        '<button class="btn btn-ghost btn-sm" type="submit" name="decision" value="skipped">Retire unsent</button>'
+        "</form>"
+    )
+    return _card(
+        kind="stale", row=row, name=item.athlete.display_name, href=href,
+        problem="Outdated—new athlete information received", chip=("Outdated", "grey"),
+        evidence=[item.stale_reason or ""], why=[f"Drafted: “{' '.join(item.body.split())[:160]}”"],
+        recommended="Retire it; reply from Messages if something is still needed",
+        controls=form + _link("Open conversation", f"{href}#messages"),
+    )
+
+
 def _approval_card(item: PendingMessage, row: AthleteRow | None) -> str:
+    if item.stale_reason:
+        return _stale_card(item, row)
     athlete = item.athlete
     href = f"/coach/athlete/{quote(item.athlete_id)}"
     readiness = (

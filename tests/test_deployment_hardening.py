@@ -112,13 +112,12 @@ def test_a_signed_tick_never_touches_the_morning_workflow(env, monkeypatch):
     for name in ("_send_morning_prompts", "draft_upcoming_prompts", "send_approved_prompts"):
         monkeypatch.setattr(main, name, forbidden)
     coach_sends: list[str] = []
-    monkeypatch.setattr(main, "send_approved_notes", lambda conn, sender: coach_sends.append("notes") or 0)
-    monkeypatch.setattr(main, "send_approved_feedback", lambda conn, sender: coach_sends.append("feedback") or 0)
+    monkeypatch.setattr(main, "send_approved_outbound", lambda conn, sender: coach_sends.append("outbound") or 0)
     planned_demo_athletes(settings)
     with TestClient(main.app) as client:
         response = signed_tick(client)
     assert response.status_code == 200 and response.json()["actions"] == 2
-    assert coach_sends == ["notes", "feedback"], "coach-written and coach-approved messages still go out"
+    assert coach_sends == ["outbound"], "coach-written and coach-approved messages still go out, in one ordered pass"
 
 
 def test_the_console_shows_no_morning_draft_queue_under_the_agent(env, monkeypatch):
@@ -143,13 +142,15 @@ def test_the_console_shows_no_morning_draft_queue_under_the_agent(env, monkeypat
         assert "Check-ins are sent by the training-day agent" in refused.text
     conn = db.connect(settings.database_path)
     try:
-        assert db.draft(conn, athlete, MORNING, tomorrow)["status"] == "pending"
+        legacy = db.draft(conn, athlete, MORNING, tomorrow)
+        assert (legacy["status"], legacy["resolution"]) == ("skipped", "superseded"), "retired, never deleted"
+        assert legacy["reason"] == db.LEGACY_CHECKIN_REASON
     finally:
         conn.close()
 
     monkeypatch.setattr(settings, "enable_agent_loop", False)
     with TestClient(main.app) as client:
-        assert "LEGACY MORNING DRAFT" in client.get("/coach").text
+        assert "LEGACY MORNING DRAFT" not in client.get("/coach").text, "a retired check-in is never revived"
 
 
 def test_the_render_blueprint_has_one_check_in_owner_and_durable_storage():

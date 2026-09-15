@@ -301,7 +301,7 @@ def test_approved_message_prefers_the_paired_telegram_chat(tmp_path, monkeypatch
             AssertionError("WhatsApp should not be used for a Telegram-paired athlete")
         ),
     )
-    assert main._send_morning_prompts() == 1
+    assert main._send_approved_coach_messages() == 1
     assert sent == [("7001", "Approved advice")]
     conn = db.connect(settings.database_path)
     try:
