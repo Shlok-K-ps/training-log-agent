@@ -1623,52 +1623,57 @@ def _process(
             message_kind="athlete_feedback",
             channel=channel,
         )
-        now = clock.utcnow()
-        agent_owned = deployment.agent_loop_active() and channel in AGENT_CHANNELS
-        # Establish today's training day before reading the message, so an athlete who
-        # pairs or writes before the scheduled tick is still handled by the agent.
-        case = engine.open_today_case(conn, athlete_id, now) if agent_owned else None
-        reply, actions = handle_message_with_actions(
-            conn, athlete_id, body, get_model_client(),
-            today=engine.local_today(conn, athlete_id, now) if agent_owned else None,
-            allowed=LOOP_TOOL_NAMES if agent_owned else None,
-        )
-        if agent_owned and engine.observe_message(
-            conn, athlete_id, actions, raw_text=body, now=now,
-            transport=LiveTransport(), coach_name=settings.coach_name,
-        ):
-            return None
-        injured, _ = db.injury_state(conn, athlete_id)
-        if case is not None:
-            # The day's case owns the conversation: no automated reply is queued to go
-            # out later, where it could arrive after newer messages.
-            acknowledgement = INJURY_ACK if injured else CASE_ACK
-            db.record_whatsapp_message(
-                conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
-                status="queued", message_kind="receipt", reply_to_sid=provider_sid or None,
-                channel=channel,
-            )
-            return acknowledgement
-        identity = provider_sid or hashlib.sha256(
-            f"{athlete_id}|{date.today().isoformat()}|{body}".encode("utf-8")
-        ).hexdigest()[:20]
-        db.create_draft(
-            conn, athlete_id, FEEDBACK_REPLY + identity,
-            date.today().isoformat(), reply,
-        )
-        acknowledgement = INJURY_ACK if injured else FEEDBACK_ACK
-        db.record_whatsapp_message(
-            conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
-            status="queued", message_kind="receipt",
-            reply_to_sid=provider_sid or None,
-            channel=channel,
-        )
-        return acknowledgement
+        # Store raw inbound evidence before waiting.  A delivery owner performs a
+        # final freshness query under its per-athlete lease, so this version makes
+        # an automated draft stale even while its owner is between reservations.
+        with db.outbound_delivery_lease(conn, athlete_id):
+            return _process_recorded_inbound(conn, athlete_id, body, provider_sid, channel)
     except Exception:  # noqa: BLE001
         log.exception("failed to handle message from %s", athlete_id)
         return "Something broke on my end. Your message wasn't logged — send it again."
     finally:
         conn.close()
+
+
+def _process_recorded_inbound(conn, athlete_id: str, body: str, provider_sid: str, channel: str) -> str | None:
+    """Finish a recorded inbound message while excluding that athlete's outbound sender."""
+    now = clock.utcnow()
+    agent_owned = deployment.agent_loop_active() and channel in AGENT_CHANNELS
+    # Establish today's training day before reading the message, so an athlete who
+    # pairs or writes before the scheduled tick is still handled by the agent.
+    case = engine.open_today_case(conn, athlete_id, now) if agent_owned else None
+    reply, actions = handle_message_with_actions(
+        conn, athlete_id, body, get_model_client(),
+        today=engine.local_today(conn, athlete_id, now) if agent_owned else None,
+        allowed=LOOP_TOOL_NAMES if agent_owned else None,
+    )
+    if agent_owned and engine.observe_message(
+        conn, athlete_id, actions, raw_text=body, now=now,
+        transport=LiveTransport(), coach_name=settings.coach_name,
+    ):
+        return None
+    injured, _ = db.injury_state(conn, athlete_id)
+    if case is not None:
+        # The day's case owns the conversation: no automated reply is queued to go
+        # out later, where it could arrive after newer messages.
+        acknowledgement = INJURY_ACK if injured else CASE_ACK
+        db.record_whatsapp_message(
+            conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
+            status="queued", message_kind="receipt", reply_to_sid=provider_sid or None,
+            channel=channel,
+        )
+        return acknowledgement
+    identity = provider_sid or hashlib.sha256(
+        f"{athlete_id}|{date.today().isoformat()}|{body}".encode("utf-8")
+    ).hexdigest()[:20]
+    db.create_draft(conn, athlete_id, FEEDBACK_REPLY + identity, date.today().isoformat(), reply)
+    acknowledgement = INJURY_ACK if injured else FEEDBACK_ACK
+    db.record_whatsapp_message(
+        conn, athlete_id=athlete_id, direction="outbound", body=acknowledgement,
+        status="queued", message_kind="receipt", reply_to_sid=provider_sid or None,
+        channel=channel,
+    )
+    return acknowledgement
 
 
 @app.post("/webhook/whatsapp/status")

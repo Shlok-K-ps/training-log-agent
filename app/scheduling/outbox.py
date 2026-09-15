@@ -48,28 +48,46 @@ CHECKIN_SENT_REASON = "Sent: approved check-in, and no newer athlete information
 
 
 def _deliver(conn: sqlite3.Connection, row, sender: Callable[[str, str], None], *, reason: str) -> bool:
-    """Revalidate, claim, then send. A draft that is stale, loses the claim or fails is never retried."""
+    """Serialize one athlete through freshness validation and transport delivery.
+
+    The durable lease is intentionally held across the Telegram call.  An inbound
+    webhook records its raw message before it waits for that same lease, so a
+    final validation sees evidence that arrived during an earlier reservation.
+    """
     athlete_id, message_kind, local_date = (
         str(row["athlete_id"]), str(row["message_kind"]), str(row["local_date"])
     )
-    stale = db.stale_draft_reason(conn, row)
-    if stale is not None:
-        db.supersede_draft(conn, athlete_id, message_kind, local_date, stale)
-        return False
-    if not db.claim_draft_for_send(conn, athlete_id, message_kind, local_date, reason=reason):
-        # Another worker sent it, the coach cancelled it, or the athlete wrote a moment ago.
-        current = db.draft(conn, athlete_id, message_kind, local_date)
-        if current is not None and str(current["status"]) == "approved":
-            late = db.stale_draft_reason(conn, current)
-            if late is not None:
-                db.supersede_draft(conn, athlete_id, message_kind, local_date, late)
-        return False
     try:
-        sender(athlete_id, str(row["body"]))
-    except Exception as exc:  # noqa: BLE001 - one failed send must not stop the others
-        db.mark_draft_failed(conn, athlete_id, message_kind, local_date, type(exc).__name__)
+        # A competing tick yields immediately rather than blocking its worker.
+        # The current owner finishes, and the next tick sees the durable result.
+        with db.outbound_delivery_lease(conn, athlete_id, wait_seconds=0):
+            # Reload after owning the athlete. A concurrent worker may have sent,
+            # cancelled, or superseded this row while this worker was waiting.
+            current = db.draft(conn, athlete_id, message_kind, local_date)
+            if current is None or str(current["status"]) != "approved":
+                return False
+            stale = db.stale_draft_reason(conn, current)
+            if stale is not None:
+                db.supersede_draft(conn, athlete_id, message_kind, local_date, stale)
+                return False
+            # This last database check deliberately happens after lease ownership.
+            # ``claim_draft_for_send`` no longer marks sent: only a successful
+            # Telegram return below can do that.
+            if not db.claim_draft_for_send(conn, athlete_id, message_kind, local_date, reason=reason):
+                late = db.stale_draft_reason(conn, current)
+                if late is not None:
+                    db.supersede_draft(conn, athlete_id, message_kind, local_date, late)
+                return False
+            try:
+                sender(athlete_id, str(current["body"]))
+            except Exception as exc:  # noqa: BLE001 - a later lease owner may retry
+                db.mark_draft_failed(conn, athlete_id, message_kind, local_date, type(exc).__name__)
+                return False
+            return db.mark_draft_sent(conn, athlete_id, message_kind, local_date, reason=reason)
+    except db.DeliveryLeaseBusy:
+        # Do not turn contention into a failed draft. The next tick, or the
+        # expired lease after a crashed owner, can safely make progress.
         return False
-    return True
 
 
 def message_kind_label(message_kind: str) -> str:
@@ -145,17 +163,9 @@ def send_approved_prompts(
 
         if row is None or row["status"] != "approved":
             continue          # unreviewed or skipped: silence, not a broadcast
-        if db.invalidate_draft_if_evidence_changed(
-            conn, prompt.athlete_id, MORNING, prompt.local_date
-        ):
-            continue          # the athlete already answered, reported pain, or wrote again
-        if not db.claim_draft_for_send(
-            conn, prompt.athlete_id, MORNING, prompt.local_date, reason=CHECKIN_SENT_REASON
-        ):
-            continue          # sent by another worker, or stale at the instant of sending
-        sender(prompt.athlete_id, str(row["body"]))
-        db.mark_scheduled_delivery(conn, prompt.athlete_id, MORNING, prompt.local_date)
-        sent += 1
+        if _deliver(conn, row, sender, reason=CHECKIN_SENT_REASON):
+            db.mark_scheduled_delivery(conn, prompt.athlete_id, MORNING, prompt.local_date)
+            sent += 1
     return sent
 
 

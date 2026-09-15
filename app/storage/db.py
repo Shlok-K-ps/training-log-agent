@@ -18,8 +18,11 @@ are operational integration state, not coaching observations.
 from __future__ import annotations
 
 import sqlite3
+import time
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Literal
 
@@ -1944,13 +1947,14 @@ def invalidate_draft_if_evidence_changed(
 def mark_draft_sent(
     conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str,
     *, reason: str = "Sent.",
-) -> None:
-    conn.execute(
-        "UPDATE outbound_drafts SET status = 'sent', reason = ? "
-        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
-        (reason, athlete_id, message_kind, local_date),
+) -> bool:
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'sent', resolved_at = ?, reason = ? "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'",
+        (_now_iso(), reason, athlete_id, message_kind, local_date),
     )
     conn.commit()
+    return cur.rowcount == 1
 
 
 def _now_iso() -> str:
@@ -1966,14 +1970,13 @@ def claim_draft_for_send(
     conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str,
     *, reason: str = "Sent.",
 ) -> bool:
-    """Atomically move an approved draft to sent before it leaves.
+    """Return whether an approved draft is still fresh enough to attempt.
 
-    Only one worker can win the claim, so concurrent or repeated ticks can never
-    deliver the same draft twice. For an automated draft the same statement also
-    re-checks that no athlete fact or message arrived since it was drafted, so a
-    reply cannot slip out in the instant after the athlete wrote again. If the send
-    then fails, the draft is marked failed rather than retried, because the
-    provider may already have accepted it.
+    Delivery ownership is deliberately kept in ``agent_lease`` rather than by
+    marking this row sent.  The row becomes ``sent`` only after the transport
+    returns successfully; a crashed owner leaves an approved draft for a later
+    lease holder to retry.  That is at-least-once delivery, not a claim of
+    mathematical exactly-once delivery across Telegram's remote API.
     """
     automated = is_automated_kind(message_kind)
     freshness = (
@@ -1982,27 +1985,97 @@ def claim_draft_for_send(
         " WHERE athlete_id = ? AND direction = 'inbound')"
         if automated else ""
     )
-    cur = conn.execute(
-        "UPDATE outbound_drafts SET status = 'sent', resolved_at = ?, reason = ? "
+    row = conn.execute(
+        "SELECT 1 FROM outbound_drafts "
         "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'"
         + freshness,
-        (_now_iso(), reason, athlete_id, message_kind, local_date)
+        (athlete_id, message_kind, local_date)
         + ((athlete_id, athlete_id) if automated else ()),
-    )
-    conn.commit()
-    return cur.rowcount == 1
+    ).fetchone()
+    return row is not None
 
 
 def mark_draft_failed(
     conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str, error: str
 ) -> None:
     conn.execute(
-        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'failed', resolved_at = ?, "
-        "last_error = ?, reason = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
-        (_now_iso(), error[:200], f"Delivery failed ({error[:120]}); not retried automatically.",
+        "UPDATE outbound_drafts SET last_error = ?, reason = ? "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'",
+        (error[:200], f"Delivery attempt failed ({error[:120]}); safe retry is pending.",
          athlete_id, message_kind, local_date),
     )
     conn.commit()
+
+
+# --- Per-athlete outbound ownership -------------------------------------------
+
+# ``agent_lease`` is durable in both SQLite and Postgres.  A distinct row for
+# each athlete lets unrelated athletes send concurrently, while one owner holds
+# an athlete's lease from the final freshness check through the transport call.
+# The bounded lease is recoverable after a crash; the unavoidable uncertainty is
+# a crash after Telegram accepts a request but before the local sent marker.
+OUTBOUND_LEASE_PREFIX = "outbound-delivery:"
+OUTBOUND_LEASE_TTL_SECONDS = 120
+OUTBOUND_LEASE_WAIT_SECONDS = 150
+
+
+class DeliveryLeaseBusy(RuntimeError):
+    """Another worker still owns this athlete's short-lived delivery lease."""
+
+
+def _outbound_lease_name(athlete_id: str) -> str:
+    return OUTBOUND_LEASE_PREFIX + athlete_id
+
+
+def try_acquire_outbound_lease(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    holder: str,
+    *,
+    now: datetime | None = None,
+    ttl_seconds: int = OUTBOUND_LEASE_TTL_SECONDS,
+) -> bool:
+    """Atomically acquire this athlete's durable lease, or take an expired one."""
+    now = now or datetime.now(timezone.utc)
+    name = _outbound_lease_name(athlete_id)
+    conn.execute(
+        "INSERT INTO agent_lease (name, holder, expires_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at "
+        "WHERE agent_lease.expires_at < ?",
+        (name, holder, (now + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds"),
+         now.isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    row = conn.execute("SELECT holder FROM agent_lease WHERE name = ?", (name,)).fetchone()
+    return row is not None and str(row["holder"]) == holder
+
+
+def release_outbound_lease(conn: sqlite3.Connection, athlete_id: str, holder: str) -> None:
+    conn.execute(
+        "DELETE FROM agent_lease WHERE name = ? AND holder = ?",
+        (_outbound_lease_name(athlete_id), holder),
+    )
+    conn.commit()
+
+
+@contextmanager
+def outbound_delivery_lease(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    *,
+    wait_seconds: float = OUTBOUND_LEASE_WAIT_SECONDS,
+):
+    """Wait for a durable per-athlete lease; never lock another athlete's work."""
+    holder = uuid.uuid4().hex
+    deadline = time.monotonic() + wait_seconds
+    while not try_acquire_outbound_lease(conn, athlete_id, holder):
+        if time.monotonic() >= deadline:
+            raise DeliveryLeaseBusy(f"delivery for {athlete_id} is still owned by another worker")
+        time.sleep(0.02)
+    try:
+        yield
+    finally:
+        release_outbound_lease(conn, athlete_id, holder)
 
 
 def mark_draft_duplicate(
@@ -2039,11 +2112,14 @@ def recent_failed_deliveries(conn: sqlite3.Connection, *, since: str, limit: int
     limit = max(1, min(int(limit), 100))
     items = [
         {"athlete_id": str(row["athlete_id"]), "message_kind": str(row["message_kind"]),
-         "body": str(row["body"]), "occurred_at": str(row["resolved_at"]), "error": row["last_error"]}
+         "body": str(row["body"]), "occurred_at": str(row["occurred_at"]), "error": row["last_error"]}
         for row in conn.execute(
-            "SELECT athlete_id, message_kind, body, resolved_at, last_error FROM outbound_drafts "
-            "WHERE resolution = 'failed' AND resolved_at >= ? ORDER BY resolved_at DESC LIMIT ?",
-            (since, limit),
+            "SELECT athlete_id, message_kind, body, "
+            "COALESCE(resolved_at, created_at) AS occurred_at, last_error FROM outbound_drafts "
+            "WHERE ((resolution = 'failed' AND resolved_at >= ?) "
+            "OR (status = 'approved' AND last_error IS NOT NULL AND created_at >= ?)) "
+            "ORDER BY COALESCE(resolved_at, created_at) DESC LIMIT ?",
+            (since, since, limit),
         )
     ]
     items += [

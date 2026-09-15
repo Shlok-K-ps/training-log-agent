@@ -412,7 +412,7 @@ def test_an_overlapping_send_cannot_deliver_a_note_twice(env):
     assert sorted(delivered) == ["Note one.", "Note two.", "Reply one."]
 
 
-def test_a_failed_send_is_marked_failed_and_never_retried(env):
+def test_a_failed_send_stays_approved_for_a_safe_retry(env):
     client, settings, _ = env
     url = _register(settings)
     client.post(f"{url}/message", data={"body": "Check in after training."})
@@ -428,11 +428,11 @@ def test_a_failed_send_is_marked_failed_and_never_retried(env):
         assert outbox.send_approved_notes(conn, broken, now_utc=LATER) == 0
     finally:
         conn.close()
-    assert calls == ["Check in after training."]
+    assert calls == ["Check in after training.", "Check in after training."]
     [row] = _notes(settings)
-    assert (row["status"], row["resolution"]) == ("skipped", "failed")
+    assert (row["status"], row["resolution"]) == ("approved", None)
     item = BeautifulSoup(client.get(url).text, "html.parser").select_one("#outbox .outbox-item")
-    assert item.select_one(".delivery-badge").get_text(strip=True) == "Failed"
+    assert item.select_one(".delivery-badge").get_text(strip=True) == "Scheduled"
 
 
 def test_the_coach_can_cancel_a_scheduled_note(env):

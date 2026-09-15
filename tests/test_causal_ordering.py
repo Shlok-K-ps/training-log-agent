@@ -406,3 +406,175 @@ def test_stale_drafts_cannot_look_like_approvable_messages(world):
     athlete_page = BeautifulSoup(world.client.get(url).text, "html.parser")
     item = next(li for li in athlete_page.select("#outbox .outbox-item") if STALE_REPLY in li.get_text())
     assert item.select_one(".delivery-badge").get_text(strip=True) == "Outdated—new athlete information received"
+
+
+# --- Delivery ownership: these tests use events, never timing guesses ---------
+
+
+def _deliver_one(world, athlete_id: str, kind: str, sender) -> bool:
+    conn = world.db()
+    try:
+        row = db.draft(conn, athlete_id, kind, DAY)
+        assert row is not None
+        return outbox._deliver(conn, row, sender, reason=outbox.REPLY_SENT_REASON)
+    finally:
+        conn.close()
+
+
+def _approved_draft(world, athlete_id: str, kind: str, body: str, created: str) -> None:
+    conn = world.db()
+    try:
+        db.create_draft(conn, athlete_id, kind, DAY, body)
+        conn.execute(
+            "UPDATE outbound_drafts SET created_at = ? WHERE athlete_id = ? AND message_kind = ?",
+            (created, athlete_id, kind),
+        )
+        conn.commit()
+        db.review_draft(conn, athlete_id, kind, DAY, status="approved", reviewed_by="Coach Rao")
+    finally:
+        conn.close()
+
+
+def test_concurrent_workers_cannot_overtake_one_athletes_delivery(world, monkeypatch):
+    _, athlete = world.register("Ordered Athlete", plan=False)
+    first_kind, second_kind = "feedback_reply:first", "coach_note:second"
+    _approved_draft(world, athlete, first_kind, "First message.", "2026-09-14T09:00:00+00:00")
+    _approved_draft(world, athlete, second_kind, "Second message.", "2026-09-14T10:00:00+00:00")
+    first_entered, second_checked, release_first = threading.Event(), threading.Event(), threading.Event()
+    sent: list[str] = []
+    original_acquire = db.try_acquire_outbound_lease
+    acquisitions = 0
+
+    def tracked_acquire(*args, **kwargs):
+        nonlocal acquisitions
+        acquisitions += 1
+        result = original_acquire(*args, **kwargs)
+        if acquisitions == 2:
+            second_checked.set()
+        return result
+
+    monkeypatch.setattr(db, "try_acquire_outbound_lease", tracked_acquire)
+
+    def sender(_athlete, body):
+        if body == "First message.":
+            first_entered.set()
+            assert release_first.wait(10)
+        sent.append(body)
+
+    first = threading.Thread(target=_deliver_one, args=(world, athlete, first_kind, sender))
+    second = threading.Thread(target=_deliver_one, args=(world, athlete, second_kind, sender))
+    first.start()
+    assert first_entered.wait(10)
+    second.start()
+    assert second_checked.wait(10)
+    release_first.set()
+    first.join(10)
+    second.join(10)
+    assert not first.is_alive() and not second.is_alive()
+    # The overlapping worker yields instead of taking the later message.  A
+    # retry after the first transport has confirmed is then allowed to proceed.
+    assert sent == ["First message."]
+    assert _deliver_one(world, athlete, second_kind, sender)
+    assert sent == ["First message.", "Second message."]
+
+
+def test_inbound_pain_recorded_after_reservation_stops_automated_delivery(world, monkeypatch):
+    url, athlete = world.register("Evidence Athlete", plan=False)
+    kind, body = "feedback_reply:old", "Old automated coaching reply."
+    conn = world.db()
+    try:
+        db.link_telegram_chat(conn, chat_id="8101", athlete_id=athlete)
+        conn.execute(
+            "UPDATE telegram_links SET linked_at = ? WHERE athlete_id = ?",
+            ("2026-09-14T08:00:00+00:00", athlete),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    _approved_draft(world, athlete, kind, body, "2026-09-14T09:00:00+00:00")
+    reserved, release_validation, inbound_recorded = threading.Event(), threading.Event(), threading.Event()
+    original_claim = db.claim_draft_for_send
+    original_record = db.record_whatsapp_message
+
+    def paused_claim(*args, **kwargs):
+        reserved.set()
+        assert release_validation.wait(10)
+        return original_claim(*args, **kwargs)
+
+    def recording(*args, **kwargs):
+        result = original_record(*args, **kwargs)
+        if kwargs.get("direction") == "inbound" and kwargs.get("athlete_id") == athlete:
+            inbound_recorded.set()
+        return result
+
+    monkeypatch.setattr(db, "claim_draft_for_send", paused_claim)
+    monkeypatch.setattr(db, "record_whatsapp_message", recording)
+    sent: list[str] = []
+    worker = threading.Thread(target=_deliver_one, args=(world, athlete, kind, lambda _, text: sent.append(text)))
+    worker.start()
+    assert reserved.wait(10)
+    inbound = threading.Thread(target=world.say, args=(8101, "Slept 5 hours, knee pain today.", 91))
+    inbound.start()
+    assert inbound_recorded.wait(10)
+    release_validation.set()
+    worker.join(10)
+    inbound.join(10)
+    assert not worker.is_alive() and not inbound.is_alive()
+    assert sent == []
+    row = world.draft(athlete, kind)
+    assert (row["status"], row["resolution"]) == ("skipped", "superseded")
+    # The raw inbound version invalidates before its parser can take the lease;
+    # once it does, the same pain report opens the injury hold.
+    assert row["reason"] in {db.NEW_MESSAGE_REASON, db.INJURY_REASON}
+    conn = world.db()
+    try:
+        assert db.injury_state(conn, athlete)[0] is True
+    finally:
+        conn.close()
+
+
+def test_expired_delivery_owner_is_recovered_and_failed_send_retries(world):
+    _, athlete = world.register("Recoverable Athlete", plan=False)
+    kind, body = "feedback_reply:retry", "Retry me."
+    _approved_draft(world, athlete, kind, body, "2026-09-14T09:00:00+00:00")
+    conn = world.db()
+    try:
+        assert db.try_acquire_outbound_lease(
+            conn, athlete, "crashed-worker", now=at(10, 0), ttl_seconds=1
+        )
+    finally:
+        conn.close()
+    attempts: list[str] = []
+
+    def fail_once(_, text):
+        attempts.append(text)
+        if len(attempts) == 1:
+            raise RuntimeError("network down")
+
+    assert not _deliver_one(world, athlete, kind, fail_once)
+    assert world.draft(athlete, kind)["status"] == "approved"
+    assert _deliver_one(world, athlete, kind, fail_once)
+    assert attempts == [body, body]
+    assert world.draft(athlete, kind)["status"] == "sent"
+
+
+def test_different_athletes_can_deliver_concurrently(world):
+    _, one = world.register("Parallel One", plan=False)
+    _, two = world.register("Parallel Two", plan=False)
+    _approved_draft(world, one, "feedback_reply:one", "One.", "2026-09-14T09:00:00+00:00")
+    _approved_draft(world, two, "feedback_reply:two", "Two.", "2026-09-14T09:00:00+00:00")
+    entered_one, entered_two, release = threading.Event(), threading.Event(), threading.Event()
+
+    def sender(athlete_id, _body):
+        (entered_one if athlete_id == one else entered_two).set()
+        assert release.wait(10)
+
+    first = threading.Thread(target=_deliver_one, args=(world, one, "feedback_reply:one", sender))
+    second = threading.Thread(target=_deliver_one, args=(world, two, "feedback_reply:two", sender))
+    first.start()
+    second.start()
+    assert entered_one.wait(10) and entered_two.wait(10)
+    release.set()
+    first.join(10)
+    second.join(10)
+    assert not first.is_alive() and not second.is_alive()
