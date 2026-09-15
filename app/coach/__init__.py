@@ -12,10 +12,10 @@ from app.coach.view import (
     approval_card,
     render,
     render_athletes,
-    render_landing,
     render_privacy,
     render_terms,
 )
+from app.coach.landing_view import render_landing
 
 __all__ = [
     "Bucket", "Flag", "PendingMessage", "Roster", "RosterEntry",

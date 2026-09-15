@@ -36,6 +36,16 @@ attention today.
 > consenting test users. It is not a production medical or health-data system and
 > gives no medical advice.
 
+## Start here
+
+| If you want to… | Go here |
+|---|---|
+| Understand the product quickly | [Watch the 90-second public demo](https://training-log-agent.onrender.com/demo) |
+| See why this is an agent, not just a dashboard | [Four parts of the agent](#four-parts-of-the-agent) |
+| Follow the real coach-and-athlete workflow | [Set up a real athlete](#setting-up-a-real-athlete) |
+| Inspect the implementation | [Architecture](#the-architecture), [rules](#the-rules) and [tests](#tests) |
+| Run your own private instance | [Deployment instructions](#5-deploy) |
+
 ## See it in 90 seconds
 
 Open the live site and press **Watch the agent work**, or go straight to `/demo`.
@@ -86,8 +96,15 @@ training plan added, autopilot decision made, first training day ready.
 
 Adding an athlete takes a name, timezone and usual check-in and training times. The
 internal identifier is generated and kept out of sight. The next screen has a large
-**Copy Telegram invite** button, tells the coach what the athlete should do, and turns
-to **Connected** by itself when the athlete presses Start.
+**Copy invite for {name}** button, tells the coach exactly what the athlete should do,
+and turns to **Connected** by itself when the athlete presses Start. The invite is
+signed, single-use and restricted to Telegram-safe characters. Replacing an invite or
+disconnecting an athlete immediately invalidates every older link.
+
+The page records the outcome of the latest connection attempt without exposing the
+Telegram chat ID or invite token. Plain `/start`, expired or replaced links, and an
+account already paired to somebody else each receive a specific next step. The coach
+can also press **Check connection** instead of guessing whether pairing worked.
 
 ![An athlete's status and Telegram invite](docs/screenshots/06-athlete-status-and-invite.png)
 
