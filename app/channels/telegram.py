@@ -155,6 +155,22 @@ def send_outbound(
     return provider_sid(chat_id, message_id)
 
 
+def delete_outbound(sid: str) -> bool:
+    """Best-effort withdrawal for a safety correction; Telegram may already have shown it."""
+    prefix, chat_id, message_id = str(sid).split(":", 2)
+    if prefix != "telegram":
+        return False
+    try:
+        response = httpx.post(
+            _api_url("deleteMessage"), json={"chat_id": chat_id, "message_id": int(message_id)}, timeout=15.0,
+        )
+        response.raise_for_status()
+    except (ValueError, httpx.HTTPError):
+        return False
+    payload = response.json()
+    return bool(payload.get("ok") and payload.get("result"))
+
+
 def answer_callback_query(callback_query_id: str, text: str) -> None:
     """Close the loading state on a pressed inline button. Failures are not fatal."""
     try:

@@ -78,12 +78,24 @@ def _deliver(conn: sqlite3.Connection, row, sender: Callable[[str, str], None], 
                 if late is not None:
                     db.supersede_draft(conn, athlete_id, message_kind, local_date, late)
                 return False
+            db.record_athlete_event(
+                conn, athlete_id=athlete_id, kind="outbound_dispatch_started",
+                summary="Approved coach/outbox message entered ordered dispatch.",
+                detail={"draft": message_kind, "local_date": local_date},
+            )
             try:
                 sender(athlete_id, str(current["body"]))
             except Exception as exc:  # noqa: BLE001 - a later lease owner may retry
                 db.mark_draft_failed(conn, athlete_id, message_kind, local_date, type(exc).__name__)
                 return False
-            return db.mark_draft_sent(conn, athlete_id, message_kind, local_date, reason=reason)
+            sent = db.mark_draft_sent(conn, athlete_id, message_kind, local_date, reason=reason)
+            if sent:
+                db.record_athlete_event(
+                    conn, athlete_id=athlete_id, kind="outbound_accepted",
+                    summary="Telegram accepted the ordered coach/outbox message.",
+                    detail={"draft": message_kind, "local_date": local_date},
+                )
+            return sent
     except db.DeliveryLeaseBusy:
         # Do not turn contention into a failed draft. The next tick, or the
         # expired lease after a crashed owner, can safely make progress.

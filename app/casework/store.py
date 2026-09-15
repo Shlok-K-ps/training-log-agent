@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.casework.policy import PlannedLift
+from app.storage import db
 from app.storage.lifts import normalize_lift
 
 OPEN_STATES = ("scheduled", "awaiting_checkin", "awaiting_outcome", "needs_coach")
@@ -329,6 +330,41 @@ def reserve_action(
         "SELECT status FROM agent_events WHERE idempotency_key = ?", (key,)
     ).fetchone()
     return str(row["status"]) if row is not None else "reserved"
+
+
+def reserve_ordered_athlete_action(
+    conn, *, case_id: int, athlete_id: str, key: str, code: str, summary: str,
+    detail: Any, now: datetime,
+) -> tuple[str, int | None]:
+    """Reserve an athlete dispatch at one durable per-athlete sequence point."""
+    existing = conn.execute(
+        "SELECT status FROM agent_events WHERE idempotency_key = ?", (key,)
+    ).fetchone()
+    if existing is not None:
+        return str(existing["status"]), None
+    sequence = db.record_athlete_event(
+        conn, athlete_id=athlete_id, kind="outbound_dispatch_started",
+        summary=summary, detail={"action": code, "key": key}, occurred_at=iso(now), commit=False,
+    )
+    payload = dict(detail or {})
+    payload["event_sequence"] = sequence
+    cur = conn.execute(
+        "INSERT INTO agent_events (case_id, athlete_id, occurred_at, kind, code, summary, "
+        "detail_json, idempotency_key, status) VALUES (?, ?, ?, 'action', ?, ?, ?, ?, 'reserved') "
+        "ON CONFLICT (idempotency_key) DO NOTHING",
+        (case_id, athlete_id, iso(now), code, summary[:500], _dumps(payload), key),
+    )
+    conn.commit()
+    if cur.rowcount == 1:
+        return "new", sequence
+    row = conn.execute("SELECT status FROM agent_events WHERE idempotency_key = ?", (key,)).fetchone()
+    return (str(row["status"]) if row is not None else "reserved"), None
+
+
+def action_result(conn, key: str) -> str | None:
+    row = conn.execute("SELECT detail_json FROM agent_events WHERE idempotency_key = ?", (key,)).fetchone()
+    detail = loads(row["detail_json"]) if row is not None else None
+    return str(detail.get("result")) if isinstance(detail, dict) and detail.get("result") else None
 
 
 def finish_action(conn, key: str, status: str, *, note: str | None = None) -> None:

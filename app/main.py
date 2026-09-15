@@ -1617,17 +1617,16 @@ def _process(
             if previous is not None:
                 return str(previous["body"])
             return None if channel in AGENT_CHANNELS else "Message received."
-        db.record_whatsapp_message(
+        _message_id, event_sequence = db.record_whatsapp_message(
             conn, athlete_id=athlete_id, direction="inbound", body=body,
             status="received", provider_sid=provider_sid or None,
             message_kind="athlete_feedback",
-            channel=channel,
+            channel=channel, ordered_inbound=True,
         )
-        # Store raw inbound evidence before waiting.  A delivery owner performs a
-        # final freshness query under its per-athlete lease, so this version makes
-        # an automated draft stale even while its owner is between reservations.
-        with db.outbound_delivery_lease(conn, athlete_id):
-            return _process_recorded_inbound(conn, athlete_id, body, provider_sid, channel)
+        # Ingress is never held behind an outbound send.  Its durable sequence is
+        # the causal fact a later workout dispatch must inspect; evidence after a
+        # dispatch is handled as a recorded compensation, not an imaginary cancel.
+        return _process_recorded_inbound(conn, athlete_id, body, provider_sid, channel, event_sequence)
     except Exception:  # noqa: BLE001
         log.exception("failed to handle message from %s", athlete_id)
         return "Something broke on my end. Your message wasn't logged — send it again."
@@ -1635,7 +1634,9 @@ def _process(
         conn.close()
 
 
-def _process_recorded_inbound(conn, athlete_id: str, body: str, provider_sid: str, channel: str) -> str | None:
+def _process_recorded_inbound(
+    conn, athlete_id: str, body: str, provider_sid: str, channel: str, event_sequence: int | None = None,
+) -> str | None:
     """Finish a recorded inbound message while excluding that athlete's outbound sender."""
     now = clock.utcnow()
     agent_owned = deployment.agent_loop_active() and channel in AGENT_CHANNELS
@@ -1649,7 +1650,7 @@ def _process_recorded_inbound(conn, athlete_id: str, body: str, provider_sid: st
     )
     if agent_owned and engine.observe_message(
         conn, athlete_id, actions, raw_text=body, now=now,
-        transport=LiveTransport(), coach_name=settings.coach_name,
+        transport=LiveTransport(), coach_name=settings.coach_name, event_sequence=event_sequence,
     ):
         return None
     injured, _ = db.injury_state(conn, athlete_id)

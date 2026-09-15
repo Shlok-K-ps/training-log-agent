@@ -336,30 +336,55 @@ def _advance(conn, case, *, now, transport, coach_name, report) -> None:
                        now, {"by": store.iso(next_at)})
 
 
-def _send(conn, case, *, step, code, body, summary, now, transport, coach_name, report) -> bool:
-    """Deliver one athlete message at most once. True when the step can be treated as done."""
+def _send(
+    conn, case, *, step, code, body, summary, now, transport, coach_name, report,
+    readiness_sequence: int | None = None,
+) -> bool:
+    """Dispatch under the athlete lease; reservation commit is the local cutover point."""
     key = f"case:{case['id']}:{step}"
-    status = store.reserve_action(
-        conn, case_id=int(case["id"]), athlete_id=str(case["athlete_id"]), key=key, code=code,
-        summary=summary, detail={"message": body}, now=now,
-    )
-    if status != "new":
-        return status in {"reserved", "sent", "unconfirmed"}
+    athlete_id = str(case["athlete_id"])
     try:
-        provider_id = transport.send_athlete(conn, str(case["athlete_id"]), body, kind=code)
-    except DeliveryFailed as exc:
-        store.finish_action(conn, key, "failed", note=str(exc))
-        _escalate(
-            conn, _fresh(conn, case), "delivery_failed", now=now, transport=transport,
-            coach_name=coach_name, report=report,
-            evidence=[str(exc), f"Could not complete: {summary}"], extra={"outcome": "undelivered"},
-        )
+        with db.outbound_delivery_lease(conn, athlete_id):
+            # Evidence that committed before this reservation wins. It is not
+            # hidden behind the lease, so a pain signal retires the workout.
+            if code == "session_delivered":
+                late = db.inbound_safety_event_after(conn, athlete_id, readiness_sequence)
+                if late is not None:
+                    _event(conn, case, "decision", "workout_retired_before_dispatch",
+                           "New safety evidence arrived before workout dispatch; no workout was sent.", now,
+                           {"evidence_sequence": int(late["sequence"]), "readiness_sequence": readiness_sequence})
+                    db.record_athlete_event(
+                        conn, athlete_id=athlete_id, kind="workout_retired",
+                        summary="Workout retired before dispatch because newer safety evidence was accepted.",
+                    )
+                    return False
+            status, _sequence = store.reserve_ordered_athlete_action(
+                conn, case_id=int(case["id"]), athlete_id=athlete_id, key=key, code=code,
+                summary=summary, detail={"message": body}, now=now,
+            )
+            if status != "new":
+                return status in {"reserved", "sent", "unconfirmed"}
+            try:
+                provider_id = transport.send_athlete(conn, athlete_id, body, kind=code)
+            except DeliveryFailed as exc:
+                store.finish_action(conn, key, "failed", note=str(exc))
+                _escalate(
+                    conn, _fresh(conn, case), "delivery_failed", now=now, transport=transport,
+                    coach_name=coach_name, report=report,
+                    evidence=[str(exc), f"Could not complete: {summary}"], extra={"outcome": "undelivered"},
+                )
+                return False
+            if AFTER_SEND is not None:
+                AFTER_SEND(key)
+            store.finish_action(conn, key, "sent", note=provider_id)
+            db.record_athlete_event(
+                conn, athlete_id=athlete_id, kind="outbound_accepted",
+                summary="Telegram accepted the ordered athlete action.", detail={"action": code, "provider_sid": provider_id},
+            )
+            report.actions += 1
+            return True
+    except db.DeliveryLeaseBusy:
         return False
-    if AFTER_SEND is not None:
-        AFTER_SEND(key)
-    store.finish_action(conn, key, "sent", note=provider_id)
-    report.actions += 1
-    return True
 
 
 def _close(conn, case, *, outcome: str, summary: str, now: datetime, report, detail=None) -> None:
@@ -459,7 +484,7 @@ def open_today_case(conn, athlete_id: str, now: datetime):
 
 def observe_message(
     conn, athlete_id: str, actions: Sequence[Action], *, raw_text: str, now: datetime,
-    transport: Transport, coach_name: str,
+    transport: Transport, coach_name: str, event_sequence: int | None = None,
 ) -> bool:
     """Fold a validated athlete message into today's case. True if the agent replied."""
     schedule = db.latest_schedule_settings(conn, athlete_id)
@@ -499,7 +524,7 @@ def observe_message(
                                coach_name=coach_name, report=report)
     if checkin is not None and state in {"scheduled", "awaiting_checkin"}:
         return _handle_checkin(conn, case, checkin, now=now, transport=transport,
-                               coach_name=coach_name, report=report)
+                               coach_name=coach_name, report=report, event_sequence=event_sequence)
     return False
 
 
@@ -508,11 +533,30 @@ def _handle_injury(conn, case, injury: LogStatus, *, now, transport, coach_name,
         _event(conn, case, "observation", "injury_update",
                "Further injury detail added to the pending decision.", now, {"note": injury.injury_note})
         return False
-    session_sent = case["state"] == "awaiting_outcome" and case["session_json"] is not None
+    session_key = f"case:{case['id']}:session"
+    session_sent = (
+        (case["state"] == "awaiting_outcome" and case["session_json"] is not None)
+        or store.action_result(conn, session_key) is not None
+    )
     note = injury.injury_note or "pain or injury reported"
     _event(conn, case, "decision", "guidance_stopped",
            "Injury reported: autonomous training guidance stops until the coach decides.", now,
            {"note": note, "session_already_sent": session_sent})
+    if session_sent:
+        provider_sid = store.action_result(conn, session_key)
+        withdraw = getattr(transport, "withdraw_athlete_message", None)
+        withdrawn = False
+        if provider_sid and callable(withdraw):
+            try:
+                withdrawn = bool(withdraw(conn, str(case["athlete_id"]), provider_sid))
+            except DeliveryFailed:
+                withdrawn = False
+        _event(
+            conn, case, "action", "workout_withdrawal_attempted",
+            "Attempted to withdraw the earlier workout after late safety evidence."
+            if provider_sid else "No provider message identifier was available to withdraw the workout.",
+            now, {"provider_sid": provider_sid, "withdrawn": withdrawn},
+        )
     _send(conn, case, step="injury_hold", code="guidance_paused",
           body=messages.injury_hold(_first_name(conn, case["athlete_id"]), session_sent),
           summary="Told the athlete guidance is paused and the coach has been alerted.",
@@ -527,7 +571,9 @@ def _handle_injury(conn, case, injury: LogStatus, *, now, transport, coach_name,
     return True
 
 
-def _handle_checkin(conn, case, checkin: LogCheckIn, *, now, transport, coach_name, report) -> bool:
+def _handle_checkin(
+    conn, case, checkin: LogCheckIn, *, now, transport, coach_name, report, event_sequence: int | None = None,
+) -> bool:
     athlete_id = str(case["athlete_id"])
     first = _first_name(conn, athlete_id)
     stored = (store.loads(case["readiness_json"]) or {}).get("checkin", {})
@@ -537,7 +583,7 @@ def _handle_checkin(conn, case, checkin: LogCheckIn, *, now, transport, coach_na
         if value is not None:
             values[name] = value
     merged = DailyCheckIn(checked_on=str(case["local_date"]), **values)
-    updates = {"readiness_json": json.dumps({"checkin": values}, sort_keys=True)}
+    updates = {"readiness_json": json.dumps({"checkin": values, "event_sequence": event_sequence}, sort_keys=True)}
     if case["checkin_received_at"] is None:
         updates["checkin_received_at"] = store.iso(now)
 
@@ -583,7 +629,8 @@ def _handle_checkin(conn, case, checkin: LogCheckIn, *, now, transport, coach_na
         body = messages.session(first, result.session, plan, readiness, result.changes, coach=coach_name)
         if _send(conn, case, step="session", code="session_delivered", body=body,
                  summary="Delivered today's session within the coach-approved plan (hold or reduce only).",
-                 now=now, transport=transport, coach_name=coach_name, report=report):
+                 now=now, transport=transport, coach_name=coach_name, report=report,
+                 readiness_sequence=event_sequence):
             _await_outcome(conn, case, session=[item.as_dict() for item in result.session], now=now)
         return True
 
@@ -705,9 +752,10 @@ def apply_coach_decision(
         _, changes = policy.adjust_for_band(plan, readiness.band)
         body = messages.session(first, session, plan, readiness, changes, coach=coach_name,
                                 confirmed_by_coach=True)
+        readiness_sequence = (store.loads(case["readiness_json"]) or {}).get("event_sequence")
         if _send(conn, case, step=f"coach:{option}", code="session_delivered", body=body,
                  summary=f"Delivered the session {coach_name} approved.", now=now, transport=transport,
-                 coach_name=coach_name, report=report):
+                 coach_name=coach_name, report=report, readiness_sequence=readiness_sequence):
             _await_outcome(conn, case, session=[item.as_dict() for item in session], now=now)
         return True, f"Session sent to {first}."
 

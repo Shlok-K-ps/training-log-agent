@@ -176,6 +176,12 @@ product.
 
 ## The training-day agent
 
+### Delivery ordering and safety corrections
+
+Each athlete has a durable local event sequence. Incoming evidence receives a sequence when it is persisted; an athlete-facing action receives its sequence when its ordered dispatch reservation commits under that athlete's database lease. That reservation is the dispatch linearization point: safety evidence already ordered before it retires a workout before Telegram is called. Coach notes and automated messages share the same per-athlete lease, while different athletes remain independent.
+
+Telegram acceptance is outside the database transaction. Delivery is therefore at-least-once, including the unavoidable ambiguity if a process dies after Telegram accepts a request but before local confirmation. If pain or unsafe readiness arrives after workout dispatch has begun, the service records the later evidence, attempts to delete the accepted Telegram workout when Telegram supplied a usable message id, sends a fixed hold/correction, and escalates the coach. It never claims the earlier workout was atomically cancelled.
+
 The core of the system is an agent that owns one athlete's scheduled training day
 from start to finish, over hours and across restarts:
 

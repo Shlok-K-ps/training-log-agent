@@ -17,6 +17,8 @@ are operational integration state, not coaching observations.
 
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
 import time
 import uuid
@@ -325,6 +327,28 @@ CREATE TABLE IF NOT EXISTS agent_events (
 
 CREATE INDEX IF NOT EXISTS idx_agent_events_case
     ON agent_events (case_id, id);
+
+-- A small per-athlete sequence is the durable causal order shared by inbound
+-- evidence and outbound dispatch decisions.  It is deliberately separate from
+-- provider delivery: Telegram acceptance is external and cannot join this transaction.
+CREATE TABLE IF NOT EXISTS athlete_event_sequences (
+    athlete_id      TEXT PRIMARY KEY,
+    next_sequence   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS athlete_event_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id      TEXT NOT NULL,
+    sequence        INTEGER NOT NULL,
+    occurred_at     TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    summary         TEXT NOT NULL,
+    detail_json     TEXT,
+    UNIQUE (athlete_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_athlete_event_log_order
+    ON athlete_event_log (athlete_id, sequence);
 
 CREATE TABLE IF NOT EXISTS agent_adaptations (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1549,7 +1573,8 @@ def record_whatsapp_message(
     scheduled_for: str | None = None,
     reply_to_sid: str | None = None,
     channel: str = "whatsapp",
-) -> int:
+    ordered_inbound: bool = False,
+) -> int | tuple[int, int]:
     """Append a transport event once; Twilio retries are idempotent by MessageSid."""
     if direction not in {"inbound", "outbound"}:
         raise ValueError("message direction must be inbound or outbound")
@@ -1561,6 +1586,8 @@ def record_whatsapp_message(
     if not body:
         raise ValueError("a WhatsApp message cannot be empty")
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if ordered_inbound and direction != "inbound":
+        raise ValueError("only inbound messages can allocate a causal event")
     if provider_sid:
         existing = conn.execute(
             "SELECT id FROM whatsapp_messages WHERE provider_sid = ?", (provider_sid,)
@@ -1590,8 +1617,80 @@ def record_whatsapp_message(
             """,
             (athlete_id, now),
         )
+    sequence = None
+    if ordered_inbound:
+        sequence = record_athlete_event(
+            conn, athlete_id=athlete_id, kind="inbound_evidence",
+            summary="Inbound athlete evidence accepted.",
+            detail={"provider_sid": provider_sid or None, "safety_signal": inbound_safety_signal(body)},
+            occurred_at=occurred_at or now, commit=False,
+        )
     conn.commit()
-    return int(cur.lastrowid)
+    message_id = int(cur.lastrowid)
+    return (message_id, sequence) if sequence is not None else message_id
+
+
+_INBOUND_SAFETY_RE = re.compile(r"\\b(hurt|pain|painful|tweak(?:ed)?|injur(?:y|ed)|strain(?:ed)?|niggle)\\b", re.I)
+_UNSAFE_READINESS_RE = re.compile(r"\\breadiness\\s*(?:[0-4](?:\\s*/\\s*10)?|[0-4]\\s*out\\s*of\\s*10)\\b", re.I)
+
+
+def inbound_safety_signal(body: str) -> str | None:
+    """A conservative ingress signal; the validated parser remains authoritative."""
+    if _INBOUND_SAFETY_RE.search(body or ""):
+        return "pain_or_injury"
+    if _UNSAFE_READINESS_RE.search(body or ""):
+        return "unsafe_readiness"
+    return None
+
+
+def record_athlete_event(
+    conn: sqlite3.Connection, *, athlete_id: str, kind: str, summary: str,
+    detail: dict | None = None, occurred_at: str | None = None, commit: bool = True,
+) -> int:
+    """Append one durable per-athlete event and return its causal sequence.
+
+    The cursor row is independently locked by SQLite/Postgres during the UPDATE,
+    so different athletes never serialize each other.  This orders local events;
+    it intentionally does not claim that Telegram's remote acceptance is atomic.
+    """
+    conn.execute(
+        "INSERT INTO athlete_event_sequences (athlete_id, next_sequence) VALUES (?, 0) "
+        "ON CONFLICT (athlete_id) DO NOTHING",
+        (athlete_id,),
+    )
+    row = conn.execute(
+        "UPDATE athlete_event_sequences SET next_sequence = next_sequence + 1 "
+        "WHERE athlete_id = ? RETURNING next_sequence",
+        (athlete_id,),
+    ).fetchone()
+    if row is None:  # pragma: no cover - defensive against a corrupt cursor row
+        raise RuntimeError("could not allocate athlete event sequence")
+    sequence = int(row["next_sequence"])
+    stamp = occurred_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO athlete_event_log (athlete_id, sequence, occurred_at, kind, summary, detail_json) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (athlete_id, sequence, stamp, kind, summary[:500], json.dumps(detail or {}, sort_keys=True)),
+    )
+    if commit:
+        conn.commit()
+    return sequence
+
+
+def inbound_safety_event_after(conn: sqlite3.Connection, athlete_id: str, sequence: int | None):
+    """Newest unprocessed ingress safety signal ordered after a readiness event."""
+    if sequence is None:
+        return None
+    rows = conn.execute(
+        "SELECT * FROM athlete_event_log WHERE athlete_id = ? AND kind = 'inbound_evidence' "
+        "AND sequence > ? ORDER BY sequence DESC",
+        (athlete_id, int(sequence)),
+    )
+    for row in rows:
+        detail = json.loads(str(row["detail_json"] or "{}"))
+        if detail.get("safety_signal"):
+            return row
+    return None
 
 
 class PairingError(ValueError):
