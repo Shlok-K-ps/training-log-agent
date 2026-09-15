@@ -42,19 +42,64 @@ def coach_note_kind(body: str) -> str:
     return f"{COACH_NOTE}:{digest}"
 
 
-def _deliver(conn: sqlite3.Connection, row, sender: Callable[[str, str], None]) -> bool:
-    """Claim, then send. A draft that loses the claim or fails to send is never retried."""
+NOTE_SENT_REASON = "Sent: written by the coach."
+REPLY_SENT_REASON = "Sent: approved by the coach, and no newer athlete information had arrived."
+CHECKIN_SENT_REASON = "Sent: approved check-in, and no newer athlete information had arrived."
+
+
+def _deliver(conn: sqlite3.Connection, row, sender: Callable[[str, str], None], *, reason: str) -> bool:
+    """Serialize one athlete through freshness validation and transport delivery.
+
+    The durable lease is intentionally held across the Telegram call.  An inbound
+    webhook records its raw message before it waits for that same lease, so a
+    final validation sees evidence that arrived during an earlier reservation.
+    """
     athlete_id, message_kind, local_date = (
         str(row["athlete_id"]), str(row["message_kind"]), str(row["local_date"])
     )
-    if not db.claim_draft_for_send(conn, athlete_id, message_kind, local_date):
-        return False  # already sent by another worker, cancelled, or resolved
     try:
-        sender(athlete_id, str(row["body"]))
-    except Exception as exc:  # noqa: BLE001 - one failed send must not stop the others
-        db.mark_draft_failed(conn, athlete_id, message_kind, local_date, type(exc).__name__)
+        # A competing tick yields immediately rather than blocking its worker.
+        # The current owner finishes, and the next tick sees the durable result.
+        with db.outbound_delivery_lease(conn, athlete_id, wait_seconds=0):
+            # Reload after owning the athlete. A concurrent worker may have sent,
+            # cancelled, or superseded this row while this worker was waiting.
+            current = db.draft(conn, athlete_id, message_kind, local_date)
+            if current is None or str(current["status"]) != "approved":
+                return False
+            stale = db.stale_draft_reason(conn, current)
+            if stale is not None:
+                db.supersede_draft(conn, athlete_id, message_kind, local_date, stale)
+                return False
+            # This last database check deliberately happens after lease ownership.
+            # ``claim_draft_for_send`` no longer marks sent: only a successful
+            # Telegram return below can do that.
+            if not db.claim_draft_for_send(conn, athlete_id, message_kind, local_date, reason=reason):
+                late = db.stale_draft_reason(conn, current)
+                if late is not None:
+                    db.supersede_draft(conn, athlete_id, message_kind, local_date, late)
+                return False
+            db.record_athlete_event(
+                conn, athlete_id=athlete_id, kind="outbound_dispatch_started",
+                summary="Approved coach/outbox message entered ordered dispatch.",
+                detail={"draft": message_kind, "local_date": local_date},
+            )
+            try:
+                sender(athlete_id, str(current["body"]))
+            except Exception as exc:  # noqa: BLE001 - a later lease owner may retry
+                db.mark_draft_failed(conn, athlete_id, message_kind, local_date, type(exc).__name__)
+                return False
+            sent = db.mark_draft_sent(conn, athlete_id, message_kind, local_date, reason=reason)
+            if sent:
+                db.record_athlete_event(
+                    conn, athlete_id=athlete_id, kind="outbound_accepted",
+                    summary="Telegram accepted the ordered coach/outbox message.",
+                    detail={"draft": message_kind, "local_date": local_date},
+                )
+            return sent
+    except db.DeliveryLeaseBusy:
+        # Do not turn contention into a failed draft. The next tick, or the
+        # expired lease after a crashed owner, can safely make progress.
         return False
-    return True
 
 
 def message_kind_label(message_kind: str) -> str:
@@ -130,17 +175,9 @@ def send_approved_prompts(
 
         if row is None or row["status"] != "approved":
             continue          # unreviewed or skipped: silence, not a broadcast
-        if db.invalidate_draft_if_evidence_changed(
-            conn, prompt.athlete_id, MORNING, prompt.local_date
-        ):
-            continue          # newer check-in/injury/schedule fact needs fresh approval
-        body = str(row["body"])
-
-        sender(prompt.athlete_id, body)
-        db.mark_scheduled_delivery(conn, prompt.athlete_id, MORNING, prompt.local_date)
-        if row is not None:
-            db.mark_draft_sent(conn, prompt.athlete_id, MORNING, prompt.local_date)
-        sent += 1
+        if _deliver(conn, row, sender, reason=CHECKIN_SENT_REASON):
+            db.mark_scheduled_delivery(conn, prompt.athlete_id, MORNING, prompt.local_date)
+            sent += 1
     return sent
 
 
@@ -157,46 +194,63 @@ def send_approved_notes(
     *when* it leaves, and refuses to send one dated in the athlete's future.
     """
     now_utc = now_utc or datetime.now(timezone.utc)
-    sent = 0
     handled: set[tuple[str, str, str]] = set()
-    for row in db.approved_drafts_with_prefix(conn, COACH_NOTE):
-        athlete_id = str(row["athlete_id"])
-        message_kind, local_date = str(row["message_kind"]), str(row["local_date"])
-        resolved = _local_now(conn, athlete_id, now_utc)
-        local_today = (
-            resolved[0].date().isoformat() if resolved else now_utc.date().isoformat()
-        )
-        if local_date > local_today:
-            continue
-        identity = (athlete_id, local_date, db.normalized_message(row["body"]))
-        already_sent = db.identical_note(
-            conn, athlete_id, local_date, str(row["body"]), prefix=COACH_NOTE,
-            statuses=("sent",), exclude_kind=message_kind,
-        )
-        if identity in handled or already_sent is not None:
-            # An identical note for this athlete and day is already on its way.
-            db.mark_draft_duplicate(conn, athlete_id, message_kind, local_date)
-            continue
-        handled.add(identity)
-        if _deliver(conn, row, sender):
-            sent += 1
-    return sent
+    return sum(
+        _send_note(conn, row, sender, now_utc=now_utc, handled=handled)
+        for row in db.approved_drafts_with_prefix(conn, COACH_NOTE)
+    )
+
+
+def _send_note(conn, row, sender, *, now_utc: datetime, handled: set) -> int:
+    athlete_id = str(row["athlete_id"])
+    message_kind, local_date = str(row["message_kind"]), str(row["local_date"])
+    resolved = _local_now(conn, athlete_id, now_utc)
+    local_today = resolved[0].date().isoformat() if resolved else now_utc.date().isoformat()
+    if local_date > local_today:
+        return 0
+    identity = (athlete_id, local_date, db.normalized_message(row["body"]))
+    already_sent = db.identical_note(
+        conn, athlete_id, local_date, str(row["body"]), prefix=COACH_NOTE,
+        statuses=("sent",), exclude_kind=message_kind,
+    )
+    if identity in handled or already_sent is not None:
+        # An identical note for this athlete and day is already on its way.
+        db.mark_draft_duplicate(conn, athlete_id, message_kind, local_date)
+        return 0
+    handled.add(identity)
+    return int(_deliver(conn, row, sender, reason=NOTE_SENT_REASON))
 
 
 def send_approved_feedback(
     conn: sqlite3.Connection,
     sender: Callable[[str, str], None],
 ) -> int:
-    """Send coach-approved responses to athlete feedback on the next worker tick."""
+    """Send coach-approved responses to athlete feedback, revalidated at the moment of sending."""
+    return sum(
+        int(_deliver(conn, row, sender, reason=REPLY_SENT_REASON))
+        for row in db.approved_drafts_with_prefix(conn, FEEDBACK_REPLY)
+    )
+
+
+def send_approved_outbound(
+    conn: sqlite3.Connection,
+    sender: Callable[[str, str], None],
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    """Send every due coach note and coach-approved reply in one pass, oldest first.
+
+    A single chronological pass keeps the athlete's conversation in the order the
+    messages were written, whatever their kind; each is revalidated as it goes.
+    """
+    now_utc = now_utc or datetime.now(timezone.utc)
+    rows = db.approved_drafts_with_prefix(conn, COACH_NOTE) + db.approved_drafts_with_prefix(conn, FEEDBACK_REPLY)
+    rows.sort(key=lambda row: (str(row["created_at"]), str(row["local_date"]), str(row["message_kind"])))
+    handled: set[tuple[str, str, str]] = set()
     sent = 0
-    for row in db.approved_drafts_with_prefix(conn, FEEDBACK_REPLY):
-        athlete_id = str(row["athlete_id"])
-        message_kind = str(row["message_kind"])
-        local_date = str(row["local_date"])
-        if db.invalidate_draft_if_evidence_changed(
-            conn, athlete_id, message_kind, local_date
-        ):
-            continue
-        if _deliver(conn, row, sender):
-            sent += 1
+    for row in rows:
+        if str(row["message_kind"]).startswith(COACH_NOTE):
+            sent += _send_note(conn, row, sender, now_utc=now_utc, handled=handled)
+        else:
+            sent += int(_deliver(conn, row, sender, reason=REPLY_SENT_REASON))
     return sent

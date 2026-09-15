@@ -412,7 +412,7 @@ def test_an_overlapping_send_cannot_deliver_a_note_twice(env):
     assert sorted(delivered) == ["Note one.", "Note two.", "Reply one."]
 
 
-def test_a_failed_send_is_marked_failed_and_never_retried(env):
+def test_a_failed_send_stays_approved_for_a_safe_retry(env):
     client, settings, _ = env
     url = _register(settings)
     client.post(f"{url}/message", data={"body": "Check in after training."})
@@ -428,11 +428,11 @@ def test_a_failed_send_is_marked_failed_and_never_retried(env):
         assert outbox.send_approved_notes(conn, broken, now_utc=LATER) == 0
     finally:
         conn.close()
-    assert calls == ["Check in after training."]
+    assert calls == ["Check in after training.", "Check in after training."]
     [row] = _notes(settings)
-    assert (row["status"], row["resolution"]) == ("skipped", "failed")
+    assert (row["status"], row["resolution"]) == ("approved", None)
     item = BeautifulSoup(client.get(url).text, "html.parser").select_one("#outbox .outbox-item")
-    assert item.select_one(".delivery-badge").get_text(strip=True) == "Failed"
+    assert item.select_one(".delivery-badge").get_text(strip=True) == "Scheduled"
 
 
 def test_the_coach_can_cancel_a_scheduled_note(env):
@@ -508,7 +508,10 @@ def test_setup_steps_show_current_idle_ready_and_blocked(env, monkeypatch):
     client.post(f"{url}/plan", data={"weekday": "0", "lift": "squat", "sets": "4", "reps": "5", "rpe": "7"})
     soup, header, steps = _header(client, url)
     assert header["data-state"] == "ready"
-    assert set(steps.values()) == {"is-done"}
+    assert steps == {}, "a finished setup collapses from a checklist to a few facts"
+    facts = {node["data-status"]: node.get_text(strip=True) for node in header.select(".status-facts [data-status]")}
+    assert facts == {"telegram": "Connected", "training-plan": "Mon · 1 lift", "autopilot": "On"}
+    assert soup.select_one("#telegram") is None, "onboarding instructions are gone once connected"
     assert header.select_one("[data-idle]") is None
     assert header.select_one('[data-status="next-action"]').get_text(strip=True) == "Check-in today at 07:30."
     assert [a.get_text(strip=True) for a in header.select(".status-actions a")] == ["Run a safe simulated test"]
@@ -522,7 +525,6 @@ def test_setup_steps_show_current_idle_ready_and_blocked(env, monkeypatch):
     soup, header, steps = _header(client, url)
     assert header["data-state"] == "blocked"
     assert header.select_one(".status-badge").get_text(strip=True) == "Blocked"
-    assert steps["agent-ready"] == "is-blocked"
     assert "DATABASE_URL" in header.select_one("[data-status=blocking]").get_text()
 
 
@@ -531,6 +533,6 @@ def test_the_page_puts_setup_before_evidence_and_messages(env):
     url = _register(settings)
     html = client.get(url).text
     order = [html.index(marker) for marker in (
-        'class="athlete-hero"', 'id="agent-status"', 'id="telegram"', "id='agent-plan'", "id='autopilot'",
-        'id="evidence"', 'id="messages"', 'id="plan"', 'id="advanced"')]
+        'id="agent-status"', 'id="telegram"', 'class="athlete-tabs"', 'id="panel-plan"', "id='agent-plan'",
+        "id='autopilot'", 'id="panel-evidence"', 'id="panel-messages"', 'id="panel-profile"', 'id="advanced"')]
     assert order == sorted(order)

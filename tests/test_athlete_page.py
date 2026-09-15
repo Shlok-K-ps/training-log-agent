@@ -124,9 +124,9 @@ def test_the_page_carries_the_draft_and_a_way_to_send_it(squad):
     assert "<svg" in html
     assert "Recovery today" in html
     assert "Programming" in html
-    assert "Schedule & logistics" in html
+    assert "Schedule" in html
     assert "Nutrition & supplements" in html
-    assert "Prepared · requires coach approval" in html
+    assert "Queue message" in html
 
 
 # --- registration ----------------------------------------------------------------

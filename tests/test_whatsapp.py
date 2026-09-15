@@ -105,6 +105,7 @@ def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeyp
     from app.config import settings as app_settings
 
     assert client.post("/coach/demo/seed").status_code == 200
+    # Rohit has a planned day, so the training-day agent takes his message itself.
     response = client.post(
         "/coach/whatsapp/simulate",
         data={
@@ -120,14 +121,24 @@ def test_coach_can_simulate_the_whatsapp_flow_with_demo_athletes(client, monkeyp
     approval = client.get("/coach/whatsapp?tab=approval")
     assert approval.status_code == 200
     assert "Needs approval" in approval.text
+    # The reply drafted before Rohit wrote again is outdated, never an ordinary approvable card.
     assert "Rohit Sharma" in approval.text
+    assert "Outdated—new athlete information received" in approval.text
+
+    # Sameer has no planned day, so his update becomes a draft for the coach to review.
+    client.post(
+        "/coach/whatsapp/simulate",
+        data={"athlete_id": "+99900000004", "body": "squat 3x5 at 100kg rpe 8"},
+    )
+    approval = client.get("/coach/whatsapp?tab=approval")
+    assert "Sameer Bhat" in approval.text
     assert 'action="/coach/whatsapp/review"' in approval.text
 
     conn = db.connect(app_settings.database_path)
     try:
         draft = next(
             row for row in db.pending_drafts(conn)
-            if row["athlete_id"] == "+99900000002"
+            if row["athlete_id"] == "+99900000004"
             and str(row["message_kind"]).startswith("feedback_reply:")
         )
     finally:

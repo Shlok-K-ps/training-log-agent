@@ -15,27 +15,19 @@ def configure_coach(monkeypatch):
     monkeypatch.setattr(settings, "coach_name", "Coach Rao")
 
 
-def test_landing_page_renders_complete_product_story():
+def test_landing_page_renders_a_lean_product_story():
     with TestClient(app) as client:
         resp = client.get("/")
         assert resp.status_code == 200
         html = resp.text
         assert "Training Log Agent" in html
-        assert "The coach reads exceptions" in html
-        # Illustrative message example
-        assert "squat 3x5 at 140 today" in html
-        assert "Squat — Stalled" in html
-        # What runs the live agent
-        assert "Gemini 2.5 Flash" in html
-        assert "Neon Postgres" in html
-        assert "Tested safety rules" in html
-        # Honest note
-        assert "Honest note" in html
-        # Authority boundaries
-        assert "Close an injury flag" in html
-        assert "Coach Only" in html
-        assert "WHY THIS IS AN AGENT, NOT A CHAT WINDOW" in html
-        assert "This system keeps working" in html
+        assert "The agent runs the training day" in html
+        assert "Checks in first" in html
+        assert "Four parts of the agent" in html
+        assert "THE AGENT HANDLES" in html and "THE COACH DECIDES" in html
+        assert html.count('class="content-section') == 2
+        assert "Architectural Separation" not in html
+        assert "Empirical Ground Truth" not in html
         # The desk opens directly; there is no sign-in step
         assert 'href="/coach"' in html
         assert "/coach/login" not in html
@@ -69,11 +61,12 @@ def test_coach_console_opens_without_signing_in(tmp_path, monkeypatch):
 
         client.post("/coach/demo/seed")
         resp = client.get("/coach")
-        assert "Roster" in resp.text
-        assert "Daily agent loop" in resp.text
-        assert "Approval queue" in resp.text
+        assert "Open roster" in resp.text
+        assert "Decisions needed" in resp.text
+        assert "Needs you" in resp.text
         assert "Remove demo athletes" in resp.text
-        assert "Open tutorial" in resp.text
+        assert "Daily agent loop" not in resp.text and "Open tutorial" not in resp.text, (
+            "how the agent works belongs on the public site, not the console")
         assert "Set up your agent" in resp.text, "demo athletes do not count as real setup"
 
 
@@ -81,7 +74,7 @@ def test_athlete_directory_is_a_separate_workspace():
     with TestClient(app) as client:
         resp = client.get("/coach/athletes")
         assert resp.status_code == 200
-        assert "Current status, recent progress and readiness" in resp.text
+        assert 'class="roster-table"' in resp.text or "No athletes yet." in resp.text
         assert 'id="athlete-search"' in resp.text
         assert 'id="athlete-filter"' in resp.text
         assert "/coach/whatsapp" in resp.text

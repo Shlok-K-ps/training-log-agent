@@ -2398,6 +2398,11 @@ dialog form button {
   opacity: 0.66;
 }
 
+/* Structured replies are indented markup, not user text: collapse that whitespace. */
+.chat-bubble.chat-agent {
+  white-space: normal;
+}
+
 .chat-reply-header {
   display: flex;
   align-items: center;

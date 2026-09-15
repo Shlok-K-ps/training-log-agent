@@ -78,11 +78,10 @@ def test_today_shows_open_cases_exceptions_timeline_and_the_case_page(console):
     with TestClient(main.app) as client:
         client.post("/coach/agent/run", data={"return_to": "/coach"})
         today = client.get("/coach").text
-        assert "Open cases" in today
-        assert "Waiting for: Athlete check-in" in today
+        assert "What happens next" in today
+        assert "Waiting for athlete check-in" in today
         assert "Sent the morning check-in." in today
-        assert "Agent timeline" in today
-        assert "What the agent adapted" in today
+        assert "Handled by the agent" in today
 
         conn = db.connect(settings.database_path)
         try:
@@ -95,7 +94,7 @@ def test_today_shows_open_cases_exceptions_timeline_and_the_case_page(console):
         assert case["state"] == "needs_coach", "autopilot is off by default"
 
         today = client.get("/coach").text
-        assert "Exceptions for you" in today
+        assert "Needs you" in today and 'data-kind="case"' in today
         assert "Session waiting for approval" in today
         assert "Send the adjusted session" in today
 

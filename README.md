@@ -36,6 +36,16 @@ attention today.
 > consenting test users. It is not a production medical or health-data system and
 > gives no medical advice.
 
+## Start here
+
+| If you want to… | Go here |
+|---|---|
+| Understand the product quickly | [Watch the 90-second public demo](https://training-log-agent.onrender.com/demo) |
+| See why this is an agent, not just a dashboard | [Four parts of the agent](#four-parts-of-the-agent) |
+| Follow the real coach-and-athlete workflow | [Set up a real athlete](#setting-up-a-real-athlete) |
+| Inspect the implementation | [Architecture](#the-architecture), [rules](#the-rules) and [tests](#tests) |
+| Run your own private instance | [Deployment instructions](#5-deploy) |
+
 ## See it in 90 seconds
 
 Open the live site and press **Watch the agent work**, or go straight to `/demo`.
@@ -86,8 +96,15 @@ training plan added, autopilot decision made, first training day ready.
 
 Adding an athlete takes a name, timezone and usual check-in and training times. The
 internal identifier is generated and kept out of sight. The next screen has a large
-**Copy Telegram invite** button, tells the coach what the athlete should do, and turns
-to **Connected** by itself when the athlete presses Start.
+**Copy invite for {name}** button, tells the coach exactly what the athlete should do,
+and turns to **Connected** by itself when the athlete presses Start. The invite is
+signed, single-use and restricted to Telegram-safe characters. Replacing an invite or
+disconnecting an athlete immediately invalidates every older link.
+
+The page records the outcome of the latest connection attempt without exposing the
+Telegram chat ID or invite token. Plain `/start`, expired or replaced links, and an
+account already paired to somebody else each receive a specific next step. The coach
+can also press **Check connection** instead of guessing whether pairing worked.
 
 ![An athlete's status and Telegram invite](docs/screenshots/06-athlete-status-and-invite.png)
 
@@ -158,6 +175,12 @@ experiments that were never used successfully and are not part of the deployed
 product.
 
 ## The training-day agent
+
+### Delivery ordering and safety corrections
+
+Each athlete has a durable local event sequence. Incoming evidence receives a sequence when it is persisted; an athlete-facing action receives its sequence when its ordered dispatch reservation commits under that athlete's database lease. That reservation is the dispatch linearization point: safety evidence already ordered before it retires a workout before Telegram is called. Coach notes and automated messages share the same per-athlete lease, while different athletes remain independent.
+
+Telegram acceptance is outside the database transaction. Delivery is therefore at-least-once, including the unavoidable ambiguity if a process dies after Telegram accepts a request but before local confirmation. If pain or unsafe readiness arrives after workout dispatch has begun, the service records the later evidence, attempts to delete the accepted Telegram workout when Telegram supplied a usable message id, sends a fixed hold/correction, and escalates the coach. It never claims the earlier workout was atomically cancelled.
 
 The core of the system is an agent that owns one athlete's scheduled training day
 from start to finish, over hours and across restarts:
@@ -704,8 +727,33 @@ sends on its own are the fixed training-day templates described above.
 Every approval records who made it, when, and whether the wording was changed.
 Untouched morning prompts whose evidence has not changed can be approved as a
 safe batch. New readiness data, an injury, a schedule update, an edit, or any
-other newer athlete fact forces individual review. If evidence changes after
-approval but before sending, the approval is invalidated automatically.
+other newer athlete fact forces individual review.
+
+#### Message freshness (causal ordering)
+
+Every automated draft stores the evidence version (newest log entry) and inbound
+version (newest athlete message) it was written against. Approval never refreshes
+those versions. A draft is **outdated** when the athlete has since reported pain,
+sent sleep/readiness for that day, sent any newer message or fact, or connected
+Telegram after it was drafted. Outdated drafts:
+
+- show as *Outdated—new athlete information received* and cannot be approved;
+  an approval attempt is refused, the draft is retired and the reason recorded;
+- are rechecked atomically at send time (the claim `UPDATE` compares versions),
+  so a draft approved before new information arrives is never delivered;
+- keep their row with `status=skipped`, `resolution=superseded` and a `reason`.
+
+Coach-written notes stay valid after new evidence because the coach wrote them
+knowingly. Approved messages leave oldest first, and each keeps its send,
+duplicate, failure or retirement reason.
+
+With the training-day agent on, it owns check-ins. At startup and on every send
+pass, legacy `morning_checkin` drafts still pending or approved are retired rather
+than delivered, and none are deleted. Pairing Telegram retires the athlete's
+unsent automated backlog. When an athlete writes during an eligible planned day,
+the day's case opens *before* the message is interpreted: pain goes straight to
+the fixed injury hold and a coach decision, and a check-in already received is
+never asked for again.
 
 To test the workflow without an external messaging account, load the fictional demo squad from
 Overview, open **Messaging Desk → Inbox → Test the messaging workflow**, and submit a

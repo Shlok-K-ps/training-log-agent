@@ -17,9 +17,14 @@ are operational integration state, not coaching observations.
 
 from __future__ import annotations
 
+import json
+import re
 import sqlite3
+import time
+import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Iterator, Literal
 
@@ -323,6 +328,28 @@ CREATE TABLE IF NOT EXISTS agent_events (
 CREATE INDEX IF NOT EXISTS idx_agent_events_case
     ON agent_events (case_id, id);
 
+-- A small per-athlete sequence is the durable causal order shared by inbound
+-- evidence and outbound dispatch decisions.  It is deliberately separate from
+-- provider delivery: Telegram acceptance is external and cannot join this transaction.
+CREATE TABLE IF NOT EXISTS athlete_event_sequences (
+    athlete_id      TEXT PRIMARY KEY,
+    next_sequence   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS athlete_event_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    athlete_id      TEXT NOT NULL,
+    sequence        INTEGER NOT NULL,
+    occurred_at     TEXT NOT NULL,
+    kind            TEXT NOT NULL,
+    summary         TEXT NOT NULL,
+    detail_json     TEXT,
+    UNIQUE (athlete_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_athlete_event_log_order
+    ON athlete_event_log (athlete_id, sequence);
+
 CREATE TABLE IF NOT EXISTS agent_adaptations (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     athlete_id    TEXT NOT NULL,
@@ -426,6 +453,10 @@ OUTBOUND_DRAFT_COLUMNS = {
     "resolution": "TEXT",
     "resolved_at": "TEXT",
     "last_error": "TEXT",
+    # The newest inbound athlete message the draft was prepared after.
+    "inbound_version": "INTEGER NOT NULL DEFAULT 0",
+    # Plain words for why it was approved, sent, cancelled, superseded or refused.
+    "reason": "TEXT",
 }
 
 ATHLETE_PROFILE_COLUMNS = {
@@ -1178,18 +1209,22 @@ def create_draft(
     body: str,
 ) -> bool:
     """Queue a message for review. Idempotent: re-drafting never overwrites an
-    edit or an approval the coach has already made."""
-    evidence_version = latest_evidence_version(conn, athlete_id)
+    edit or an approval the coach has already made.
+
+    The draft remembers exactly which athlete facts and messages it was prepared
+    from, so anything that arrives later can be recognised as making it stale.
+    """
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO outbound_drafts
             (athlete_id, message_kind, local_date, body, original_body,
-             status, evidence_version, created_at)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+             status, evidence_version, inbound_version, created_at)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
         """,
         (
             athlete_id, message_kind, local_date, body, body,
-            evidence_version,
+            latest_evidence_version(conn, athlete_id),
+            latest_inbound_version(conn, athlete_id),
             datetime.now(timezone.utc).isoformat(timespec="seconds"),
         ),
     )
@@ -1211,7 +1246,7 @@ def approved_drafts(conn: sqlite3.Connection, message_kind: str) -> list[sqlite3
     return list(
         conn.execute(
             "SELECT * FROM outbound_drafts WHERE status = 'approved' AND message_kind = ? "
-            "ORDER BY local_date, athlete_id",
+            "ORDER BY created_at, local_date, athlete_id",
             (message_kind,),
         )
     )
@@ -1339,7 +1374,7 @@ def pending_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
             "SELECT * FROM outbound_drafts WHERE status = 'pending' "
-            "ORDER BY local_date, athlete_id"
+            "ORDER BY created_at, local_date, athlete_id"
         )
     )
 
@@ -1347,10 +1382,11 @@ def pending_drafts(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 def approved_drafts_with_prefix(
     conn: sqlite3.Connection, message_kind_prefix: str
 ) -> list[sqlite3.Row]:
+    """Approved drafts oldest first, so delivery follows the order they were written."""
     return list(
         conn.execute(
             "SELECT * FROM outbound_drafts WHERE status = 'approved' "
-            "AND message_kind LIKE ? ORDER BY local_date, athlete_id",
+            "AND message_kind LIKE ? ORDER BY created_at, local_date, athlete_id",
             (message_kind_prefix + "%",),
         )
     )
@@ -1365,14 +1401,132 @@ def latest_evidence_version(conn: sqlite3.Connection, athlete_id: str) -> int:
     return int(row["version"] if row is not None else 0)
 
 
+def latest_inbound_version(conn: sqlite3.Connection, athlete_id: str) -> int:
+    """Monotonic version of what the athlete has said to the agent."""
+    row = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) AS version FROM whatsapp_messages "
+        "WHERE athlete_id = ? AND direction = 'inbound'",
+        (athlete_id,),
+    ).fetchone()
+    return int(row["version"] if row is not None else 0)
+
+
+def _row_get(row, key: str):
+    try:
+        return row[key]
+    except (IndexError, KeyError):
+        return None
+
+
+MORNING_KIND = "morning_checkin"
+AUTOMATED_REPLY_PREFIX = "feedback_reply:"
+COACH_PLAN_PREFIX = "feedback_reply:injury:"
+
+LEGACY_CHECKIN_REASON = (
+    "Superseded: the training-day agent now sends check-ins, so this legacy morning "
+    "check-in was retired without sending."
+)
+BEFORE_PAIRING_REASON = "It was drafted before this athlete connected Telegram."
+INJURY_REASON = "The athlete reported pain or an injury after this was drafted."
+CHECKIN_RECEIVED_REASON = "The athlete already sent sleep and readiness for this day."
+NEW_EVIDENCE_REASON = "New athlete information arrived after this was drafted."
+NEW_MESSAGE_REASON = "The athlete sent a newer message after this was drafted."
+
+
+def is_automated_kind(message_kind: str) -> bool:
+    """Drafts the software wrote. Coach notes and coach-chosen injury plans are the coach's own words."""
+    return message_kind == MORNING_KIND or (
+        message_kind.startswith(AUTOMATED_REPLY_PREFIX) and not message_kind.startswith(COACH_PLAN_PREFIX)
+    )
+
+
+def injury_reported_on(conn: sqlite3.Connection, athlete_id: str, local_date: str) -> str | None:
+    """The note of a pain or injury report made on this exact day, if there was one."""
+    row = conn.execute(
+        "SELECT injury_note FROM entries WHERE athlete_id = ? AND kind = 'status' "
+        "AND injured = 1 AND session_date = ? ORDER BY id DESC LIMIT 1",
+        (athlete_id, local_date),
+    ).fetchone()
+    return None if row is None else str(row["injury_note"] or "pain or injury reported")
+
+
+def stale_draft_reason(conn: sqlite3.Connection, row, *, legacy_checkins_retired: bool = False) -> str | None:
+    """Why an automated draft may no longer be sent, or None while it still stands.
+
+    Coach-written notes are never stale: the coach chose those words knowingly.
+    """
+    message_kind = str(row["message_kind"])
+    if not is_automated_kind(message_kind):
+        return None
+    athlete_id = str(row["athlete_id"])
+    local_date = str(row["local_date"])
+    if message_kind == MORNING_KIND:
+        if legacy_checkins_retired:
+            return LEGACY_CHECKIN_REASON
+        if injury_reported_on(conn, athlete_id, local_date) is not None:
+            return INJURY_REASON
+        if latest_checkin(conn, athlete_id, local_date) is not None:
+            return CHECKIN_RECEIVED_REASON
+    linked = conn.execute(
+        "SELECT linked_at FROM telegram_links WHERE athlete_id = ?", (athlete_id,)
+    ).fetchone()
+    if linked is not None and str(row["created_at"]) < str(linked["linked_at"]):
+        return BEFORE_PAIRING_REASON
+    drafted_from = int(row["evidence_version"] or 0)
+    if latest_evidence_version(conn, athlete_id) > drafted_from:
+        injury_id = open_injury_entry_id(conn, athlete_id)
+        return INJURY_REASON if injury_id is not None and injury_id > drafted_from else NEW_EVIDENCE_REASON
+    if latest_inbound_version(conn, athlete_id) > int(_row_get(row, "inbound_version") or 0):
+        return NEW_MESSAGE_REASON
+    return None
+
+
+def supersede_draft(
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str, reason: str
+) -> bool:
+    """Retire a draft that has not left, keeping it in history with the reason."""
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'superseded', resolved_at = ?, "
+        "reason = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
+        "AND status IN ('pending', 'approved')",
+        (_now_iso(), reason, athlete_id, message_kind, local_date),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def retire_legacy_checkins(conn: sqlite3.Connection) -> int:
+    """Mark every unsent legacy morning check-in superseded. History is kept, nothing is deleted."""
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'superseded', resolved_at = ?, "
+        "reason = ? WHERE message_kind = ? AND status IN ('pending', 'approved')",
+        (_now_iso(), LEGACY_CHECKIN_REASON, MORNING_KIND),
+    )
+    conn.commit()
+    return int(cur.rowcount or 0)
+
+
+def retire_automated_drafts(conn: sqlite3.Connection, athlete_id: str, reason: str) -> int:
+    """Retire this athlete's unsent automated drafts, e.g. a backlog from before Telegram pairing."""
+    rows = conn.execute(
+        "SELECT message_kind, local_date FROM outbound_drafts WHERE athlete_id = ? "
+        "AND status IN ('pending', 'approved')",
+        (athlete_id,),
+    ).fetchall()
+    return sum(
+        1 for row in rows
+        if is_automated_kind(str(row["message_kind"]))
+        and supersede_draft(conn, athlete_id, str(row["message_kind"]), str(row["local_date"]), reason)
+    )
+
+
 def draft_is_bulk_eligible(conn: sqlite3.Connection, row: sqlite3.Row) -> bool:
     """Only untouched morning prompts over unchanged evidence may be bulk approved."""
     return (
         str(row["status"]) == "pending"
         and str(row["message_kind"]) == "morning_checkin"
         and str(row["body"]).strip() == str(row["original_body"]).strip()
-        and int(row["evidence_version"] or 0)
-        == latest_evidence_version(conn, str(row["athlete_id"]))
+        and stale_draft_reason(conn, row) is None
     )
 
 
@@ -1419,7 +1573,8 @@ def record_whatsapp_message(
     scheduled_for: str | None = None,
     reply_to_sid: str | None = None,
     channel: str = "whatsapp",
-) -> int:
+    ordered_inbound: bool = False,
+) -> int | tuple[int, int]:
     """Append a transport event once; Twilio retries are idempotent by MessageSid."""
     if direction not in {"inbound", "outbound"}:
         raise ValueError("message direction must be inbound or outbound")
@@ -1431,6 +1586,8 @@ def record_whatsapp_message(
     if not body:
         raise ValueError("a WhatsApp message cannot be empty")
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if ordered_inbound and direction != "inbound":
+        raise ValueError("only inbound messages can allocate a causal event")
     if provider_sid:
         existing = conn.execute(
             "SELECT id FROM whatsapp_messages WHERE provider_sid = ?", (provider_sid,)
@@ -1460,8 +1617,80 @@ def record_whatsapp_message(
             """,
             (athlete_id, now),
         )
+    sequence = None
+    if ordered_inbound:
+        sequence = record_athlete_event(
+            conn, athlete_id=athlete_id, kind="inbound_evidence",
+            summary="Inbound athlete evidence accepted.",
+            detail={"provider_sid": provider_sid or None, "safety_signal": inbound_safety_signal(body)},
+            occurred_at=occurred_at or now, commit=False,
+        )
     conn.commit()
-    return int(cur.lastrowid)
+    message_id = int(cur.lastrowid)
+    return (message_id, sequence) if sequence is not None else message_id
+
+
+_INBOUND_SAFETY_RE = re.compile(r"\\b(hurt|pain|painful|tweak(?:ed)?|injur(?:y|ed)|strain(?:ed)?|niggle)\\b", re.I)
+_UNSAFE_READINESS_RE = re.compile(r"\\breadiness\\s*(?:[0-4](?:\\s*/\\s*10)?|[0-4]\\s*out\\s*of\\s*10)\\b", re.I)
+
+
+def inbound_safety_signal(body: str) -> str | None:
+    """A conservative ingress signal; the validated parser remains authoritative."""
+    if _INBOUND_SAFETY_RE.search(body or ""):
+        return "pain_or_injury"
+    if _UNSAFE_READINESS_RE.search(body or ""):
+        return "unsafe_readiness"
+    return None
+
+
+def record_athlete_event(
+    conn: sqlite3.Connection, *, athlete_id: str, kind: str, summary: str,
+    detail: dict | None = None, occurred_at: str | None = None, commit: bool = True,
+) -> int:
+    """Append one durable per-athlete event and return its causal sequence.
+
+    The cursor row is independently locked by SQLite/Postgres during the UPDATE,
+    so different athletes never serialize each other.  This orders local events;
+    it intentionally does not claim that Telegram's remote acceptance is atomic.
+    """
+    conn.execute(
+        "INSERT INTO athlete_event_sequences (athlete_id, next_sequence) VALUES (?, 0) "
+        "ON CONFLICT (athlete_id) DO NOTHING",
+        (athlete_id,),
+    )
+    row = conn.execute(
+        "UPDATE athlete_event_sequences SET next_sequence = next_sequence + 1 "
+        "WHERE athlete_id = ? RETURNING next_sequence",
+        (athlete_id,),
+    ).fetchone()
+    if row is None:  # pragma: no cover - defensive against a corrupt cursor row
+        raise RuntimeError("could not allocate athlete event sequence")
+    sequence = int(row["next_sequence"])
+    stamp = occurred_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    conn.execute(
+        "INSERT INTO athlete_event_log (athlete_id, sequence, occurred_at, kind, summary, detail_json) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (athlete_id, sequence, stamp, kind, summary[:500], json.dumps(detail or {}, sort_keys=True)),
+    )
+    if commit:
+        conn.commit()
+    return sequence
+
+
+def inbound_safety_event_after(conn: sqlite3.Connection, athlete_id: str, sequence: int | None):
+    """Newest unprocessed ingress safety signal ordered after a readiness event."""
+    if sequence is None:
+        return None
+    rows = conn.execute(
+        "SELECT * FROM athlete_event_log WHERE athlete_id = ? AND kind = 'inbound_evidence' "
+        "AND sequence > ? ORDER BY sequence DESC",
+        (athlete_id, int(sequence)),
+    )
+    for row in rows:
+        detail = json.loads(str(row["detail_json"] or "{}"))
+        if detail.get("safety_signal"):
+            return row
+    return None
 
 
 class PairingError(ValueError):
@@ -1736,6 +1965,14 @@ def update_whatsapp_status(
     return cur.rowcount > 0
 
 
+class StaleDraftError(ValueError):
+    """An automated draft whose supporting facts changed. It was retired, not approved."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def review_draft(
     conn: sqlite3.Connection,
     athlete_id: str,
@@ -1745,8 +1982,14 @@ def review_draft(
     status: str,
     reviewed_by: str,
     body: str | None = None,
+    legacy_checkins_retired: bool = False,
 ) -> None:
-    """Approve (optionally with the coach's own wording) or skip a draft."""
+    """Approve (optionally with the coach's own wording) or skip a draft.
+
+    A draft keeps the evidence it was prepared from. Approving an automated draft
+    whose athlete information has moved on retires it with the reason and raises
+    StaleDraftError: approval never re-dates stale text as if it were current.
+    """
     if status not in {"approved", "skipped"}:
         raise ValueError("a review is either 'approved' or 'skipped'")
     reviewed_by = (reviewed_by or "").strip()
@@ -1755,57 +1998,62 @@ def review_draft(
     row = draft(conn, athlete_id, message_kind, local_date)
     if row is None:
         raise ValueError("no such draft")
-    if status == "approved" and not (body or str(row["body"])).strip():
-        raise ValueError("an approved message cannot be empty")
-    conn.execute(
+    if str(row["status"]) not in {"pending", "approved"}:
+        raise ValueError("this message was already sent or retired")
+    # No wording supplied keeps the drafted text; wording the coach cleared is refused below.
+    wording = (body if body is not None else str(row["body"])).strip()
+    if status == "approved":
+        if not wording:
+            raise ValueError("an approved message cannot be empty")
+        reason = stale_draft_reason(conn, row, legacy_checkins_retired=legacy_checkins_retired)
+        if reason is not None:
+            supersede_draft(conn, athlete_id, message_kind, local_date, reason)
+            raise StaleDraftError(reason)
+    now = _now_iso()
+    cur = conn.execute(
         """
         UPDATE outbound_drafts
-           SET status = ?, body = ?, reviewed_by = ?, reviewed_at = ?,
-               evidence_version = ?
+           SET status = ?, body = ?, reviewed_by = ?, reviewed_at = ?, reason = ?
          WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
+           AND status IN ('pending', 'approved')
         """,
         (
             status,
-            (body if body is not None else str(row["body"])).strip(),
+            wording,
             reviewed_by,
-            datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            latest_evidence_version(conn, athlete_id),
+            now,
+            f"Approved by {reviewed_by}." if status == "approved" else f"Held back by {reviewed_by}.",
             athlete_id, message_kind, local_date,
         ),
     )
     conn.commit()
+    if cur.rowcount != 1:
+        raise ValueError("this message was already sent or retired")
 
 
 def invalidate_draft_if_evidence_changed(
-    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str,
+    *, legacy_checkins_retired: bool = False,
 ) -> bool:
-    """Return an approved agent draft to review when newer athlete facts arrive."""
+    """Retire an approved automated draft whose athlete information moved on. True if retired."""
     row = draft(conn, athlete_id, message_kind, local_date)
     if row is None or str(row["status"]) != "approved":
         return False
-    if int(row["evidence_version"] or 0) == latest_evidence_version(conn, athlete_id):
-        return False
-    conn.execute(
-        """
-        UPDATE outbound_drafts
-           SET status = 'pending', reviewed_by = NULL, reviewed_at = NULL
-         WHERE athlete_id = ? AND message_kind = ? AND local_date = ?
-        """,
-        (athlete_id, message_kind, local_date),
-    )
-    conn.commit()
-    return True
+    reason = stale_draft_reason(conn, row, legacy_checkins_retired=legacy_checkins_retired)
+    return reason is not None and supersede_draft(conn, athlete_id, message_kind, local_date, reason)
 
 
 def mark_draft_sent(
-    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
-) -> None:
-    conn.execute(
-        "UPDATE outbound_drafts SET status = 'sent' "
-        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
-        (athlete_id, message_kind, local_date),
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str,
+    *, reason: str = "Sent.",
+) -> bool:
+    cur = conn.execute(
+        "UPDATE outbound_drafts SET status = 'sent', resolved_at = ?, reason = ? "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'",
+        (_now_iso(), reason, athlete_id, message_kind, local_date),
     )
     conn.commit()
+    return cur.rowcount == 1
 
 
 def _now_iso() -> str:
@@ -1818,42 +2066,126 @@ def normalized_message(body: str) -> str:
 
 
 def claim_draft_for_send(
-    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
+    conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str,
+    *, reason: str = "Sent.",
 ) -> bool:
-    """Atomically move an approved draft to sent before it leaves.
+    """Return whether an approved draft is still fresh enough to attempt.
 
-    Only one worker can win the claim, so concurrent or repeated ticks can never
-    deliver the same draft twice. If the send then fails, the draft is marked
-    failed rather than retried, because the provider may already have accepted it.
+    Delivery ownership is deliberately kept in ``agent_lease`` rather than by
+    marking this row sent.  The row becomes ``sent`` only after the transport
+    returns successfully; a crashed owner leaves an approved draft for a later
+    lease holder to retry.  That is at-least-once delivery, not a claim of
+    mathematical exactly-once delivery across Telegram's remote API.
     """
-    cur = conn.execute(
-        "UPDATE outbound_drafts SET status = 'sent', resolved_at = ? "
-        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'",
-        (_now_iso(), athlete_id, message_kind, local_date),
+    automated = is_automated_kind(message_kind)
+    freshness = (
+        " AND evidence_version >= (SELECT COALESCE(MAX(id), 0) FROM entries WHERE athlete_id = ?)"
+        " AND inbound_version >= (SELECT COALESCE(MAX(id), 0) FROM whatsapp_messages"
+        " WHERE athlete_id = ? AND direction = 'inbound')"
+        if automated else ""
     )
-    conn.commit()
-    return cur.rowcount == 1
+    row = conn.execute(
+        "SELECT 1 FROM outbound_drafts "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'"
+        + freshness,
+        (athlete_id, message_kind, local_date)
+        + ((athlete_id, athlete_id) if automated else ()),
+    ).fetchone()
+    return row is not None
 
 
 def mark_draft_failed(
     conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str, error: str
 ) -> None:
     conn.execute(
-        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'failed', resolved_at = ?, "
-        "last_error = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ?",
-        (_now_iso(), error[:200], athlete_id, message_kind, local_date),
+        "UPDATE outbound_drafts SET last_error = ?, reason = ? "
+        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? AND status = 'approved'",
+        (error[:200], f"Delivery attempt failed ({error[:120]}); safe retry is pending.",
+         athlete_id, message_kind, local_date),
     )
     conn.commit()
+
+
+# --- Per-athlete outbound ownership -------------------------------------------
+
+# ``agent_lease`` is durable in both SQLite and Postgres.  A distinct row for
+# each athlete lets unrelated athletes send concurrently, while one owner holds
+# an athlete's lease from the final freshness check through the transport call.
+# The bounded lease is recoverable after a crash; the unavoidable uncertainty is
+# a crash after Telegram accepts a request but before the local sent marker.
+OUTBOUND_LEASE_PREFIX = "outbound-delivery:"
+OUTBOUND_LEASE_TTL_SECONDS = 120
+OUTBOUND_LEASE_WAIT_SECONDS = 150
+
+
+class DeliveryLeaseBusy(RuntimeError):
+    """Another worker still owns this athlete's short-lived delivery lease."""
+
+
+def _outbound_lease_name(athlete_id: str) -> str:
+    return OUTBOUND_LEASE_PREFIX + athlete_id
+
+
+def try_acquire_outbound_lease(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    holder: str,
+    *,
+    now: datetime | None = None,
+    ttl_seconds: int = OUTBOUND_LEASE_TTL_SECONDS,
+) -> bool:
+    """Atomically acquire this athlete's durable lease, or take an expired one."""
+    now = now or datetime.now(timezone.utc)
+    name = _outbound_lease_name(athlete_id)
+    conn.execute(
+        "INSERT INTO agent_lease (name, holder, expires_at) VALUES (?, ?, ?) "
+        "ON CONFLICT (name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at "
+        "WHERE agent_lease.expires_at < ?",
+        (name, holder, (now + timedelta(seconds=ttl_seconds)).isoformat(timespec="seconds"),
+         now.isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    row = conn.execute("SELECT holder FROM agent_lease WHERE name = ?", (name,)).fetchone()
+    return row is not None and str(row["holder"]) == holder
+
+
+def release_outbound_lease(conn: sqlite3.Connection, athlete_id: str, holder: str) -> None:
+    conn.execute(
+        "DELETE FROM agent_lease WHERE name = ? AND holder = ?",
+        (_outbound_lease_name(athlete_id), holder),
+    )
+    conn.commit()
+
+
+@contextmanager
+def outbound_delivery_lease(
+    conn: sqlite3.Connection,
+    athlete_id: str,
+    *,
+    wait_seconds: float = OUTBOUND_LEASE_WAIT_SECONDS,
+):
+    """Wait for a durable per-athlete lease; never lock another athlete's work."""
+    holder = uuid.uuid4().hex
+    deadline = time.monotonic() + wait_seconds
+    while not try_acquire_outbound_lease(conn, athlete_id, holder):
+        if time.monotonic() >= deadline:
+            raise DeliveryLeaseBusy(f"delivery for {athlete_id} is still owned by another worker")
+        time.sleep(0.02)
+    try:
+        yield
+    finally:
+        release_outbound_lease(conn, athlete_id, holder)
 
 
 def mark_draft_duplicate(
     conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str
 ) -> bool:
     cur = conn.execute(
-        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'duplicate', resolved_at = ? "
-        "WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
+        "UPDATE outbound_drafts SET status = 'skipped', resolution = 'duplicate', resolved_at = ?, "
+        "reason = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
         "AND status IN ('pending', 'approved')",
-        (_now_iso(), athlete_id, message_kind, local_date),
+        (_now_iso(), "Duplicate: an identical message for this athlete and day was already sent or queued.",
+         athlete_id, message_kind, local_date),
     )
     conn.commit()
     return cur.rowcount == 1
@@ -1863,14 +2195,44 @@ def cancel_draft(
     conn: sqlite3.Connection, athlete_id: str, message_kind: str, local_date: str, *, cancelled_by: str
 ) -> bool:
     """Cancel a message that has not left yet. False if it was already sent or resolved."""
+    who = (cancelled_by or "Coach")[:80]
     cur = conn.execute(
         "UPDATE outbound_drafts SET status = 'skipped', resolution = 'cancelled', resolved_at = ?, "
-        "reviewed_by = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
+        "reviewed_by = ?, reason = ? WHERE athlete_id = ? AND message_kind = ? AND local_date = ? "
         "AND status IN ('pending', 'approved')",
-        (_now_iso(), (cancelled_by or "Coach")[:80], athlete_id, message_kind, local_date),
+        (_now_iso(), who, f"Cancelled by {who}.", athlete_id, message_kind, local_date),
     )
     conn.commit()
     return cur.rowcount == 1
+
+
+def recent_failed_deliveries(conn: sqlite3.Connection, *, since: str, limit: int = 20) -> list[dict]:
+    """Outbound messages that did not reach their athlete since `since`, newest first. Read-only."""
+    limit = max(1, min(int(limit), 100))
+    items = [
+        {"athlete_id": str(row["athlete_id"]), "message_kind": str(row["message_kind"]),
+         "body": str(row["body"]), "occurred_at": str(row["occurred_at"]), "error": row["last_error"]}
+        for row in conn.execute(
+            "SELECT athlete_id, message_kind, body, "
+            "COALESCE(resolved_at, created_at) AS occurred_at, last_error FROM outbound_drafts "
+            "WHERE ((resolution = 'failed' AND resolved_at >= ?) "
+            "OR (status = 'approved' AND last_error IS NOT NULL AND created_at >= ?)) "
+            "ORDER BY COALESCE(resolved_at, created_at) DESC LIMIT ?",
+            (since, since, limit),
+        )
+    ]
+    items += [
+        {"athlete_id": str(row["athlete_id"]), "message_kind": str(row["message_kind"] or ""),
+         "body": str(row["body"]), "occurred_at": str(row["occurred_at"]), "error": row["error_code"]}
+        for row in conn.execute(
+            "SELECT athlete_id, message_kind, body, occurred_at, error_code FROM whatsapp_messages "
+            "WHERE direction = 'outbound' AND status = 'failed' AND occurred_at >= ? "
+            "ORDER BY occurred_at DESC LIMIT ?",
+            (since, limit),
+        )
+    ]
+    items.sort(key=lambda item: item["occurred_at"], reverse=True)
+    return items[:limit]
 
 
 def athlete_drafts(conn: sqlite3.Connection, athlete_id: str, *, limit: int = 20) -> list[sqlite3.Row]:

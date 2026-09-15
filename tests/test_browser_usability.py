@@ -273,7 +273,10 @@ def test_a_new_coach_follows_setup_to_a_ready_agent(site, monkeypatch):
 
 LAYOUT_CHECK = """(() => {
   const width = window.innerWidth;
-  const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+  const box = (selector) => {
+    const node = document.querySelector(selector);
+    return node ? node.getBoundingClientRect() : {width: 0, left: 0, right: 0, top: 0};
+  };
   const inside = (selector) => { const r = box(selector); return r.width > 0 && r.left >= -1 && r.right <= width + 1; };
   const top = (selector) => box(selector).top + window.scrollY;
   return {
@@ -285,7 +288,9 @@ LAYOUT_CHECK = """(() => {
     liftWidth: box('#plan-lift').width, setsWidth: box('#plan-sets').width,
     labelled: ['plan-weekday', 'plan-lift', 'plan-sets', 'plan-reps', 'plan-rpe']
       .every(id => document.querySelector('label[for="' + id + '"]')),
-    order: ['#agent-status', '#telegram', '#agent-plan', '#autopilot', '#evidence', '#messages', '#plan'].map(top),
+    order: ['#agent-status', '#telegram', '.athlete-tabs', '#agent-plan', '#autopilot'].map(top),
+    visiblePanels: [...document.querySelectorAll('[data-panel]')].filter((panel) => !panel.hidden)
+      .map((panel) => panel.dataset.panel),
     sticky: [...document.querySelectorAll('.athlete-top *, .athlete-lower *')]
       .filter(node => ['sticky', 'fixed'].includes(getComputedStyle(node).position)).length,
     stepperColumns: getComputedStyle(document.querySelector('.stepper')).gridTemplateColumns.split(' ').length,
@@ -308,11 +313,60 @@ def test_athlete_onboarding_page_works_on_a_laptop_and_a_phone(site):
             assert layout["overflow"] <= 1, (width, layout)
             assert layout["copyInside"] and layout["checkInside"], (width, layout)
             assert layout["fieldsInside"] and layout["addInside"] and layout["labelled"], (width, layout)
-            assert layout["order"] == sorted(layout["order"]), (width, "setup comes before evidence and messages")
+            assert layout["order"] == sorted(layout["order"]), (width, "status and setup come before the tabs")
+            assert layout["visiblePanels"] == ["plan"], (width, "one tab at a time, Plan first")
             assert layout["sticky"] == 0, (width, "nothing sticks over the setup cards or conversation")
             assert layout["stepperColumns"] == columns, (width, layout)
             if not mobile:
                 assert layout["liftWidth"] > 1.8 * layout["setsWidth"], layout
             assert browser.text("#telegram h2") == "Nikash is not connected yet"
+
+            browser.click("#tab-evidence")
+            browser.wait_for("!document.getElementById('panel-evidence').hidden")
+            assert browser.eval("document.getElementById('panel-plan').hidden")
+            assert browser.eval("document.getElementById('tab-evidence').getAttribute('aria-selected')") == "true"
+            browser.goto(athlete_url + "#messages")  # a deep link opens the tab that holds it
+            browser.wait_for("!document.getElementById('panel-messages').hidden")
+    finally:
+        browser.send("Emulation.clearDeviceMetricsOverride")
+
+
+TODAY_CHECK = """(() => {
+  const width = window.innerWidth;
+  const rect = (node) => node.getBoundingClientRect();
+  const counts = [...document.querySelectorAll('.ops-counts .count')].map(rect);
+  const top = (selector) => rect(document.querySelector(selector)).top + window.scrollY;
+  const left = (selector) => rect(document.querySelector(selector)).left;
+  return {
+    overflow: document.documentElement.scrollWidth - width,
+    counts: counts.length,
+    countsInside: counts.every((r) => r.left >= -1 && r.right <= width + 1),
+    countsOneRow: new Set(counts.map((r) => Math.round(r.top))).size === 1,
+    needsTop: top('#needs-you'), activityTop: top('#activity'), nextTop: top('#next'), squadTop: top('#squad'),
+    needsLeft: left('#needs-you'), activityLeft: left('#activity'),
+    controlsInside: [...document.querySelectorAll('.decision-controls .btn')]
+      .every((node) => rect(node).right <= width + 1),
+  };
+})()"""
+
+
+def test_today_puts_decisions_first_on_a_laptop_and_a_phone(site):
+    base, browser, _ = site
+    httpx.post(f"{base}/coach/demo/seed", data={"return_to": "/coach"})
+    try:
+        for width, height, mobile in ((1280, 900, False), (390, 844, True)):
+            browser.send("Emulation.setDeviceMetricsOverride", width=width, height=height,
+                         deviceScaleFactor=1, mobile=mobile)
+            browser.goto(base + "/coach")
+            layout = browser.eval(TODAY_CHECK)
+            assert layout["overflow"] <= 1, (width, layout)
+            assert layout["counts"] == 3 and layout["countsInside"] and layout["countsOneRow"], (width, layout)
+            assert layout["controlsInside"], (width, layout)
+            if mobile:
+                assert layout["needsTop"] < layout["activityTop"] < layout["nextTop"] < layout["squadTop"], layout
+            else:
+                assert layout["activityLeft"] > layout["needsLeft"], "the agent's work sits beside the decisions"
+            assert browser.eval("document.querySelectorAll('#needs-you .decision').length") > 0
+            assert browser.eval("!document.getElementById('tools').open"), "simulation tools stay folded away"
     finally:
         browser.send("Emulation.clearDeviceMetricsOverride")

@@ -75,7 +75,7 @@ def awaiting_coach(first_name: str) -> str:
 
 def injury_hold(first_name: str, session_already_sent: bool) -> str:
     hold = (
-        " Please don't train the session I sent earlier until your coach replies."
+        " Please don't train the session I sent earlier; disregard and hold that workout until your coach replies."
         if session_already_sent else ""
     )
     return (

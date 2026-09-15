@@ -98,16 +98,14 @@ def test_the_demo_is_public_while_the_console_stays_locked(tmp_path, monkeypatch
 
 
 def test_the_landing_page_explains_the_agent():
-    from app.coach.view import render_landing
+    from app.coach.landing_view import render_landing
 
     html = render_landing()
     for text in (
-        "The problem", 'aria-label="The closed agent loop"', "DOES ALONE", "ALWAYS ASKS THE COACH",
-        "Public simulation", "Real Telegram agent", "See it in 90 seconds",
-        "Four parts of the agent", "1 &middot; PERCEIVE", "2 &middot; REASON", "3 &middot; ACT",
-        "4 &middot; REMEMBER AND ADAPT", "It cannot invent training loads, clear injuries or modify safety policy.",
-        "Ways to use Power AI", 'href="/demo">Watch the safe demo</a>', "View the source",
-        "Deploy your own private agent", "private single-coach deployment",
-        "Public visitors cannot access real athletes, send Telegram messages or become coaches on this instance.",
+        "Checks in first", "Handles the routine", "Escalates the exception",
+        "Four parts of the agent", "01 · RECEIVE", "02 · REASON", "03 · ACT", "04 · REMEMBER",
+        "THE AGENT HANDLES", "THE COACH DECIDES", 'href="/demo">Watch the safe demo',
+        "For architecture, tests and deployment instructions, use the GitHub repository.",
+        "The public demo is fictional. The real coach console is private.",
     ):
         assert text in html

@@ -30,6 +30,7 @@ class FakeTransport:
         self.athlete: list[tuple[str, str, str]] = []
         self.coach: list[dict] = []
         self.unreachable: set[str] = set()
+        self.withdrawn: list[tuple[str, str]] = []
 
     def send_athlete(self, conn, athlete_id, body, *, kind):
         if athlete_id in self.unreachable:
@@ -40,6 +41,10 @@ class FakeTransport:
     def notify_coach(self, conn, *, case_id, athlete_name, local_date, title, evidence, options):
         self.coach.append({"case_id": case_id, "title": title, "evidence": evidence, "options": options})
         return f"coach:{len(self.coach)}"
+
+    def withdraw_athlete_message(self, conn, athlete_id, provider_sid):
+        self.withdrawn.append((athlete_id, provider_sid))
+        return True
 
     def kinds(self, athlete_id=ATHLETE):
         return [kind for who, kind, _ in self.athlete if who == athlete_id]
@@ -126,6 +131,29 @@ def test_lower_readiness_reduces_the_session_and_never_increases_it(world):
     assert "Planned was:" in body and "Squat 4×5 @ RPE 7" in body
 
 
+def test_safety_evidence_ordered_before_dispatch_retires_the_workout(world):
+    conn, transport = world
+    tick(conn, transport, at(MONDAY, "07:31"))
+    readiness_sequence = db.record_athlete_event(
+        conn, athlete_id=ATHLETE, kind="inbound_evidence", summary="Safe readiness accepted.",
+        detail={"safety_signal": None}, occurred_at=store.iso(at(MONDAY, "08:00")),
+    )
+    db.record_athlete_event(
+        conn, athlete_id=ATHLETE, kind="inbound_evidence", summary="Pain accepted before dispatch.",
+        detail={"safety_signal": "pain_or_injury"}, occurred_at=store.iso(at(MONDAY, "08:01")),
+    )
+    actions = [validate_call("log_checkin", {"sleep_hours": 8, "readiness": 8}, MONDAY)]
+    assert engine.observe_message(
+        conn, ATHLETE, actions, raw_text="slept 8 hours, readiness 8", now=at(MONDAY, "08:02"),
+        transport=transport, coach_name=COACH, event_sequence=readiness_sequence,
+    )
+    assert "session_delivered" not in transport.kinds()
+    case = case_for(conn)
+    assert ("decision", "workout_retired_before_dispatch") in event_codes(conn, case)
+    order = list(conn.execute("SELECT sequence, kind FROM athlete_event_log WHERE athlete_id = ? ORDER BY sequence", (ATHLETE,)))
+    assert [row["sequence"] for row in order] == sorted(row["sequence"] for row in order)
+
+
 def test_an_incomplete_checkin_gets_one_clarifying_question(world):
     conn, transport = world
     tick(conn, transport, at(MONDAY, "07:31"))
@@ -167,10 +195,12 @@ def test_an_injury_report_immediately_stops_autonomous_guidance(world):
     hold = transport.athlete[-1]
     assert hold[1] == "guidance_paused"
     assert "don't train the session" in hold[2]
+    assert transport.withdrawn == [(ATHLETE, "fake:3")]
     case = case_for(conn)
     assert case["state"] == "needs_coach"
     assert transport.coach[-1]["title"] == "Injury reported"
     assert ("rest", "Rest today") in transport.coach[-1]["options"]
+    assert ("action", "workout_withdrawal_attempted") in event_codes(conn, case)
 
     sent_before = len(transport.athlete)
     tick(conn, transport, at(MONDAY, "20:31"))

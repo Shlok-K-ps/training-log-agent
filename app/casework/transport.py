@@ -29,6 +29,8 @@ class Transport(Protocol):
         evidence: list[str], options: tuple[tuple[str, str], ...],
     ) -> str | None: ...
 
+    def withdraw_athlete_message(self, conn, athlete_id: str, provider_sid: str) -> bool: ...
+
 
 class LiveTransport:
     """Telegram for paired athletes and the coach; the simulator for demo athletes."""
@@ -73,3 +75,12 @@ class LiveTransport:
             return telegram.send_outbound(chat_id, text, reply_markup={"inline_keyboard": keyboard})
         except RuntimeError as exc:
             raise DeliveryFailed(str(exc)) from None
+
+    def withdraw_athlete_message(self, conn, athlete_id: str, provider_sid: str) -> bool:
+        """Best-effort compensation only; deletion cannot undo a read message."""
+        if not provider_sid.startswith("telegram:"):
+            return False
+        try:
+            return telegram.delete_outbound(provider_sid)
+        except RuntimeError:
+            return False

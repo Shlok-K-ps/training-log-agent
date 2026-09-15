@@ -238,7 +238,7 @@ def test_a_week_owned_by_the_agent(world):
     assert w.tick(saturday, "07:00")["adaptations"] == 0, "it needs new evidence before moving again"
 
     today = w.client.get("/coach").text
-    assert "What the agent adapted" in today
+    assert "Handled by the agent" in today
     assert "Priya Kulkarni: check-in 07:30 → 08:00" in today
     assert "median 99 minutes" in today
     assert "Silent on consecutive training days" in today, "Neha's second silent day reached the coach"

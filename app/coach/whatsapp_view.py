@@ -69,17 +69,25 @@ def _who(athlete_id: str, names: dict[str, str], when: str) -> str:
     )
 
 
-def _scheduled_list(rows, names: dict[str, str]) -> str:
+def _scheduled_list(rows, names: dict[str, str], stale: dict | None = None) -> str:
     if not rows:
         return '<div class="desk-empty">No approved messages are waiting to send.</div>'
-    return '<div class="delivery-list">' + "".join(
-        '<div class="delivery-row">'
-        f'{_who(str(row["athlete_id"]), names, str(row["local_date"]))}'
-        f'<div><strong>{escape(message_kind_label(str(row["message_kind"])))}</strong>'
-        f'<p>{escape(str(row["body"]))}</p></div>'
-        '<span class="delivery-state tag-fine">Approved</span></div>'
-        for row in rows
-    ) + "</div>"
+    stale = stale or {}
+    items = []
+    for row in rows:
+        reason = stale.get((str(row["athlete_id"]), str(row["message_kind"]), str(row["local_date"])))
+        state = (
+            f'<span class="delivery-state tag-act" title="{escape(reason)}">Outdated—new athlete information received</span>'
+            if reason else '<span class="delivery-state tag-fine">Approved</span>'
+        )
+        note = f'<p class="stale-note">{escape(reason)} It will not be sent.</p>' if reason else ""
+        items.append(
+            f'<div class="delivery-row{" is-stale" if reason else ""}">'
+            f'{_who(str(row["athlete_id"]), names, str(row["local_date"]))}'
+            f'<div><strong>{escape(message_kind_label(str(row["message_kind"])))}</strong>'
+            f'<p>{escape(str(row["body"]))}</p>{note}</div>{state}</div>'
+        )
+    return '<div class="delivery-list">' + "".join(items) + "</div>"
 
 
 def _sent_list(rows, names: dict[str, str]) -> str:
@@ -141,6 +149,7 @@ def render_whatsapp_desk(
     message: tuple[str, str] | None = None,
     names: dict[str, str] | None = None,
     legacy_checkins: bool = True,
+    stale: dict | None = None,
 ) -> str:
     """Render inbox, approval, schedule and delivery states in one daily desk.
 
@@ -177,7 +186,7 @@ def render_whatsapp_desk(
             if pending else '<div class="desk-empty">Nothing is waiting for approval.</div>'
         )
     elif tab == "scheduled":
-        content = _scheduled_list(scheduled, names)
+        content = _scheduled_list(scheduled, names, stale)
     elif tab == "sent":
         content = _sent_list(sent, names)
     else:

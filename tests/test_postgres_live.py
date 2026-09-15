@@ -219,7 +219,7 @@ def test_the_agent_loop_survives_restarts_on_real_postgres(live):
         assert decided.text == "decided"
 
         today = client.get("/coach")
-        assert today.status_code == 200 and "Open cases" in today.text
+        assert today.status_code == 200 and "What happens next" in today.text
         case_id = _one("SELECT id FROM agent_cases WHERE athlete_id = ?", ROUTINE)
         assert client.get(f"/coach/case/{case_id}").status_code == 200
         assert client.get(f"/coach/athlete/{ROUTINE}").status_code == 200

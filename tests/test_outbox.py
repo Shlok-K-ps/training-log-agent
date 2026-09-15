@@ -114,7 +114,7 @@ def test_an_approved_message_is_sent_once_even_if_the_loop_ticks_again(scheduled
     assert len(sent) == 1
 
 
-def test_new_evidence_after_approval_returns_the_message_to_review(scheduled):
+def test_new_evidence_after_approval_retires_the_message_with_a_reason(scheduled):
     draft_upcoming_prompts(scheduled, now_utc=EVENING)
     db.review_draft(
         scheduled, ATHLETE, MORNING, "2026-09-11",
@@ -130,7 +130,9 @@ def test_new_evidence_after_approval_returns_the_message_to_review(scheduled):
     sent = Outbox()
     assert send_approved_prompts(scheduled, sent, now_utc=NEXT_MORNING) == 0
     assert sent == []
-    assert db.draft(scheduled, ATHLETE, MORNING, "2026-09-11")["status"] == "pending"
+    row = db.draft(scheduled, ATHLETE, MORNING, "2026-09-11")
+    assert (row["status"], row["resolution"]) == ("skipped", "superseded"), "kept in history, never sent"
+    assert row["reason"] == db.INJURY_REASON
 
 
 def test_a_review_must_record_who_made_it(scheduled):
